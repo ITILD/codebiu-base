@@ -11,7 +11,7 @@
     <!-- 角色 × 模块域 权限矩阵 -->
     <div class="bg-note-card rounded-lg shadow-note p-3 overflow-x-auto">
       <div class="text-sm text-note-sub mb-2">
-        点击单元格查看/编辑该角色在此模块域的策略明细；"全部"表示通配策略(资源=*)，"—"表示暂无策略
+        点击单元格编辑策略；「全部」为通配策略，「—」为暂无
       </div>
       <table v-loading="loading" class="w-full min-w-[680px] border-collapse">
         <thead>
@@ -54,7 +54,7 @@
       <div v-loading="drawerLoading">
         <!-- 通配策略警示 -->
         <el-alert v-if="cellWildcard(currentRole, currentDom)" type="warning" :closable="false" class="mb-3"
-          title="该角色在此域拥有通配策略(资源=*), 拥有全部资源权限, 删除前请确认影响范围" />
+          title="通配策略覆盖此域全部资源，删除前请确认" />
 
         <!-- 策略明细列表 -->
         <div v-for="(p, i) in drawerPolicies" :key="i"
@@ -239,7 +239,7 @@ const handleAddPolicy = async () => {
 // 删除策略(通配策略二次确认)
 const handleRemovePolicy = async (row: PolicyRow) => {
   try {
-    const tip = row.obj === '*' ? '这是通配策略, 删除后该角色将失去此域全部资源权限' : ''
+    const tip = row.obj === '*' ? '删除后该角色将失去此域全部权限' : ''
     await ElMessageBox.confirm(
       `确定删除策略 "${row.sub} / ${row.dom} / ${row.obj} / ${row.act}" 吗？${tip}`,
       '警告',

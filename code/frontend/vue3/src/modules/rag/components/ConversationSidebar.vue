@@ -7,7 +7,7 @@
   <!-- 会话列表(桌面默认常驻可收起, 移动端侧滑抽屉) -->
   <aside
     fixed md:static inset-y-0 left-0 z-30 w-72 shrink-0 flex flex-col bg-note-soft
-    transition-all duration-300
+    class="transition-[transform,margin] duration-300"
     :class="open ? 'translate-x-0 md:ml-0' : '-translate-x-full md:-ml-72'"
   >
     <!-- 新建 + 搜索 -->
@@ -15,7 +15,7 @@
       <button
         class="active:scale-[0.98]"
         flex items-center justify-center gap-1.5 w-full py-2.5 rounded-xl bg-note-green text-white text-sm font-medium
-        shadow-note hover:opacity-90 transition-all
+        shadow-note hover:opacity-90 note-transition
         @click="handleCreate"
       >
         <el-icon :size="16"><Plus /></el-icon>

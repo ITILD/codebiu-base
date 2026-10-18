@@ -3,9 +3,7 @@
   <el-aside
     v-if="isMd"
     :width="isCollapse ? '64px' : '230px'"
-    transition-all
-    duration-300
-    class="sidebar-note bg-note-soft"
+    class="sidebar-note bg-note-soft transition-[width] duration-300"
     self-start
     sticky
     top-16

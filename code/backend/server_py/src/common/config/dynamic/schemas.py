@@ -53,6 +53,20 @@ class EmailSettings(SettingsGroup):
     _secret_fields = frozenset({"sender_password"})
 
 
+# ############################# 短信服务 #############################
+class SmsSettings(SettingsGroup):
+    _group = "sms"
+    _name = "短信服务"
+    _description = "阿里云短信发件配置; 用于手机验证码等短信发送"
+
+    access_key_id: str = Field("", title="AccessKey ID", description="阿里云 RAM 访问密钥 ID")
+    access_key_secret: str = Field("", title="AccessKey Secret", description="阿里云访问密钥 Secret; 为空视为未配置")
+    sign_name: str = Field("", title="短信签名", description="已在阿里云备案通过的签名名称")
+    template_code: str = Field("", title="验证码模板 CODE", description="模板需含 ${code} 变量, 如 SMS_123456789")
+
+    _secret_fields = frozenset({"access_key_secret"})
+
+
 # ############################# 文件存储 #############################
 class FileSystemSettings(SettingsGroup):
     _group = "file_system"
@@ -103,9 +117,9 @@ class DBVectorSettings(SettingsGroup):
     _name = "向量数据库"
     _description = "milvus(远程) / lancedb(本地文件); 变更需重启生效, 更换向量库后需重建向量索引"
 
-    type: str = Field("lancedb", title="类型", description="milvus(远程) / lancedb(本地文件)")
+    type: str = Field("milvus", title="类型", description="milvus(远程, 默认) / lancedb(本地文件)")
     database: str = Field(
-        "temp_source/db/lancedb", title="数据库", description="lancedb 为本地目录路径; milvus 为库名(默认 default)"
+        "default", title="数据库", description="milvus 为库名(默认 default); lancedb 为本地目录路径"
     )
     uri: str | None = Field(None, title="URI", description="milvus 完整地址(如 http://ip:20005), 配置后忽略 host/port")
     host: str | None = Field(None, title="主机", description="milvus 地址")
@@ -185,6 +199,7 @@ class WebSearchSettings(SettingsGroup):
 GROUPS: list[type[SettingsGroup]] = [
     TokenSettings,
     EmailSettings,
+    SmsSettings,
     FileSystemSettings,
     DBCacheSettings,
     DBVectorSettings,

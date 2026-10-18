@@ -6,26 +6,27 @@
   >
     <!-- 关联账号 本站 备案 -->
     <div flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6>
-      <!-- 关联账号 -->
-      <div flex space-x-5 text-note-sub>
+      <!-- 关联账号(图标链接触达区放大到 40px 满足移动端触控, 悬浮轻浮起更醒目) -->
+      <div flex items-center text-note-sub>
         <a
           v-for="link in socialLinks"
           :key="link.name"
           :href="link.url"
+          p-2.5
           text-note-green
-          hover:opacity-70
-          transition-opacity
+          hover:-translate-y-0.5
+          transition-transform
         >
-          <component :is="link.icon" h-5 w-5 />
+          <component :is="link.icon" h-5 w-5 aria-hidden="true" />
           <span sr-only>{{ link.name }}</span>
         </a>
       </div>
       <!-- 年份提示 + 备案(合并为一组,移动端居中堆叠,避免长文本截断) -->
       <div flex flex-col items-center gap-1 text-center sm:flex-row sm:gap-6 text-note-sub>
         <span text-xs md:text-sm>© 2023-{{ yearNow }} <a href="https://wx1s.com/"
-            hover:underline>ITILD</a>. All Rights Reserved.</span>
-        <span text-xs hover:underline>© 备案号: <a href="https://beian.miit.gov.cn/"
-            target="_blank">辽ICP备2022000388号-1</a></span>
+            class="hover:underline underline-offset-2">ITILD</a>. All Rights Reserved.</span>
+        <span text-xs>© 备案号: <a href="https://beian.miit.gov.cn/"
+            target="_blank" class="hover:underline underline-offset-2">辽ICP备2022000388号-1</a></span>
       </div>
     </div>
   </footer>

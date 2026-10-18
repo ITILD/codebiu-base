@@ -5,6 +5,7 @@ from typing import ClassVar
 
 from module_office.utils.file_parse.base import BaseParser
 from module_office.utils.file_parse.mineru import MinerUParser
+from module_office.utils.file_parse.office import OfficeParser
 
 
 class ParserFactory:
@@ -12,9 +13,11 @@ class ParserFactory:
 
     根据文件后缀创建对应解析器实例，统一输出 do.chunk.Chunk 列表。
 
-    引擎说明(基线版, 解析全部走外部服务, 无本地推理依赖):
-      - mineru: 唯一内置引擎(pdf/doc/docx/ppt/pptx), 调用远程 mineru.net API
-        或本地 docker mineru-api, HTTP 调用零本地重型依赖。
+    引擎说明:
+      - mineru: pdf/图片走 MinerU(远程 mineru.net API 或本地 docker mineru-api)。
+        实测 MinerU v4 远程 API 不支持 Office 格式(上传成功但解析必失败), 故
+      - office: docx/pptx 由本地 OfficeParser 纯标准库解析兜底, 零外部依赖;
+        .doc/.ppt 二进制旧格式标准库无法解析, 明确报错提示另存新格式。
 
     扩展接口(后续接入其他解析服务)：
       - 在 file_parse 下新建引擎目录(如 other_service/)，实现 BaseParser 子类；
@@ -25,10 +28,10 @@ class ParserFactory:
     # mineru 引擎: 后缀 -> 解析器类(MinerU 官方支持的版式文档与图片格式, 远程 API 实测)
     _MINERU_REGISTRY: ClassVar[dict[str, type[BaseParser]]] = {
         ".pdf": MinerUParser,
-        ".docx": MinerUParser,
-        ".doc": MinerUParser,
-        ".pptx": MinerUParser,
-        ".ppt": MinerUParser,
+        ".docx": OfficeParser,
+        ".doc": OfficeParser,
+        ".pptx": OfficeParser,
+        ".ppt": OfficeParser,
         ".png": MinerUParser,
         ".jpg": MinerUParser,
         ".jpeg": MinerUParser,

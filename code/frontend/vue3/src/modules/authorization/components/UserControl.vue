@@ -1,7 +1,8 @@
 <!-- 头像下拉用户控制: 登录态菜单(后台管理/账户设置/版本信息/退出) -->
 <template>
   <el-dropdown trigger="click" items-center placement="bottom-end" @command="handleCommand">
-    <UserLoginIcon pointer-default w-7 h-7 />
+    <!-- 触发头像 32px: 顶部栏高度约束下尽量接近 44px 触控目标 -->
+    <UserLoginIcon pointer-default w-8 h-8 />
     <template #dropdown>
       <el-dropdown-menu>
         <!-- 用户信息 -->

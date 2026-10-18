@@ -679,7 +679,8 @@ class ProjectDocumentService:
                         project_id=document.project_id,
                         content=item.content[:8192],
                         embedding=emb,
-                        source=item.source,
+                        # 引用溯源: 分块器未标注来源时回退文档名, 避免前端显示"未知来源"
+                        source=item.source or document.name,
                         content_types=item.content_types,
                         position=item.position,
                         # LanceModel 不支持 dict 注解, 非标元数据以 JSON 字符串存储

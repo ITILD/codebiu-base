@@ -2,11 +2,10 @@
 // Markdown 富文本渲染区块:
 // 1. 先保护 $..$ / $$..$$ 公式占位(避免 markdown 语法与公式互相干扰), 渲染后用 katex 恢复
 // 2. 按 token 分段: mermaid 代码块 → MermaidBlock, 表格 → TableBlock, 其余 → v-html 文本段
-import { computed } from 'vue'
 import { marked, type Tokens } from 'marked'
 import MermaidBlock from './MermaidBlock.vue'
 import TableBlock from './TableBlock.vue'
-import { protectMath, restoreMathHtml } from '@/common/utils/latex'
+import { loadKatex, protectMath, restoreMathHtml } from '@/common/utils/latex'
 import { sanitizeHtml } from '@/common/utils/sanitize'
 
 interface Props {
@@ -44,22 +43,30 @@ const buildTableMarkdown = (token: Tokens.Table): string => {
   return header + alignRow + rows
 }
 
+/** 分段结果(异步渲染: 首次出现公式时需等待 katex 动态加载完成) */
+const segments = ref<Segment[]>([])
+// 渲染序号: 流式输出下丢弃过期渲染结果
+let renderSeq = 0
+
 /** 分段计算: 保护公式 → lexer → 逐 token 归类 */
-const segments = computed<Segment[]>(() => {
+const renderSegments = async () => {
+  const seq = ++renderSeq
   const { text: protectedContent, mathMap } = protectMath(props.content)
+  // 存在公式才加载 katex(仅首次真实下载, 之后命中模块缓存)
+  if (mathMap.size > 0) await loadKatex()
   const tokens = marked.lexer(protectedContent)
   const result: Segment[] = []
   let idx = 0
   let currentTextTokens: Tokens.Generic[] = []
 
   // 把累计的普通 token 渲染为 HTML 文本段
-  const flushText = () => {
+  const flushText = async () => {
     if (currentTextTokens.length > 0) {
       const html = marked.parser(currentTextTokens)
       result.push({
         type: 'text',
         // marked 不消毒, LLM 输出可能含恶意 HTML, 渲染前必须 sanitize
-        content: sanitizeHtml(restoreMathHtml(html, mathMap)),
+        content: sanitizeHtml(await restoreMathHtml(html, mathMap)),
         id: `${props.blockId}-${idx++}`,
       })
       currentTextTokens = []
@@ -68,7 +75,7 @@ const segments = computed<Segment[]>(() => {
 
   for (const token of tokens) {
     if (token.type === 'code' && token.lang === 'mermaid') {
-      flushText()
+      await flushText()
       result.push({
         type: 'mermaid',
         content: token.text,
@@ -76,20 +83,24 @@ const segments = computed<Segment[]>(() => {
         id: `${props.blockId}-${idx++}`,
       })
     } else if (token.type === 'table') {
-      flushText()
+      await flushText()
       const rawMd = buildTableMarkdown(token as Tokens.Table)
       result.push({
         type: 'table',
-        content: restoreMathHtml(rawMd, mathMap),
+        content: await restoreMathHtml(rawMd, mathMap),
         id: `${props.blockId}-${idx++}`,
       })
     } else {
       currentTextTokens.push(token)
     }
   }
-  flushText()
-  return result
-})
+  await flushText()
+  // 仅当仍是最新一轮渲染时才上屏, 防止流式场景旧结果覆盖
+  if (seq === renderSeq) segments.value = result
+}
+
+// 内容变化(含流式增量)即触发重渲染
+watch(() => props.content, () => { void renderSegments() }, { immediate: true })
 
 /** mermaid 源码被编辑(向上冒泡, 供页面回写消息内容) */
 const handleMermaidUpdate = (payload: { id: string; code: string }) => {

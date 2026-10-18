@@ -24,28 +24,30 @@
 
       <!-- 注意: 含方括号的任意值类名必须写进 class(attributify 陷阱: 裸属性名含 [] 会使 setAttribute 抛 InvalidCharacterError, 整页渲染失败) -->
       <div relative z-10 class="max-w-[68%] md:max-w-[64%]">
-        <!-- Hero 主标题: 已登录显示时段问候, 未登录显示品牌名 -->
+        <!-- Hero 主标题: 已登录显示时段问候, 未登录显示品牌名;
+             min-w-0 + break-words: flex 匿名文本项默认不收缩, 长英文昵称(如 Administrator)
+             会顶穿 68% 文字区被裁断, 放开收缩并允许断词换行 -->
         <h1
-          flex items-center font-serif text-3xl md:text-5xl font-bold text-note-green
+          flex items-center flex-wrap min-w-0 font-serif text-2xl sm:text-3xl md:text-5xl font-bold text-note-green
           :class="isLoggedIn ? 'mb-3' : 'mb-4'"
-          class="note-etch"
+          class="note-etch [overflow-wrap:anywhere]"
         >
           {{ heroTitle }}
           <span class="note-seal ml-3 md:ml-4" title="小憩">憩</span>
         </h1>
         <p text-base md:text-lg text-note-sub max-w-xl leading-relaxed :class="isLoggedIn ? 'mb-6' : 'mb-2'">
-          像打理花园一样，安放你的数据与灵感。
+          {{ $t('home_sub') }}
         </p>
 
         <!-- 已登录: 最近访问快捷入口(过滤后台路由, 首页不出现后台相关内容) -->
         <div v-if="isLoggedIn && recentAppPages.length" mb-2>
-          <p text-xs text-note-sub mb-2>最近访问</p>
+          <p text-xs text-note-sub mb-2>{{ $t('home_recent') }}</p>
           <div flex flex-wrap gap-2>
             <RouterLink
               v-for="item in recentAppPages.slice(0, 6)"
               :key="item.path"
               :to="item.path"
-              px-3 py-1.5 rounded-full bg-note-tint text-xs md:text-sm text-note hover:text-note-green hover:shadow-note transition-all
+              px-3 py-1.5 rounded-full bg-note-tint text-xs md:text-sm text-note hover:text-note-green hover:shadow-note note-transition
             >
               {{ item.title }}
             </RouterLink>
@@ -54,7 +56,7 @@
 
         <!-- 未登录: 登录引导(仅 !isLoggedIn 时显示; 已登录但无最近访问不能落到这里) -->
         <p v-if="!isLoggedIn" text-sm md:text-base text-note-sub mb-2 max-w-xl>
-          登录后即可使用个人小站、知识库等应用。
+          {{ $t('home_login_hint') }}
         </p>
       </div>
     </section>
@@ -63,7 +65,7 @@
     <section>
       <div flex items-center gap-2 mb-6>
         <span text-xl>🧭</span>
-        <h2 font-serif text-2xl font-semibold text-note class="note-etch">应用</h2>
+        <h2 font-serif text-2xl font-semibold text-note class="note-etch">{{ $t('home_apps') }}</h2>
         <hr class="note-line-fade flex-1" />
       </div>
 
@@ -75,7 +77,7 @@
           class="paper-grain note-glow-hover"
           bg-note-card
           rounded-note-lg
-          p-7
+          p-5 md:p-7
           overflow-hidden
           duration-300
           hover:-translate-y-0.5
@@ -90,12 +92,12 @@
             rounded-note-lg
             bg-note-tint
             text-note-green
-            mb-5
+            mb-4 md:mb-5
           >
             <el-icon :size="28"><component :is="app.icon" /></el-icon>
           </div>
           <h3 text-xl font-semibold text-note mb-2>{{ app.title }}</h3>
-          <p text-sm text-note-sub leading-relaxed>{{ app.desc ?? '进入应用开始使用。' }}</p>
+          <p text-sm text-note-sub leading-relaxed>{{ app.desc ?? $t('home_app_desc') }}</p>
           <!-- 功能速览: 应用内主要页面 -->
           <div v-if="app.children?.length" flex flex-wrap gap-1.5 mt-4>
             <span
@@ -128,6 +130,8 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/common/stores/auth'
 import { useVisibleApps } from '@/app/composables/useMenu'
 import { useRecentPages } from '@/app/composables/useRecentPages'
+// 系统三语(中/英/日): 问候语等脚本侧取词
+import { i18n } from '@/common/i18n/language'
 // 诗意场景装饰: 分形悬枝与涟漪小池(纯 SVG, 零图片依赖) + 页面级落叶
 import FractalBranch from '@/common/components/decor/FractalBranch.vue'
 import FallingLeaves from '@/common/components/decor/FallingLeaves.vue'
@@ -144,19 +148,21 @@ const { recentPages } = useRecentPages()
 const isLoggedIn = computed(() => Boolean(authStore.authState.user.id))
 const displayName = computed(() => authStore.authState.user.nickname || authStore.authState.user.username)
 
-/** 按当前时段返回问候语 */
+/** 按当前时段返回问候语 i18n key(展示时经 $t 翻译) */
 function greetingByHour(): string {
   const h = new Date().getHours()
-  if (h < 6) return '夜深了'
-  if (h < 12) return '早上好'
-  if (h < 14) return '中午好'
-  if (h < 18) return '下午好'
-  return '晚上好'
+  if (h < 6) return 'g_night'
+  if (h < 12) return 'g_morning'
+  if (h < 14) return 'g_noon'
+  if (h < 18) return 'g_afternoon'
+  return 'g_evening'
 }
 const greeting = ref(greetingByHour())
 
-/** Hero 主标题: 已登录为时段问候 + 昵称, 未登录为品牌名 */
-const heroTitle = computed(() => (isLoggedIn.value ? `${greeting.value}，${displayName.value}` : TITLE))
+/** Hero 主标题: 已登录为时段问候 + 昵称, 未登录为品牌名(t 随语言切换刷新) */
+const heroTitle = computed(() =>
+  isLoggedIn.value ? i18n.global.t('hello_fmt', { g: i18n.global.t(greeting.value), name: displayName.value }) : TITLE
+)
 
 // ===== 最近访问(仅展示前台应用页, 后台路由不出现在首页) =====
 const recentAppPages = computed(() =>

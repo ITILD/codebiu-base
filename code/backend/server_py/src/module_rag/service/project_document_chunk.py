@@ -47,6 +47,10 @@ class ProjectDocumentChunkService:
             # 根因附在消息里(如 Connection error), 检索节点会将原因透传到前端过程区块
             raise ValueError(f"文本向量化失败: {e}") from e
 
+        # 向量维度漂移防护: 向量表是历史模型建的(维度不一致时 Milvus 直接报
+        # "vector dimension mismatch" 原始异常), 检索前先校验并自动修复/明确提示
+        await self._ensure_table_dim(len(query_vector))
+
         # 4. 调用 DAO 层执行向量检索
         results: list[ProjectDocumentChunkSearchResponse] = (
             await self.project_document_chunk_dao.search(
@@ -81,6 +85,34 @@ class ProjectDocumentChunkService:
             logger.info(f"[Search] 深度思考未开启, 跳过 Rerank 精排")
 
         return results
+
+    async def _ensure_table_dim(self, current_dim: int) -> None:
+        """向量表维度与当前向量化模型一致性校验(检索前防护)
+
+        - 一致: 直接返回(常态路径, 仅一次 describe 开销)
+        - 不一致且知识库无文档: 历史残留表, 自动重建为当前维度(自愈)
+        - 不一致且有文档: 抛出可读错误, 提示执行"重新向量化"(勿静默重建丢数据)
+        """
+        from module_rag.dao.project_document import ProjectDocumentDao
+        from module_rag.do.project_document_chunk import ProjectDocumentChunk
+        from common.config.db import db_vector
+
+        table_name = "projectdocumentchunk"  # 与 ProjectDocumentChunkDao 一致: 类名小写
+        old_dim = await db_vector.get_vector_dim(table_name, "embedding")
+        if old_dim is None or old_dim == current_dim:
+            return
+
+        document_ids = await ProjectDocumentDao().list_all_ids()
+        if document_ids:
+            raise ValueError(
+                f"向量表维度({old_dim})与当前向量化模型维度({current_dim})不一致, "
+                f"请先执行全库重新向量化后再检索"
+            )
+
+        # 无文档: 重建空表自愈, 后续上传按当前维度写入
+        logger.warning(f"向量表维度漂移 {old_dim} -> {current_dim} 且无文档, 自动重建向量表")
+        await db_vector.drop_table(table_name)
+        await db_vector.create_table(ProjectDocumentChunk, {"embedding": current_dim})
 
     async def rerank_candidates(
         self,

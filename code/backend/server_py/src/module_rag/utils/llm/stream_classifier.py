@@ -52,25 +52,27 @@ def extract_text(content: object) -> str:
 class StreamEventClassifier:
     """LangGraph 事件分类器"""
 
-    def _not_allowed_event(self, event: StreamEvent) -> bool:
-        """判断是否为图节点根事件，而不是节点内部 Runnable 事件"""
-        event_name = event.get("name")
-        bool_allowed = event_name in ["RunnableSequence","RunnableLambda"]
-        return bool_allowed
+    def _is_node_event(self, event: StreamEvent) -> bool:
+        """判断是否为图节点本体事件(而非节点内部 Runnable 事件)
+
+        真节点事件的 name 即节点名(与 metadata.langgraph_node 相等, GraphNode 为
+        StrEnum 可直接比较); 节点内部的路由函数(_route_after_*)、RunnableSeq/
+        RunnableSequence 等子 Runnable 事件虽也携带 langgraph_node 元数据, 但
+        name 各不相同, 据此过滤, 避免重复 STATUS/空数据 TOOL_CALL
+        """
+        return bool(self._node_name(event)) and event.get("name") == self._node_name(event)
 
     def classify(self, event: StreamEvent) -> Generator[StreamOne, None, None]:
         """将 LangGraph 原始事件转换为业务 StreamOne"""
         event_name = event.get("event") or ""
-        if self._not_allowed_event(event):
-            return
 
         if event_name == GraphEvent.MODEL_STREAM:
             yield from self._model_stream(event)
 
-        elif event_name == GraphEvent.NODE_START:
+        elif event_name == GraphEvent.NODE_START and self._is_node_event(event):
             yield from self._node_start(event)
 
-        elif event_name == GraphEvent.NODE_END:
+        elif event_name == GraphEvent.NODE_END and self._is_node_event(event):
             yield from self._node_end(event)
 
     def _model_stream(self, event: StreamEvent) -> Generator[StreamOne, None, None]:

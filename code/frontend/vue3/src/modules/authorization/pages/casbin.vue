@@ -1,7 +1,7 @@
 <template>
   <div p-4 md:p-6 w-full>
     <!-- 水墨页头 -->
-    <InkPageHead title="策略中心" sub="权限矩阵 / 用户授权 / 原始规则, 三视角一览" seal="律" />
+    <InkPageHead title="策略中心" sub="角色权限矩阵与策略规则" seal="律" />
 
     <!-- 策略中心三视角: 权限矩阵(可视化) / 用户授权(卡片) / 高级规则(原始casbin表格) -->
     <el-tabs v-model="activeTab">

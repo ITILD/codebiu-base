@@ -3,7 +3,7 @@
     <!-- 水墨页头 -->
     <InkPageHead title="字段表管理" seal="典">
       <template #sub>
-        🌿 左侧为字段类型(dict_type)，右侧为对应字段项(dict_item)，点击类型查看其字段项
+        左侧选择字段类型，右侧维护对应字段项
       </template>
     </InkPageHead>
 
@@ -66,7 +66,7 @@
         </div>
 
         <!-- 未选择类型提示 -->
-        <el-empty v-if="!currentType" description="请先在左侧选择一个字段类型" :image-size="80" />
+        <el-empty v-if="!currentType" description="请先在左侧选择字段类型" :image-size="80" />
         <template v-else>
           <!-- 项表格 -->
           <el-table :data="itemList" v-loading="itemLoading" stripe size="small">
@@ -309,7 +309,7 @@ const handleTypeSubmit = async () => {
 const handleDeleteType = async (row: DictType) => {
   try {
     await ElMessageBox.confirm(
-      `确定删除类型「${row.type_name}」吗？其下字段项仍保留在数据库中。`,
+      `确定删除类型「${row.type_name}」？其下字段项将保留`,
       '警告', { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' }
     )
     await deleteDictType(row.id)
@@ -417,7 +417,7 @@ const handleItemSubmit = async () => {
 const handleDeleteItem = async (row: DictItem) => {
   try {
     await ElMessageBox.confirm(
-      `确定删除字段项「${row.item_name}」吗？此操作不可恢复。`,
+      `确定删除「${row.item_name}」？此操作不可恢复`,
       '警告', { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' }
     )
     await deleteDictItem(row.id)

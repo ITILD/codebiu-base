@@ -16,29 +16,31 @@
       <el-form ref="registerFormRef" :model="registerForm" :rules="registerRules as any" label-position="top"
         @submit.prevent="handleRegister">
         <el-form-item :label="$t('username')" prop="username">
-          <el-input v-model="registerForm.username" :placeholder="$t('username')" autocomplete="username" />
+          <el-input v-model="registerForm.username" :placeholder="$t('placeholder_username')" autocomplete="username"
+            :spellcheck="false" />
         </el-form-item>
 
         <el-form-item :label="$t('email')" prop="email">
-          <el-input v-model="registerForm.email" :placeholder="$t('email')" autocomplete="email" />
+          <el-input v-model="registerForm.email" :placeholder="$t('email')" autocomplete="email" :spellcheck="false" />
         </el-form-item>
 
-        <el-form-item v-if="emailVerify" label="邮箱验证码" prop="code">
+        <el-form-item v-if="emailVerify" :label="$t('label_email_code')" prop="code">
           <div flex gap-8px w-full>
-            <el-input v-model="registerForm.code" placeholder="请输入邮箱验证码" autocomplete="one-time-code" />
+            <el-input v-model="registerForm.code" :placeholder="$t('placeholder_email_code')"
+              autocomplete="one-time-code" :spellcheck="false" />
             <el-button :disabled="countdown > 0" :loading="codeSending" @click="handleSendCode">
-              {{ countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
+              {{ countdown > 0 ? $t('resend_in', { n: countdown }) : $t('send_code') }}
             </el-button>
           </div>
         </el-form-item>
 
-        <el-form-item label="密码" prop="password">
-          <el-input v-model="registerForm.password" type="password" placeholder="请输入密码" autocomplete="new-password"
-            show-password />
+        <el-form-item :label="$t('label_password')" prop="password">
+          <el-input v-model="registerForm.password" type="password" :placeholder="$t('placeholder_password')"
+            autocomplete="new-password" show-password />
         </el-form-item>
 
-        <el-form-item label="确认密码" prop="confirmPassword">
-          <el-input v-model="registerForm.confirmPassword" type="password" placeholder="请再次输入密码"
+        <el-form-item :label="$t('label_confirm_password')" prop="confirmPassword">
+          <el-input v-model="registerForm.confirmPassword" type="password" :placeholder="$t('placeholder_password_again')"
             autocomplete="new-password" show-password />
         </el-form-item>
 
@@ -65,6 +67,9 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import { getRegisterConfig, registerUser, sendRegisterCode } from '../api/auth'
 import type { AuthRegisterRequest, AuthResponse } from '../types/auth'
+// 系统三语(中/英/日): 表单文案/校验/提示随语言切换
+import { i18n } from '@/common/i18n/language'
+const { t } = i18n.global
 // 定义组件属性
 const props = defineProps<{
   modelValue: boolean
@@ -106,30 +111,30 @@ const registerForm = reactive({
   code: ''
 })
 
-// 表单验证规则
-const registerRules = {
+// 表单验证规则(computed: 校验文案随语言切换刷新)
+const registerRules = computed(() => ({
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 20, message: '用户名长度应在3-20个字符之间', trigger: 'blur' }
+    { required: true, message: t('rule_username_required'), trigger: 'blur' },
+    { min: 3, max: 20, message: t('rule_username_len'), trigger: 'blur' }
   ],
   email: [
-    { required: true, message: '请输入邮箱地址', trigger: 'blur' },
-    { type: 'email', message: '请输入正确的邮箱地址', trigger: 'blur' }
+    { required: true, message: t('rule_email_required'), trigger: 'blur' },
+    { type: 'email' as const, message: t('rule_email_invalid'), trigger: 'blur' }
   ],
   // 未开启邮箱验证时该表单项不渲染, 规则不会生效
   code: [
-    { required: true, message: '请输入邮箱验证码', trigger: 'blur' }
+    { required: true, message: t('rule_code_required'), trigger: 'blur' }
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码至少6位', trigger: 'blur' }
+    { required: true, message: t('rule_password_required'), trigger: 'blur' },
+    { min: 6, message: t('rule_password_min'), trigger: 'blur' }
   ],
   confirmPassword: [
-    { required: true, message: '请确认密码', trigger: 'blur' },
+    { required: true, message: t('rule_confirm_required'), trigger: 'blur' },
     {
       validator: (rule: unknown, value: string, callback: (error?: Error) => void) => {
         if (value !== registerForm.password) {
-          callback(new Error('两次输入的密码不一致'))
+          callback(new Error(t('rule_password_mismatch')))
         } else {
           callback()
         }
@@ -137,7 +142,7 @@ const registerRules = {
       trigger: 'blur'
     }
   ]
-}
+}))
 
 // 获取注册配置(是否开启邮箱验证码)
 const loadRegisterConfig = async () => {
@@ -177,10 +182,10 @@ const handleSendCode = async () => {
   codeSending.value = true
   try {
     await sendRegisterCode(registerForm.email)
-    ElMessage.success('验证码已发送，请查收邮箱')
+    ElMessage.success(t('msg_code_sent'))
     startCountdown()
   } catch (error) {
-    ElMessage.error((error as { message?: string }).message || '验证码发送失败')
+    ElMessage.error((error as { message?: string }).message || t('msg_code_send_failed'))
   } finally {
     codeSending.value = false
   }
@@ -220,7 +225,7 @@ const handleRegister = async () => {
         console.error('注册失败:', error)
         if (error instanceof Error) {
           // 添加错误提示
-          ElMessage.error(error.message || '注册失败，请检查输入信息')
+          ElMessage.error(error.message || t('msg_register_failed'))
         }
       } finally {
         loading.value = false

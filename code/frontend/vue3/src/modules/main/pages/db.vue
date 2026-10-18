@@ -1,7 +1,7 @@
 <!-- 数据监测页: 关系库/向量库/缓存/图库运行信息面板(四子面板) -->
 <template>
   <div p-4 md:p-6>
-    <InkPageHead title="数据监测" sub="关系库 / 向量库 / 缓存 / 图数据库的数据量与运行情况" seal="测">
+    <InkPageHead title="数据监测" sub="各类数据库的数据量与运行状态" seal="测">
       <template #actions>
         <el-input
           v-if="activeTab === 'rel'"

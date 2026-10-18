@@ -11,6 +11,7 @@ from common.config.dynamic.schemas import (
     DBVectorSettings,  # noqa: F401
     EmailSettings,  # noqa: F401
     FileSystemSettings,  # noqa: F401
+    SmsSettings,  # noqa: F401
     TasksSettings,  # noqa: F401
     TokenSettings,  # noqa: F401
     WebSearchSettings,  # noqa: F401

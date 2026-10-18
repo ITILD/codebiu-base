@@ -29,7 +29,7 @@ const SysSettingStore = defineStore('sysSetting', () => {
         tabPosition: 'left'
       }
     },
-    language: 'zh' as any
+    // 语言切换统一由 common/i18n/language.ts 管理(持久化于 localStorage)
   })
 
   const sysObj = {

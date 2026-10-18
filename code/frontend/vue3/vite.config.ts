@@ -5,6 +5,8 @@ import { resolve } from 'node:path'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
+// 产物预压缩: 构建时同时生成 .gz/.br, 部署后由服务器直接回源压缩文件
+import { compression } from 'vite-plugin-compression2'
 // 开发插件
 import VueRouter from 'unplugin-vue-router/vite'// 自动引入路由
 import AutoImport from 'unplugin-auto-import/vite' //自动导入 API
@@ -54,6 +56,10 @@ export default defineConfig(
       // 插件配置
       plugins: [
         versionFilePlugin,
+        // 预压缩产物(gzip + brotli): 传输体积大幅下降, 不影响原始文件回退
+        ...(mode === 'production'
+          ? [compression({ algorithms: ['gzip', 'brotli'] })]
+          : []),
         vue(),
         // 自动路由(特性/模块化架构):
         // 1. src/pages            —— 全局页面(首页/后台工作台/账户设置/404 等)
@@ -93,7 +99,8 @@ export default defineConfig(
             if (file.endsWith('/src/pages/version.vue')) route.addToMeta({ standalone: true })
           },
         }),
-        vueDevTools(),
+        // devtools 仅开发环境挂载, 生产构建零开销
+        ...(mode === 'development' ? [vueDevTools()] : []),
 
         // 辅助导入和设定 tailwindcss 等 css 框架
         UnoCSS(),
@@ -162,6 +169,8 @@ export default defineConfig(
       build: {
         // 现代浏览器目标: 减少语法降级与 helper 体积
         target: 'es2020',
+        // 现代浏览器原生支持 modulepreload, 省去 polyfill 注入
+        modulePreload: { polyfill: false },
         cssCodeSplit: true,
         // 无需 gzip 体积统计, 加快构建
         reportCompressedSize: false,
@@ -177,9 +186,11 @@ export default defineConfig(
               if (/[\\/]node_modules[\\/](@vue|vue|vue-router|pinia|vue-i18n|@vueuse)[\\/]/.test(id)) {
                 return 'vue-vendor'
               }
-              if (id.includes('element-plus') || id.includes('@element-plus')) {
+              if (id.includes('element-plus') || id.includes('@element-plus') || id.includes('dayjs')) {
                 return 'element-plus'
               }
+              // ECharts 图表库(db 关系图用), 独立缓存
+              if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
               // Mermaid 及其图形依赖(聊天/导出时动态加载)
               if (/[\\/]node_modules[\\/](mermaid|cytoscape|d3|d3-[^\\/]+|dagre[^\\/]*|elkjs|roughjs|khroma|@viz-js)[\\/]/.test(id)) {
                 return 'mermaid'

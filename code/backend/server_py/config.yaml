@@ -86,10 +86,14 @@ db_cache:
   db: 0
   database: temp_source\db\redis.db
 
-# 向量库: lancedb=零依赖本地文件(基线唯一向量库, 更换后需重建向量索引)
+# 向量库: milvus=远程向量库(默认, 更换后需重建向量索引); lancedb=零依赖本地文件
 db_vector:
-  type: lancedb
-  database: temp_source\db\lancedb
+  type: milvus
+  database: default
+  host: http://127.0.0.1
+  port: 19530
+  user: root
+  password: ""
 
 # 任务队列: local=进程内协程零依赖; celery 需 Redis(在环境层配 broker_url)
 tasks:

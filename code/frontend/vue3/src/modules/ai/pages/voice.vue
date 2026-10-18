@@ -37,7 +37,7 @@
         <el-card flex-1 min-w-0>
           <template #header>
             <div flex items-center gap-2>
-              <span text-lg font-bold>🎤 语音识别 ASR</span>
+              <span text-lg font-bold>语音识别 ASR</span>
               <el-tag size="small" type="success">{{ engineLabel }}</el-tag>
             </div>
           </template>
@@ -59,7 +59,7 @@
         <el-card flex-1 min-w-0>
           <template #header>
             <div flex items-center gap-2>
-              <span text-lg font-bold>🔊 语音合成 TTS</span>
+              <span text-lg font-bold>语音合成 TTS</span>
               <el-tag size="small" type="success">{{ engineLabel }}</el-tag>
             </div>
           </template>
