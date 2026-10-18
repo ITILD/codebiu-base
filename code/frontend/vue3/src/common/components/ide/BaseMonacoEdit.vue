@@ -4,8 +4,36 @@
 </template>
 
 <script setup lang="ts">
-// import { editor } from '@monaco-editor/loader'
-import * as monaco from 'monaco-editor'
+// 按需引入 Monaco: 编辑器核心 + CodeType 枚举 15 种语言的语法高亮,
+// 语言服务 worker 仅保留 JSON(默认语言), 剔除 ts/css/html 三个重型 worker(合计约 8.7MB)
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
+// 编辑器核心功能(查找/折叠/补全浮层等, 自带 UI 样式)
+import 'monaco-editor/esm/vs/editor/editor.all.js'
+// 语法高亮注册(与 CodeType 枚举一一对应)
+import 'monaco-editor/esm/vs/basic-languages/python/python.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/java/java.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/html/html.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/css/css.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/dart/dart.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/ruby/ruby.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/csharp/csharp.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js'
+// JSON 语言服务(默认语言, 保留格式化与校验)
+import 'monaco-editor/esm/vs/language/json/monaco.contribution.js'
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
+import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
+
+// worker 分发: JSON 用专用 worker(校验/格式化), 其余语言用基础 worker(词法建议等)
+;(self as unknown as { MonacoEnvironment?: monaco.Environment }).MonacoEnvironment = {
+  getWorker: (_workerId: string, label: string): Worker =>
+    label === 'json' ? new jsonWorker() : new editorWorker(),
+}
 // 定义组件属性
 interface Props {
   modelValue?: string

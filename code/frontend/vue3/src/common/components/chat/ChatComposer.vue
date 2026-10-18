@@ -334,7 +334,12 @@ onMounted(() => {
   background: var(--note-tint, #e7f3e9);
   color: var(--note-sub, #6b7f6e);
   cursor: pointer;
-  transition: all 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s,
+    opacity 0.2s;
   padding: 0;
 }
 
@@ -499,7 +504,12 @@ onMounted(() => {
   min-height: 28px;
   padding: 2px 10px;
   font-size: 12px;
-  transition: all 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s,
+    opacity 0.2s;
 }
 
 .cc-toolbar :deep(.el-select__wrapper:hover),

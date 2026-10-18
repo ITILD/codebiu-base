@@ -20,7 +20,9 @@
     <el-icon :size="16">
       <Download />
     </el-icon>
-    版本已发布点击刷新
+    <!-- 手机档短文案(顶部栏空间有限), 平板及以上完整提示 -->
+    <span class="hidden sm:inline">发现新版本，点击更新</span>
+    <span class="sm:hidden">更新</span>
   </button>
 </template>
 

@@ -34,7 +34,10 @@
         <div
           v-for="row in projects" :key="row.id"
           flex flex-col gap-3 p-4 rounded-2xl bg-note-card shadow-note cursor-pointer
-          hover:shadow-note-hover hover:-translate-y-0.5 transition-all
+          hover:shadow-note-hover hover:-translate-y-0.5 note-transition
+          role="button" tabindex="0"
+          @keydown.enter="handleOpenEdit(row)"
+          @keydown.space.prevent="handleOpenEdit(row)"
           @click="handleOpenEdit(row)"
         >
           <!-- 头部: 图标 + 名称 + 创建时间 -->

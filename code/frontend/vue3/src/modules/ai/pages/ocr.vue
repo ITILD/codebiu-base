@@ -3,7 +3,7 @@
     <!-- 水墨页头 -->
     <InkPageHead title="OCR 文字识别" seal="识">
       <template #sub>
-        🌿 上传图片识别文字, 支持多语言识别
+        上传图片，识别其中文字
       </template>
     </InkPageHead>
 
@@ -44,7 +44,7 @@
             :disabled="!targetFile || isProcessing"
             @click="startRecognition"
           >
-            {{ isProcessing ? '运行中...' : '开始识别' }}
+            {{ isProcessing ? '识别中…' : '开始识别' }}
           </el-button>
         </div>
       </div>
@@ -54,7 +54,7 @@
     <div v-if="targetFile" flex flex-col lg:flex-row gap-5>
       <!-- 图片预览和检测结果 -->
       <div page-card flex-1 min-w-0>
-        <div font-bold mb-3 text-note>文 本 检 测 结 果</div>
+        <div font-bold mb-3 text-note>识别结果</div>
         <div relative>
           <img
             :src="imageSrc"

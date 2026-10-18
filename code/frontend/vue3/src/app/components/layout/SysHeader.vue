@@ -12,6 +12,8 @@
           hover:bg-note-tint
           p-2
           shrink-0
+          type="button"
+          aria-label="打开侧边菜单"
           @click="sysSettingStore.sysStyle.isSidebarDrawerOpen = true"
         >
           <el-icon :size="22" text-note>
@@ -20,7 +22,7 @@
         </button>
 
         <router-link to="/" flex items-center ml-4 md:ml-8 shrink-0>
-          <img src="@/assets/img/ion/sy_w.svg" h-8 mr-3 />
+          <img :src="sysStyle.theme.isDark ? logoDark : logoLight" h-8 mr-3 alt="logo" />
           <span text-lg md:text-xl font-semibold whitespace-nowrap text-note>
             {{ TITLE }}
           </span>
@@ -30,13 +32,46 @@
         <SysBreadcrumb class="ml-6 flex-1 min-w-0" />
       </div>
 
-      <!-- 右侧: 版本更新按钮 + 主题切换 + 登录/用户 -->
-      <div flex items-center mr-4 md:mr-8 gap-3 shrink-0>
+      <!-- 右侧: 版本更新按钮 + 语言切换 + 主题切换 + 登录/用户
+           手机档收紧间距与页边距, 避免多控件时溢出 -->
+      <div flex items-center mr-3 md:mr-8 gap-1.5 md:gap-3 shrink-0>
         <!-- 新版本发布提示(按钮而非弹窗, 点击刷新加载新资源) -->
         <VersionRefresh />
+        <!-- 语言切换(中/英/日; 平板及以上显示, 手机经 设置-外观 调整) -->
+        <el-dropdown v-if="isMd" trigger="click" @command="changeLanguage">
+          <button
+            type="button"
+            aria-label="切换语言"
+            flex
+            items-center
+            rounded
+            px-2
+            py-1.5
+            text-sm
+            text-note
+            hover:bg-note-tint
+            note-transition
+          >
+            {{ currentLanguageLabel }}
+            <el-icon class="ml-1" :size="12"><ArrowDown /></el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="opt in languageOptions"
+                :key="opt.value"
+                :command="opt.value"
+                :disabled="opt.value === currentLanguage"
+              >
+                {{ opt.label }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <!-- 主题切换 -->
         <el-switch
           v-model="sysSettingStore.sysStyle.theme.isDark"
+          aria-label="切换深色模式"
           @change="sysSettingStore.changeThemeValueByIsDark"
         />
         <!-- 登录/用户 -->
@@ -68,6 +103,7 @@
             rounded
             px-3
             py-1.5
+            type="button"
             bg-note-tint
             text-note
             hover:shadow-note
@@ -100,7 +136,9 @@
 // 样式控制
 import { SysSettingStore } from '@/common/stores/sys'
 import { useResponsive } from '@/common/composables/useResponsive'
-import { Menu } from '@element-plus/icons-vue'
+import { Menu, ArrowDown } from '@element-plus/icons-vue'
+// 语言切换(中/英/日)
+import { languageOptions, currentLanguage, changeLanguage } from '@/common/i18n/language'
 // 面包屑(应用壳布局组件)
 import SysBreadcrumb from './SysBreadcrumb.vue'
 // 登录/注册/用户控件属于 authorization 模块的登录认证功能(应用壳只做组装)
@@ -109,12 +147,19 @@ import RegisterDialog from '@/modules/authorization/components/RegisterDialog.vu
 import UserControl from '@/modules/authorization/components/UserControl.vue'
 import { useAuthStore } from '@/common/stores/auth'
 import type { AuthResponse } from '@/modules/authorization/types/auth'
+// Logo 按明暗主题切换: 亮色用浅底版, 暗色用深青底版(避免暗色下发白刺眼)
+import logoLight from '@/assets/img/ion/sy_w.svg'
+import logoDark from '@/assets/img/ion/sy_d.svg'
 const authStore = useAuthStore()
 const authState = authStore.authState
 const sysSettingStore = SysSettingStore()
 const sysStyle = sysSettingStore.sysStyle
 // 响应式断点: 汉堡按钮仅在 md 以下显示
 const { isMd } = useResponsive()
+// 当前语言全称(切换器触发钮展示, 以各自语言书写)
+const currentLanguageLabel = computed(
+  () => languageOptions.find((o) => o.value === currentLanguage.value)?.label ?? '简体中文'
+)
 const showLoginDialog = ref(false)
 const showRegisterDialog = ref(false)
 const TITLE = ref(import.meta.env.VITE_GLOB_APP_TITLE)

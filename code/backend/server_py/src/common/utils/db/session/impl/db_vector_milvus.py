@@ -383,15 +383,23 @@ class DBVectorMilvus(DBVectorInterface):
         """读取集合中向量字段的维度(表或字段不存在返回 None)
 
         用于全库重向量化时对比新旧模型维度。
+        兼容 pymilvus 2.x/3.x: describe_collection 3.x 返回 dict(字段列表在
+        "fields" 键), 2.x 返回对象(.fields 属性)。
         """
         from pymilvus import DataType
 
         if not await self.table_exists(table_name):
             return None
         desc = await (await self._ensure_client()).describe_collection(table_name)
-        for fs in desc.fields:
-            if fs.name == field and fs.dtype == DataType.FLOAT_VECTOR:
-                return fs.params.get("dim")
+        fields = desc.get("fields", []) if isinstance(desc, dict) else desc.fields
+        for fs in fields:
+            name = fs.get("name") if isinstance(fs, dict) else fs.name
+            if name != field:
+                continue
+            dtype = fs.get("type") if isinstance(fs, dict) else fs.dtype
+            params = fs.get("params", {}) if isinstance(fs, dict) else (fs.params or {})
+            if dtype == DataType.FLOAT_VECTOR:
+                return params.get("dim")
         return None
 
     # ############################# 数据操作 #############################

@@ -60,7 +60,21 @@ async def get_checkpointer() -> AsyncPostgresSaver:
 
     # 重量级依赖延迟导入(langgraph 连带加载约 50MB+)
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
     from psycopg_pool import AsyncConnectionPool
+
+    # checkpoint 业务类型白名单: state 中以对象形式持久化的自定义模型必须在此登记,
+    # 否则升级 langgraph(将默认拒绝未注册类型)后旧会话恢复会直接失败
+    # (SAFE_MSGPACK_TYPES 内置类型与 langchain 消息类型自动放行, 无需重复登记)
+    from module_rag.do.project_document_chunk import ProjectDocumentChunkSearchResponse
+    from module_rag.do.rag_chat import ConversationSummary, RagHelpInfo, WebCitation
+
+    rag_state_types = (
+        RagHelpInfo,
+        WebCitation,
+        ConversationSummary,
+        ProjectDocumentChunkSearchResponse,
+    )
 
     if _checkpointer is not None:
         return _checkpointer
@@ -81,7 +95,11 @@ async def get_checkpointer() -> AsyncPostgresSaver:
         )
         try:
             await pool.open()
-            saver = AsyncPostgresSaver(pool)
+            # 显式注册业务类型白名单: 消除"unregistered type"反序列化告警,
+            # 并在 langgraph 收紧默认策略后仍可恢复存量会话
+            saver = AsyncPostgresSaver(
+                pool, serde=JsonPlusSerializer(allowed_msgpack_modules=rag_state_types)
+            )
             await saver.setup()
         except BaseException as e:
             await pool.close()   # 失败时回收

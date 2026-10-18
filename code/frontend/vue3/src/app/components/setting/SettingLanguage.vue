@@ -1,8 +1,8 @@
 <template>
-  <!-- 语言选择 -->
+  <!-- 语言选择: 三语(简体中文/日本語/English), 切换立即生效并持久化 -->
   <div flex items-center gap-2 p-1>
     <span w-20 shrink-0>{{ $t('language') }}</span>
-    <el-select v-model="sysStyle.language" @change="changeValueFunc">
+    <el-select :model-value="currentLanguage" @change="changeLanguage">
       <el-option
         v-for="item in languageOptions"
         :key="item.value"
@@ -14,9 +14,5 @@
 </template>
 
 <script setup lang="ts">
-import { SysSettingStore } from '@/common/stores/sys'
-import { i18n, languageOptions } from '@/common/i18n/language'
-const { sysStyle } = SysSettingStore()
-/////////////////////////////////////////////////////////todo/////////////////////////////////////////////////////////
-const changeValueFunc = () => (i18n.global.locale = sysStyle.language)
+import { languageOptions, currentLanguage, changeLanguage } from '@/common/i18n/language'
 </script>

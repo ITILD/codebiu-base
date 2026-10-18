@@ -3,11 +3,11 @@
     <!-- 水墨页头(操作开关收进右侧操作区) -->
     <InkPageHead title="服务状态" seal="诊">
       <template #sub>
-        🌿 数据来自后端 60 秒缓存，最后更新: {{ lastUpdateText }}
+        每 60 秒自动刷新 · 最后更新 {{ lastUpdateText }}
       </template>
       <template #actions>
         <el-switch v-model="autoRefresh" active-text="自动刷新" inactive-text="暂停" />
-        <el-tooltip content="立即刷新(实时读取硬件状态)">
+        <el-tooltip content="立即刷新">
           <el-button :icon="Refresh" :loading="loading" circle @click="fetchData" />
         </el-tooltip>
       </template>
@@ -34,7 +34,7 @@
     <div v-loading="loading" grid gap-4 lg:grid-cols-2>
       <!-- 硬件状态: CPU / 内存 / 磁盘 -->
       <div page-card>
-        <h3 mb-4 font-bold text-note>🖥️ 硬件状态</h3>
+        <h3 mb-4 font-bold text-note>硬件状态</h3>
         <template v-if="hardware">
           <!-- CPU -->
           <div mb-4>
@@ -70,7 +70,7 @@
 
       <!-- GPU 状态 -->
       <div page-card>
-        <h3 mb-4 font-bold text-note>🎛️ GPU 状态</h3>
+        <h3 mb-4 font-bold text-note>GPU 状态</h3>
         <template v-if="hardware && hardware.gpu.length > 0">
           <div v-for="gpu in hardware.gpu" :key="gpu.id" mb-4 p-3 rounded bg-note-soft last:mb-0>
             <div flex items-center justify-between text-sm text-note>
@@ -88,7 +88,7 @@
 
       <!-- 网络状态 -->
       <div p-4 rounded-lg bg-note-card border-note shadow-note lg:col-span-2>
-        <h3 mb-4 font-bold text-note>🌐 网络状态</h3>
+        <h3 mb-4 font-bold text-note>网络状态</h3>
         <el-table :data="networkList" stripe w-full size="small">
           <el-table-column prop="url" label="目标地址" min-width="240" show-overflow-tooltip />
           <el-table-column label="连接状态" min-width="120" align="center">

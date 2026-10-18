@@ -234,13 +234,13 @@ class AguiStreamTransformer:
             if data.get("request") is not None:
                 events.append(ToolCallArgsEvent(tool_call_id=tool_call_id, delta=_dumps(data["request"])))
             events.append(ToolCallEndEvent(tool_call_id=tool_call_id))
-            # RESULT: 结构化 results 优先(前端直接消费引用溯源); 联网开启时附 web_results
-            # (载荷升级为对象: results + web_results/web_count/web_search_error), 回退格式化文本
-            if data.get("web_results"):
+            # RESULT: 统一下发完整结构化载荷(前端免正则解析引用溯源; 检索失败时
+            # search_error/hit_count 也不丢, 避免"检索失败"被渲染成空结果), 无数据回退文本
+            if data:
                 payload = {k: v for k, v in data.items() if k != "request"}
                 result_content = _dumps(payload)
             else:
-                result_content = _dumps(data["results"]) if data.get("results") is not None else content
+                result_content = content
             events.append(
                 ToolCallResultEvent(
                     message_id=uuid4().hex, tool_call_id=tool_call_id, content=result_content

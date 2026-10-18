@@ -61,7 +61,7 @@ dependencies = [
     # rag 会话 langgraph checkpointer(postgres)
     "langgraph-checkpoint-postgres>=3.1.2",
     "psycopg[binary]>=3.3.4",
-    # 注册邮箱验证码发送
+    # 联系方式触达(module_contact): 邮件验证码(SMTP)/短信验证码(httpx 直连阿里云)
     "aiosmtplib>=5.1.2",
     "rich>=15.0.0",
 ]

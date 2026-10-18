@@ -37,15 +37,21 @@ watch(
   () => { editedMd.value = null },
 )
 
-/** 渲染表格 HTML(latex 保护 + 消毒, 仅取 <table> 部分) */
-const tableHtml = computed(() => {
-  const html = renderMarkdownWithLatex(
+/** 表格 HTML(latex 保护 + 消毒, 仅取 <table> 部分; 异步渲染: 首次遇到公式等待 katex 加载) */
+const tableHtml = ref('')
+// 渲染序号: 防止过期渲染覆盖
+let tableRenderSeq = 0
+
+watch(localMd, async () => {
+  const seq = ++tableRenderSeq
+  const html = await renderMarkdownWithLatex(
     (t) => marked.parse(t, { async: false }) as string,
     localMd.value,
   )
   // 单元格内容由 LLM 生成, 渲染前消毒防 XSS
-  return sanitizeHtml(html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? html)
-})
+  const result = sanitizeHtml(html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? html)
+  if (seq === tableRenderSeq) tableHtml.value = result
+}, { immediate: true })
 
 const getTableEl = () => tableWrapRef.value?.querySelector('table') ?? null
 

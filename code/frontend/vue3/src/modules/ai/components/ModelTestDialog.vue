@@ -1,6 +1,6 @@
 <template>
   <!-- 能力测试 + 单独测试对话框 -->
-  <el-dialog v-model="dialogVisible" :title="`模型测试 - ${testTargetName}`" width="640px">
+  <el-dialog v-model="dialogVisible" :title="`模型测试 - ${testTargetName}`" width="90%" class="max-w-[640px]">
     <div class="flex flex-col gap-4">
       <!-- ===== 单独测试区(按模型类型提供自定义输入, 单次真实调用) ===== -->
       <div class="rounded border border-note p-3">

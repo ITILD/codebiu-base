@@ -3,6 +3,16 @@ import { RouterView } from 'vue-router'
 import { useAuthStore } from '@/common/stores/auth'
 import { useRecentPages } from '@/app/composables/useRecentPages'
 import { findMenuTrail } from '@/app/config/menu'
+// 语言切换: EP 组件内建文案(pagination/date-picker 等)随界面语言同步
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import jaJp from 'element-plus/es/locale/lang/ja'
+import enUs from 'element-plus/es/locale/lang/en'
+import type { Language } from 'element-plus/es/locale'
+import { currentLanguage } from '@/common/i18n/language'
+
+// Element Plus 语言包映射(与 common/i18n 语言码对齐)
+const EP_LOCALES: Record<string, Language> = { zh: zhCn, ja: jaJp, en: enUs }
+const epLocale = computed(() => EP_LOCALES[currentLanguage.value] ?? zhCn)
 
 const route = useRoute()
 // 后台管理页面才显示左侧模块列表, 首页等为纯展示布局(页首+内容+页脚)
@@ -33,10 +43,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- 整体: 吸顶导航 + (后台: 粘性侧边栏 + 主内容) + 页脚(文档末尾)
+  <!-- EP ConfigProvider: 组件内建文案随语言切换; 整体: 吸顶导航 +
+       (后台: 粘性侧边栏 + 主内容) + 页脚(文档末尾)
        注意: 不包 Suspense —— 无组件使用顶层 await, 且 Suspense 会与
        路由 Transition(out-in) 冲突导致切页后视图空白 -->
-  <div class="flex flex-col bg-note-paper" :class="isFullpage ? 'h-screen overflow-hidden' : 'min-h-screen'">
+  <el-config-provider :locale="epLocale">
+    <div class="flex flex-col bg-note-paper" :class="isFullpage ? 'h-screen overflow-hidden' : 'min-h-screen'">
     <!-- 顶部栏(吸顶+毛玻璃): 滚动时钉在视口顶部
          注意: bg-note-glass 含方括号任意值, 必须写进 class 属性(attributify 陷阱)
          高度保持 h-14 md:h-16 不变 —— h-app/max-h-app 公式与侧边栏 top-16 依赖它 -->
@@ -63,5 +75,6 @@ onMounted(() => {
 
     <!-- 悬浮工具(可拖动): 全屏/截图/隐藏; 显隐由 设置-外观 持久化控制 -->
     <FloatTools />
-  </div>
+    </div>
+  </el-config-provider>
 </template>

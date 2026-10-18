@@ -12,7 +12,7 @@
       py-1.5
       rounded-full
       text-sm
-      transition-all
+      note-transition
       :class="isActive(tab.index)
         ? 'bg-note-green text-white font-medium'
         : 'bg-note-tint text-note hover:shadow-note hover:text-note-green'"

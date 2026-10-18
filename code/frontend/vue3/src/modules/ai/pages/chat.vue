@@ -20,7 +20,7 @@
             <button
               v-for="s in suggestions" :key="s.label"
               flex items-center gap-3 p-3.5 rounded-xl bg-note-card text-left
-              hover:shadow-note hover:-translate-y-0.5 transition-all
+              hover:shadow-note hover:-translate-y-0.5 note-transition
               @click="applySuggestion(s.question)"
             >
               <div w-8 h-8 rounded-lg bg-note-tint flex-center shrink-0>

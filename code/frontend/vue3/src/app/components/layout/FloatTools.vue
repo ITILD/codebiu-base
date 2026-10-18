@@ -37,6 +37,8 @@
       :class="{ 'is-dragging': dragging, 'is-open': expanded }"
       type="button"
       title="悬浮工具(拖动换位)"
+      aria-label="悬浮工具菜单"
+      :aria-expanded="expanded"
       @pointerdown="onDown"
       @pointermove="onMove"
       @pointerup="onUp"
@@ -83,9 +85,16 @@ const shooting = ref(false)
 const isFullscreen = ref(Boolean(document.fullscreenElement))
 
 /////////////////////////////////////////////////////////位置持久化/////////////////////////////////////////////////////////
+// 底部安全区高度(刘海屏 home indicator 遮挡): 经 base.css 的 --note-safe-b(即 env())读取
+const safeBottom = () => {
+  const v = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--note-safe-b'))
+  return Number.isFinite(v) ? v : 0
+}
+
 const clampPos = (p: { x: number; y: number }) => ({
   x: Math.min(Math.max(p.x, EDGE), window.innerWidth - KNOB - EDGE),
-  y: Math.min(Math.max(p.y, EDGE), window.innerHeight - KNOB - EDGE)
+  // 下边界多让出底部安全区, 避免悬浮球被手机 home indicator 压住
+  y: Math.min(Math.max(p.y, EDGE), window.innerHeight - KNOB - EDGE - safeBottom())
 })
 
 const loadPos = () => {
@@ -205,7 +214,7 @@ const takeScreenshot = async () => {
 const hideTools = () => {
   expanded.value = false
   sysStore.floatToolsHidden = true
-  ElMessage.info('悬浮工具已隐藏, 可在 设置-外观 中重新开启')
+  ElMessage.info('已隐藏，可在「设置 · 外观」中恢复')
 }
 </script>
 
@@ -267,7 +276,10 @@ const hideTools = () => {
   white-space: nowrap;
   box-shadow: var(--note-shadow);
   cursor: pointer;
-  transition: all 0.2s ease-out;
+  transition:
+    background-color 0.2s ease-out,
+    color 0.2s ease-out,
+    box-shadow 0.2s ease-out;
 }
 
 .ft-pill:hover {

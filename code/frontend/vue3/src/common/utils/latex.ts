@@ -1,7 +1,12 @@
 // src/common/utils/latex.ts
 // 数学公式保护渲染工具: 在 markdown 解析前把 $..$ / $$..$$ 替换为占位符,
 // 解析后再用 katex 渲染回 HTML, 避免 markdown 语法与公式内容互相干扰
-import katex from 'katex'
+// katex 模块缓存: 首次遇到公式才动态加载(约 519KB, 聊天页打开无需等待)
+let katexPromise: Promise<typeof import('katex')> | null = null
+
+/** 预加载 katex 渲染库(幂等, 并发调用复用同一 Promise) */
+export const loadKatex = (): Promise<typeof import('katex')> =>
+  (katexPromise ??= import('katex'))
 
 // 占位符格式: @@LATEX_序号@@ (不会与 markdown 语法冲突)
 const PLACEHOLDER_PREFIX = '@@LATEX_'
@@ -118,11 +123,13 @@ export const protectMath = (
  * 将 HTML 中的占位符恢复为 katex 渲染结果
  * 渲染失败时输出带错误提示的原始公式文本(不中断整体渲染)
  */
-export const restoreMathHtml = (
+export const restoreMathHtml = async (
   html: string,
   mathMap: Map<string, ProtectedMath>,
-): string => {
+): Promise<string> => {
   if (mathMap.size === 0) return html
+  // 动态加载 katex(之后命中模块缓存, 无重复网络开销)
+  const { default: katex } = await loadKatex()
   return html.replace(
     new RegExp(`${PLACEHOLDER_PREFIX}(\\d+)${PLACEHOLDER_SUFFIX}`, 'g'),
     (match, numStr: string) => {
@@ -148,10 +155,10 @@ export const restoreMathHtml = (
 }
 
 /** 便捷组合: 保护 → markdown 渲染 → 恢复公式 */
-export const renderMarkdownWithLatex = (
+export const renderMarkdownWithLatex = async (
   renderMarkdown: (text: string) => string,
   text: string,
-): string => {
+): Promise<string> => {
   const { text: protectedText, mathMap } = protectMath(text)
   const html = renderMarkdown(protectedText)
   return restoreMathHtml(html, mathMap)

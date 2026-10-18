@@ -16,19 +16,11 @@ from module_authorization.do.auth import AuthResponse, AuthLogoutRequest, SelfPr
 from common.config.db import db_cache
 from common.config.dynamic import get_settings
 from common.config.dynamic.schemas import TokenSettings
-from module_authorization.config.register import (
-    email_verify_enabled,
-    REGISTER_CODE_COOLDOWN_KEY,
-    REGISTER_CODE_COOLDOWN_SECONDS,
-    REGISTER_CODE_KEY,
-    REGISTER_CODE_LENGTH,
-    REGISTER_CODE_TTL_SECONDS,
-)
-# 邮件发送能力由本模块内置轻量 EmailService 提供(注册邮箱验证码)
-from module_authorization.service.email import EmailService
+from module_authorization.config.register import email_verify_enabled
+# 邮件/短信触达与验证码能力由 module_contact 提供(注册验证码收发经依赖注入调用)
+from module_contact.service.verify_code import VerifyCodeService
 
 import logging
-import secrets
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +32,17 @@ class AuthService:
         self,
         user_service: UserService,
         token_service: TokenService,
-        email_service: EmailService | None = None,
+        verify_code_service: VerifyCodeService | None = None,
     ):
         """
         初始化认证服务
         :param user_service: 用户服务对象
         :param token_service: 令牌服务对象
-        :param email_service: 邮件服务对象(注册邮箱验证码发送, 默认取全局单例)
+        :param verify_code_service: 验证码服务对象(module_contact 提供, 默认取全局单例)
         """
         self.user_service = user_service
         self.token_service = token_service
-        self.email_service = email_service or EmailService()
+        self.verify_code_service = verify_code_service or VerifyCodeService()
 
     async def register(
         self, user_create: UserCreate, code: str | None = None
@@ -65,7 +57,7 @@ class AuthService:
         if await email_verify_enabled():
             if not user_create.email:
                 raise ValueError("注册需要邮箱验证, 请填写邮箱")
-            await self._verify_register_code(user_create.email, code)
+            await self.verify_code_service.verify(user_create.email, code, scene="register")
         user = await self.user_service.add(user_create)
         if not user:
             raise ValueError("用户创建失败")
@@ -81,24 +73,8 @@ class AuthService:
         """
         if not await email_verify_enabled():
             raise ValueError("未开启注册邮箱验证")
-        # 发送冷却限制, 防止同一邮箱被频繁发送
-        cooldown_key = REGISTER_CODE_COOLDOWN_KEY.format(email=email)
-        if await db_cache.async_cache.get(cooldown_key):
-            raise ValueError("验证码已发送, 请稍后再试")
-        # 生成验证码并发送(先发送成功再落缓存, 发送失败可直接重试)
-        code = f"{secrets.randbelow(10 ** REGISTER_CODE_LENGTH):0{REGISTER_CODE_LENGTH}d}"
-        sent = await self.email_service.send_register_code(
-            email, code, REGISTER_CODE_TTL_SECONDS // 60
-        )
-        if not sent:
-            raise ValueError("验证码邮件发送失败, 请稍后重试")
-        await db_cache.async_cache.set(
-            REGISTER_CODE_KEY.format(email=email), code, ex=REGISTER_CODE_TTL_SECONDS
-        )
-        await db_cache.async_cache.set(
-            cooldown_key, "1", ex=REGISTER_CODE_COOLDOWN_SECONDS
-        )
-        return True
+        # 生成/冷却/发送/落缓存统一由 module_contact 验证码服务管理
+        return await self.verify_code_service.send(email, scene="register")
 
     async def login(self, username: str, password: str) -> AuthResponse:
         """
@@ -354,21 +330,3 @@ class AuthService:
         # 生成新令牌
         new_token = await self.token_service.create_token(token_request)
         return new_token
-
-    async def _verify_register_code(self, email: str, code: str | None) -> None:
-        """
-        校验注册邮箱验证码(校验通过后立即失效, 防止重复使用)
-        :param email: 注册邮箱
-        :param code: 用户提交的验证码
-        :raises: ValueError 如果验证码缺失或错误/已过期
-        """
-        if not code:
-            raise ValueError("请填写邮箱验证码")
-        key = REGISTER_CODE_KEY.format(email=email)
-        saved = await db_cache.async_cache.get(key)
-        # redis 客户端可能返回 bytes, 统一按字符串比较
-        if isinstance(saved, bytes):
-            saved = saved.decode()
-        if not saved or saved != code:
-            raise ValueError("验证码错误或已过期")
-        await db_cache.async_cache.delete(key)

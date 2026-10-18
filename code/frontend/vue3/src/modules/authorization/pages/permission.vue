@@ -1,7 +1,7 @@
 <template>
   <div p-4 md:p-6 w-full>
     <!-- 水墨页头 -->
-    <InkPageHead title="权限管理" sub="菜单与接口权限登记, 细粒度守门" seal="衡" />
+    <InkPageHead title="权限管理" sub="菜单与接口的细粒度授权" seal="衡" />
 
     <!-- 统一搜索栏: 多字段筛选(名称/类型/状态, 客户端过滤树) -->
     <TableSearchBar

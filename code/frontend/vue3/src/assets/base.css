@@ -21,18 +21,18 @@ body,
     --el-color-primary-light-9: #eef6ef;
     --el-color-primary-dark-2: #557f61;
 
-    /* 全局底色: 米白纸张 */
-    --el-bg-color: #fafaf5;
+    /* 全局底色: 米白纸张(微增绿意, 与白卡片拉开一档层次) */
+    --el-bg-color: #f7faf1;
     --el-bg-color-overlay: #ffffff;
-    --el-bg-color-page: #fafaf5;
-    --el-fill-color-blank: #fafaf5;
-    --el-fill-color-light: #f2f7f0;
-    --el-fill-color-lighter: #f7faf6;
+    --el-bg-color-page: #f7faf1;
+    --el-fill-color-blank: #f7faf1;
+    --el-fill-color-light: #eff5ea;
+    --el-fill-color-lighter: #f4f8f0;
 
     /* 边框: 淡绿灰(全局调淡一档, 边线退为背景色差) */
-    --el-border-color: #dbe5da;
-    --el-border-color-light: #e5ece4;
-    --el-border-color-lighter: #edf2ec;
+    --el-border-color: #d7e2d3;
+    --el-border-color-light: #e2ebe0;
+    --el-border-color-lighter: #eaf2e7;
 
     /* 文字: 深绿灰 */
     --el-text-color-primary: #3f5348;
@@ -41,15 +41,19 @@ body,
     /* 品牌色变量(自用, 是 uno.config.ts note-* shortcut 的唯一取值来源) */
     --note-green: #6b9e78;
     --note-green-deep: #557f61;
-    --note-paper: #fafaf5;
-    --note-soft: #f4f8f2;
+    --note-paper: #f7faf1;
+    --note-soft: #f1f6eb;
     --note-card: #ffffff;
-    --note-tint: #eef6ef;
-    --note-border: #e3ebe2;
+    --note-tint: #e9f3e8;
+    --note-border: #dee8da;
     --note-border-green: #a9c9b1;
     --note-text: #3f5348;
     --note-sub: #5a6b5f;
     --note-accent: #557f61;
+
+    /* 底部安全区高度(刘海屏 home indicator): 与主题无关仅声明一份,
+       供 FloatTools 等贴底元素经 getComputedStyle 读取避让 */
+    --note-safe-b: env(safe-area-inset-bottom, 0px);
 
     /* 阴影: 静止纸片影 / 悬浮抬升影
        首段 1px 光晕环替代实线边框: 远看是极淡的苔绿辉光, 不是描边 */
@@ -57,9 +61,9 @@ body,
     --note-shadow-hover: 0 0 0 1px var(--note-edge-soft), 0 8px 24px rgba(108, 191, 143, 0.22);
 
     /* 渐变(Hero/页头大区块) */
-    --note-grad-from: #e7f2e9;
-    --note-grad-via: #f4f8f2;
-    --note-grad-to: #ddeddf;
+    --note-grad-from: #e2f0e1;
+    --note-grad-via: #f1f6eb;
+    --note-grad-to: #d7e9d4;
 
     /* 吸顶毛玻璃底(须配 backdrop-blur) */
     --note-glass: rgba(244, 248, 242, 0.85);
@@ -360,9 +364,14 @@ html.dark .paper-sheet::after {
     --el-tag-border-radius: 6px;
 }
 
-/* ---- 按钮: 统一交互动效手感 ---- */
+/* ---- 按钮: 统一交互动效手感(只过渡合成器/低成本属性) ---- */
 .el-button {
-    transition: all 0.2s ease-out;
+    transition:
+        color 0.2s ease-out,
+        background-color 0.2s ease-out,
+        border-color 0.2s ease-out,
+        box-shadow 0.2s ease-out,
+        transform 0.2s ease-out;
 }
 
 /* ---- 按钮: 去描边, 用极淡光晕环+底色差定义形状 ----
@@ -479,9 +488,9 @@ html.dark ::selection {
     background: rgba(108, 191, 143, 0.3);
 }
 
-/* 键盘焦点: 苔绿柔光描边(不影响鼠标点击态) */
+/* 键盘焦点: 深苔绿描边(亮暗取 --note-green-deep, 对比度足够可辨; 不影响鼠标点击态) */
 :focus-visible {
-    outline: 2px solid var(--note-border-green);
+    outline: 2px solid var(--note-green-deep);
     outline-offset: 2px;
     border-radius: 6px;
 }

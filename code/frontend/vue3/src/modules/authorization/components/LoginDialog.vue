@@ -16,16 +16,18 @@
       <el-form ref="loginFormRef" :model="loginForm" :rules="loginRules" label-position="top"
         @submit.prevent="handleLogin">
         <el-form-item :label="$t('username')" prop="username">
-          <el-input v-model="loginForm.username" :placeholder="$t('username')" autocomplete="username" />
+          <el-input v-model="loginForm.username" :placeholder="$t('placeholder_username')" autocomplete="username"
+            :spellcheck="false" />
         </el-form-item>
 
-        <el-form-item label="密码" prop="password">
-          <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" autocomplete="current-password"
+        <el-form-item :label="$t('label_password')" prop="password">
+          <el-input v-model="loginForm.password" type="password" :placeholder="$t('placeholder_password')"
+            autocomplete="current-password"
             show-password />
         </el-form-item>
 
         <el-form-item>
-          <el-checkbox v-model="loginForm.remember">记住我</el-checkbox>
+          <el-checkbox v-model="loginForm.remember">{{ $t('remember_me') }}</el-checkbox>
         </el-form-item>
 
         <el-form-item>
@@ -54,6 +56,9 @@ import type {
   AuthLoginRequest,
   AuthResponse,
 } from '../types/auth';
+// 系统三语(中/英/日): 表单文案/校验/提示随语言切换
+import { i18n } from '@/common/i18n/language'
+const { t } = i18n.global
 
 
 // 定义组件属性
@@ -87,16 +92,16 @@ const loginForm = reactive({
   remember: false
 })
 
-// 表单验证规则
-const loginRules = {
+// 表单验证规则(computed: 校验文案随语言切换刷新)
+const loginRules = computed(() => ({
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' }
+    { required: true, message: t('rule_username_required'), trigger: 'blur' }
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码至少6位', trigger: 'blur' }
+    { required: true, message: t('rule_password_required'), trigger: 'blur' },
+    { min: 6, message: t('rule_password_min'), trigger: 'blur' }
   ]
-}
+}))
 
 // 关闭弹窗
 const handleClose = () => {
@@ -125,7 +130,7 @@ const handleLogin = async () => {
       } catch (error: unknown) {
         console.error('登录失败:', error)
         // 添加错误提示
-        ElMessage.error((error as { message?: string }).message || '登录失败，请检查用户名和密码')
+        ElMessage.error((error as { message?: string }).message || t('login_failed'))
       } finally {
         loading.value = false
       }

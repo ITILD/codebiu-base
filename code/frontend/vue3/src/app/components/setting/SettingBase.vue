@@ -20,7 +20,7 @@
     <SettingLanguage />
     <!-- 悬浮工具显隐: 隐藏页面右侧可拖动悬浮球(全屏/截图/隐藏入口) -->
     <div flex items-center gap-2>
-      <span w-20 shrink-0>悬浮工具</span>
+      <span w-20 shrink-0>{{ $t('float_tools') }}</span>
       <el-switch v-model="showFloatTools" />
     </div>
   </div>

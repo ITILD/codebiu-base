@@ -160,8 +160,8 @@ export default defineConfig({
       'shadow-note': 'shadow-[var(--note-shadow)]',
       // 阴影: 悬浮抬升影(配 hover:-translate-y-0.5 + note-transition)
       'shadow-note-hover': 'shadow-[var(--note-shadow-hover)]',
-      // 统一交互动效: 时长/缓动全站一致
-      'note-transition': 'transition-all duration-200 ease-out',
+      // 统一交互动效: 时长/缓动全站一致(显式列出属性, 不用 transition-all)
+      'note-transition': 'transition-colors transition-[box-shadow,transform,opacity] duration-200 ease-out',
       // 苔绿渐变(hero用)
       'bg-note-gradient': 'bg-gradient-to-br from-[var(--note-grad-from)] via-[var(--note-grad-via)] to-[var(--note-grad-to)]',
       // 毛玻璃纸底(吸顶头部用; 须配 backdrop-blur-md)
