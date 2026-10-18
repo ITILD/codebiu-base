@@ -1,0 +1,74 @@
+{
+    "//1": "调试启动配置: 调试单文件 / 后端 FastAPI(UBUNTU & WIN) / 前端 Vite",
+    "//2": "F5 默认启动第一个配置; 选 \"前后端一起 (全栈)\" 可一键启动全部服务",
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug single file (PYTHONPATH=src)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}/code/backend/server_py",
+            "python": "${workspaceFolder}/code/backend/server_py/.venv/bin/python",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/code/backend/server_py/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "▶UBUNTU Backend: app.py (server_py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/code/backend/server_py/src/app.py",
+            "cwd": "${workspaceFolder}/code/backend/server_py",
+            "python": "${workspaceFolder}/code/backend/server_py/.venv/bin/python",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/code/backend/server_py/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "▶ WIN Backend: app.py (server_py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/code/backend/server_py/src/app.py",
+            "cwd": "${workspaceFolder}/code/backend/server_py",
+            "python": "${workspaceFolder}/code/backend/server_py/.venv/Scripts/python.exe",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/code/backend/server_py/src"
+            },
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "▶ Frontend: pnpm run dev (vue3)",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "pnpm run dev",
+            "cwd": "${workspaceFolder}/code/frontend/vue3",
+            "env": {
+                "PATH": "/home/here/.local/share/fnm/aliases/default/bin:${env:PATH}"
+            }
+        }
+    ],
+    "compounds": [
+        {
+            "name": "前后端一起win (全栈)",
+            "configurations": [
+                "▶ WIN Backend: app.py (server_py)",
+                "▶ Frontend: pnpm run dev (vue3)"
+            ],
+            "stopAll": true
+        },
+        {
+            "name": "前后端一起ub (全栈)",
+            "configurations": [
+                "▶UBUNTU Backend: app.py (server_py)",
+                "▶ Frontend: pnpm run dev (vue3)"
+            ],
+            "stopAll": true
+        }
+    ]
+}

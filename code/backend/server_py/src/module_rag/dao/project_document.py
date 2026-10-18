@@ -1,0 +1,218 @@
+"""知识库模块 project_document 数据访问层"""
+
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select, func, update
+from common.utils.db.schema.pagination import PaginationParams
+from common.config.db import DaoRel
+from common.utils.fastapi_ex.exceptions import NotFoundError
+from module_rag.do.project_document import (
+    ProjectDocument,
+    ProjectDocumentCreate,
+    ProjectDocumentUpdate
+)
+
+class ProjectDocumentDao:
+    """项目文档数据访问对象"""
+
+    @DaoRel
+    async def add(
+        self,
+        document: ProjectDocumentCreate,
+        session: AsyncSession | None = None,
+    ) -> ProjectDocument:
+        """
+        新增项目文档记录
+        :param document: 项目文档创建数据
+        :param session: 可选数据库会话
+        :return: 新创建文档的对象
+        """
+        db_document = ProjectDocument.model_validate(
+            document.model_dump(exclude_unset=True)
+        )
+        session.add(db_document)
+        await session.flush()
+        return db_document
+
+    @DaoRel
+    async def delete(self, id: str, session: AsyncSession | None = None):
+        """
+        删除项目文档记录
+        :param id: 要删除的文档ID
+        :param session: 可选数据库会话
+        """
+        document = await session.get(ProjectDocument, id)
+        if not document:
+            raise NotFoundError(f"未找到ID为 {id} 的文档")
+        await session.delete(document)
+        await session.flush()
+
+    @DaoRel
+    async def update(
+        self,
+        document_id: str,
+        document: ProjectDocumentUpdate,
+        session: AsyncSession | None = None,
+    ):
+        """
+        更新项目文档记录
+        :param document_id: 要更新的文档ID
+        :param document: 文档更新数据
+        :param session: 可选数据库会话
+        """
+        update_data = document.model_dump(exclude_unset=True)
+        stmt = (
+            update(ProjectDocument)
+            .where(ProjectDocument.id == document_id)
+            .values(**update_data)
+        )
+        result = await session.exec(stmt)
+        if result.rowcount == 0:
+            raise NotFoundError(f"未找到ID为 {document_id} 的文档")
+        await session.flush()
+
+    @DaoRel
+    async def get(
+        self, id: str, session: AsyncSession | None = None
+    ) -> ProjectDocument | None:
+        """
+        查询单个项目文档
+        :param id: 要查询的文档ID
+        :param session: 可选数据库会话
+        :return: 文档对象，未找到返回None
+        """
+        return await session.get(ProjectDocument, id)
+
+    @DaoRel
+    async def list_all_ids(self, session: AsyncSession | None = None) -> list[str]:
+        """
+        查询全部文档ID(全库重向量化等运维任务按文档遍历使用)
+        :param session: 可选数据库会话
+        :return: 文档ID列表
+        """
+        result = await session.exec(select(ProjectDocument.id))
+        return list(result.all())
+
+    @DaoRel
+    async def list_by_entry_ids(
+        self,
+        entry_ids: list[str],
+        session: AsyncSession | None = None,
+    ) -> list[ProjectDocument]:
+        """
+        按文件条目ID批量查询文档(条目级浏览时联查文档口径信息)
+        :param entry_ids: 文件条目ID列表
+        :param session: 可选数据库会话
+        :return: 匹配的文档列表
+        """
+        if not entry_ids:
+            return []
+        statement = select(ProjectDocument).where(ProjectDocument.entry_id.in_(entry_ids))
+        result = await session.exec(statement)
+        return list(result.all())
+
+    @DaoRel
+    async def list_by_project(
+        self,
+        project_id: str,
+        pagination: PaginationParams,
+        session: AsyncSession | None = None,
+        name: str | None = None,
+        parse_status: str | None = None,
+    ) -> list[ProjectDocument]:
+        """
+        分页查询项目的文档列表(支持多字段过滤)
+        :param project_id: 项目ID
+        :param pagination: 分页参数
+        :param session: 可选数据库会话
+        :param name: 文档名称模糊匹配
+        :param parse_status: 解析状态精确过滤(pending/parsing/completed/failed)
+        :return: 文档列表
+        """
+        conditions = [ProjectDocument.project_id == project_id]
+        if name:
+            conditions.append(ProjectDocument.name.contains(name))
+        if parse_status:
+            conditions.append(ProjectDocument.parse_status == parse_status)
+
+        statement = (
+            select(ProjectDocument)
+            .where(*conditions)
+            .offset(pagination.offset)
+            .limit(pagination.limit)
+            .order_by(ProjectDocument.created_at.desc())
+        )
+        result = await session.exec(statement)
+        return result.all()
+
+    @DaoRel
+    async def list_all_by_project(
+        self,
+        project_id: str,
+        session: AsyncSession | None = None,
+    ) -> list[ProjectDocument]:
+        """
+        查询项目的全部文档列表(不分页，用于批量删除场景)
+        :param project_id: 项目ID
+        :param session: 可选数据库会话
+        :return: 文档列表
+        """
+        statement = (
+            select(ProjectDocument)
+            .where(ProjectDocument.project_id == project_id)
+            .order_by(ProjectDocument.created_at.desc())
+        )
+        result = await session.exec(statement)
+        return result.all()
+
+    @DaoRel
+    async def delete_by_project(
+        self,
+        project_id: str,
+        session: AsyncSession | None = None,
+    ) -> int:
+        """
+        按项目ID批量删除文档记录(物理文件与向量需由 service 层单独清理)
+        :param project_id: 项目ID
+        :param session: 可选数据库会话
+        :return: 删除的记录数
+        """
+        statement = (
+            select(ProjectDocument)
+            .where(ProjectDocument.project_id == project_id)
+        )
+        result = await session.exec(statement)
+        docs = result.all()
+        for doc in docs:
+            await session.delete(doc)
+        await session.flush()
+        return len(docs)
+
+    @DaoRel
+    async def count_by_project(
+        self,
+        project_id: str,
+        session: AsyncSession | None = None,
+        name: str | None = None,
+        parse_status: str | None = None,
+    ) -> int:
+        """
+        获取项目文档总数(与列表过滤条件保持一致)
+        :param project_id: 项目ID
+        :param session: 可选数据库会话
+        :param name: 文档名称模糊匹配
+        :param parse_status: 解析状态精确过滤
+        :return: 文档总数
+        """
+        conditions = [ProjectDocument.project_id == project_id]
+        if name:
+            conditions.append(ProjectDocument.name.contains(name))
+        if parse_status:
+            conditions.append(ProjectDocument.parse_status == parse_status)
+
+        statement = (
+            select(func.count())
+            .select_from(ProjectDocument)
+            .where(*conditions)
+        )
+        result = await session.exec(statement)
+        return result.one()

@@ -1,0 +1,179 @@
+<template>
+  <!-- 桌面端: 吸顶侧边栏(随页面滚动钉在导航下方, 超高时内部滚动) -->
+  <el-aside
+    v-if="isMd"
+    :width="isCollapse ? '64px' : '230px'"
+    transition-all
+    duration-300
+    class="sidebar-note bg-note-soft"
+    self-start
+    sticky
+    top-16
+    z-10
+    shrink-0
+  >
+    <!-- 注意: 必须用确定高度 h-app 而非 max-h-app —— 仅 max-height 的容器高度
+         对百分比解析是 indefinite, el-scrollbar 内部 wrap 的 height:100% 会
+         解析失败被内容撑开, 导致内部滚动条永远不出现 -->
+    <div flex flex-col h-app>
+      <!-- 折叠按钮(点击切换 抽屉式收窄/展开) -->
+      <div flex p-2 shrink-0 :class="isCollapse ? 'justify-center' : 'justify-end'">
+        <el-tooltip :content="isCollapse ? '展开菜单' : '收起菜单'" placement="right">
+          <el-button
+            :icon="isCollapse ? Expand : Fold"
+            circle
+            size="small"
+            text
+            bg-note-tint
+            @click="isCollapse = !isCollapse"
+          />
+        </el-tooltip>
+      </div>
+
+      <!-- 模块菜单(超出视口高度时内部滚动; min-h-0 允许 flex 子项收缩, 否则菜单撑开后无法滚动) -->
+      <el-scrollbar flex-1 min-h-0>
+        <el-menu
+          :default-active="routerStore.routerPath.now"
+          :router="true"
+          :collapse="isCollapse"
+          border-0
+          bg-transparent
+          :class="isCollapse ? 'px-0' : 'px-2'"
+        >
+          <template v-for="item in visibleMenuItems" :key="item.index">
+            <el-menu-item v-if="!item.children" :index="item.index">
+              <el-icon><component :is="item.icon" /></el-icon>
+              <template #title>{{ item.title }}</template>
+            </el-menu-item>
+
+            <el-sub-menu v-else :index="item.index">
+              <template #title>
+                <el-icon><component :is="item.icon" /></el-icon>
+                <span>{{ item.title }}</span>
+              </template>
+              <el-menu-item
+                v-for="child in item.children"
+                :key="child.index"
+                :index="child.index"
+              >
+                {{ child.title }}
+              </el-menu-item>
+            </el-sub-menu>
+          </template>
+        </el-menu>
+      </el-scrollbar>
+
+      <!-- 底部装饰小语(note-edge-t: 内阴影替代实线; 自定义类必须写进 class) -->
+      <div v-if="!isCollapse" class="note-edge-t" px-4 py-3 text-xs text-note-sub shrink-0>
+        🌿 记录每一份数据
+      </div>
+    </div>
+  </el-aside>
+
+  <!-- 移动端: 抽屉式侧边栏 -->
+  <el-drawer
+    v-model="sysSettingStore.sysStyle.isSidebarDrawerOpen"
+    :title="TITLE"
+    direction="ltr"
+    size="240px"
+    class="sidebar-drawer-note"
+  >
+    <el-menu
+      :default-active="routerStore.routerPath.now"
+      :router="true"
+      border-0
+      bg-transparent
+      @select="sysSettingStore.sysStyle.isSidebarDrawerOpen = false"
+    >
+      <template v-for="item in visibleMenuItems" :key="item.index">
+        <el-menu-item v-if="!item.children" :index="item.index">
+          <el-icon><component :is="item.icon" /></el-icon>
+          <template #title>{{ item.title }}</template>
+        </el-menu-item>
+
+        <el-sub-menu v-else :index="item.index">
+          <template #title>
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.title }}</span>
+          </template>
+          <el-menu-item v-for="child in item.children" :key="child.index" :index="child.index">
+            {{ child.title }}
+          </el-menu-item>
+        </el-sub-menu>
+      </template>
+    </el-menu>
+  </el-drawer>
+</template>
+
+<script lang="ts" setup>
+import { ref, watch } from 'vue'
+import { Expand, Fold } from '@element-plus/icons-vue'
+import { RouterStore } from '@/common/stores/router'
+import { SysSettingStore } from '@/common/stores/sys'
+import { useResponsive } from '@/common/composables/useResponsive'
+import { useVisibleMenu } from '@/app/composables/useMenu'
+
+const routerStore = RouterStore()
+const sysSettingStore = SysSettingStore()
+// 响应式断点: 常驻侧边栏仅平板及以上显示, 折叠态跟随桌面档
+const { isMd, isLg } = useResponsive()
+const TITLE = import.meta.env.VITE_GLOB_APP_TITLE
+// 菜单数据与权限过滤统一来自应用外壳层(app/config/menu.ts + app/composables/useMenu)
+const { visibleMenuItems } = useVisibleMenu()
+
+// 三档响应式折叠: 手机(<768)抽屉 / 平板(768-1023)默认折叠图标栏 / 桌面(>=1024)默认展开
+const isCollapse = ref(!isLg.value)
+// 跨断点(旋转/拉伸窗口)时重置为该档默认值
+watch(
+  () => isLg.value,
+  (v) => {
+    isCollapse.value = !v
+  }
+)
+
+// 升到平板及以上时关闭移动抽屉(已由常驻侧边栏接管)
+watch(
+  () => isMd.value,
+  (md) => {
+    if (md) sysSettingStore.sysStyle.isSidebarDrawerOpen = false
+  }
+)
+</script>
+<style scoped>
+/* 侧边栏: 淡绿纸底(bg-note-soft 已上提到模板原子类), 右缘不画线
+   —— 以与主区的底色差 + 极淡接缝光晕分区(多层内阴影无法原子化, 保留此处) */
+.sidebar-note {
+  box-shadow:
+    inset -6px 0 0 -5px rgba(107, 158, 120, 0.18),
+    inset -1px 0 0 var(--note-edge-soft);
+}
+
+/* 菜单项: 统一高度与圆角, 避免默认直角贴边的生硬感 */
+.sidebar-note :deep(.el-menu-item),
+.sidebar-note :deep(.el-sub-menu__title) {
+  height: 40px;
+  line-height: 40px;
+  border-radius: 8px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* 悬停: 淡绿底色 */
+.sidebar-note :deep(.el-menu-item:hover),
+.sidebar-note :deep(.el-sub-menu__title:hover) {
+  background-color: rgba(107, 158, 120, 0.1);
+}
+
+/* 选中: 绿色圆角高亮块(与设置页 tab 选中风格一致) */
+.sidebar-note :deep(.el-menu-item.is-active) {
+  background-color: rgba(107, 158, 120, 0.14);
+  color: var(--el-color-primary);
+  font-weight: 500;
+}
+
+/* 收缩态: 去掉水平内边距并居中图标, 修复折叠后图标偏移不齐 */
+.sidebar-note :deep(.el-menu--collapse .el-menu-item),
+.sidebar-note :deep(.el-menu--collapse .el-sub-menu__title) {
+  padding-inline: 0;
+  justify-content: center;
+}
+</style>

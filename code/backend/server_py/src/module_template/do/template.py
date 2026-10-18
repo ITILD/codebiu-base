@@ -1,0 +1,91 @@
+"""模板脚手架模块 template 表模型与请求/响应体定义"""
+
+from sqlmodel import Column, DateTime, Field, SQLModel
+from pydantic import field_validator
+
+from uuid import uuid4
+from datetime import datetime, timezone
+
+
+class TemplateBase(SQLModel):
+    """
+    模板基础模型(不含数据库表配置)
+    """
+
+    pid: str | None = Field(None, description="父级ID")
+    value: int = Field(default=0, description="数值字段")
+    name: str | None = Field( max_length=100, description="模板名称")
+    description: str | None = Field(
+        default=None, max_length=500, description="模板描述"
+    )
+    is_active: bool | None = Field(default=True, description="是否激活状态")
+
+
+class Template(TemplateBase, table=True):
+    """
+    模板数据库模型(对应数据库表)
+    """
+    __tablename__ = "template"
+    
+    id: str = Field(
+        default_factory=lambda: uuid4().hex,
+        primary_key=True,  # 主键
+        index=True,  # 索引
+        description="唯一标识符",
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+        description="创建时间",
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),  # 自动更新
+            nullable=False,  # 不允许为空
+        ),
+        description="最后更新时间",
+    )
+
+
+class TemplateCreate(TemplateBase):
+    """
+    创建模板的请求模型
+    """
+
+    pass
+
+
+class TemplateUpdate(TemplateBase):
+    """
+    更新模板的请求模型
+    """
+
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),  # 自动更新
+            nullable=False,  # 不允许为空
+        ),
+        description="最后更新时间",
+    )
+
+
+class TemplateBatchDelete(SQLModel):
+    """
+    批量删除模板的请求模型
+    """
+
+    ids: list[str] = Field(description="要删除的模板ID列表", min_length=1, max_length=200)
+    
+    @field_validator('ids')
+    @classmethod
+    def validate_ids(cls, v: list[str]) -> list[str]:
+        """校验批量删除的ID列表:不允许空或纯空白ID
+        可选：校验 ID 格式（如 UUID、数字字符串等）
+        """
+        if any(not item.strip() for item in v):
+            raise ValueError("ID 不能为空或仅包含空白字符")
+        return v

@@ -1,0 +1,131 @@
+"""知识库模块 project_member 业务逻辑层"""
+
+from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
+from common.utils.fastapi_ex.exceptions import ConflictError, NotFoundError
+from module_rag.do.project_member import (
+    ProjectMember,
+    ProjectMemberCreate,
+    ProjectMemberUpdate,
+    ProjectMemberResponse,
+    MyProjectResponse,
+    RagRole,
+)
+from module_rag.dao.project_member import ProjectMemberDao
+from module_rag.dao.project_dept import ProjectDeptDao
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class ProjectMemberService:
+    """项目成员服务(角色存成员表,项目内鉴权按档位判断,见 dependencies/permission.py)"""
+
+    def __init__(
+        self,
+        member_dao: ProjectMemberDao | None = None,
+        dept_auth_dao: ProjectDeptDao | None = None,
+    ):
+        """依赖注入构造器:初始化所需的数据访问对象"""
+        self.member_dao = member_dao or ProjectMemberDao()
+        # 部门授权计数(保底校验时部门授权来源的 admin 也计入)
+        self.dept_auth_dao = dept_auth_dao or ProjectDeptDao()
+
+    async def _assert_admin_remaining(
+        self,
+        project_id: str,
+        exclude_member_id: str | None = None,
+    ) -> None:
+        """移除/降级后必须仍有激活的 project_admin(直连成员或部门授权来源均计入, v4 3.2)"""
+        direct = await self.member_dao.count_admins(
+            project_id, exclude_member_id=exclude_member_id
+        )
+        via_dept = await self.dept_auth_dao.count_admins(project_id)
+        if direct + via_dept == 0:
+            raise ConflictError("必须至少保留一个项目管理员(project_admin)")
+
+    async def add(self, member: ProjectMemberCreate) -> str:
+        """
+        添加项目成员
+        :param member: 项目成员创建数据
+        :return: 创建的项目成员ID
+        """
+        existing = await self.member_dao.get_by_user_and_project(member.user_id, member.project_id)
+        if existing:
+            raise ConflictError(f"用户 {member.user_id} 已是项目 {member.project_id} 的成员")
+        return await self.member_dao.add(member)
+
+    async def delete(self, member_id: str):
+        """
+        移除项目成员(目标是 project_admin 时校验保底, 否则 409)
+        :param member_id: 项目成员ID
+        """
+        member = await self.member_dao.get(member_id)
+        if member is None:
+            raise NotFoundError(f"未找到ID为 {member_id} 的项目成员")
+        if member.role == RagRole.PROJECT_ADMIN:
+            await self._assert_admin_remaining(
+                member.project_id, exclude_member_id=member_id
+            )
+        await self.member_dao.delete(member_id)
+
+    async def update(self, member_id: str, member: ProjectMemberUpdate):
+        """
+        更新项目成员角色(将 project_admin 降级时校验保底, 否则 409)
+        :param member_id: 项目成员ID
+        :param member: 项目成员更新数据
+        """
+        if member.role is not None and member.role not in RagRole.PROJECT_ROLES:
+            raise ValueError(
+                f"无效的角色 '{member.role}'，允许的角色: {'/'.join(RagRole.PROJECT_ROLES)}"
+            )
+        if member.role is not None and member.role != RagRole.PROJECT_ADMIN:
+            existing = await self.member_dao.get(member_id)
+            if existing is None:
+                raise NotFoundError(f"未找到ID为 {member_id} 的项目成员")
+            if existing.role == RagRole.PROJECT_ADMIN:
+                await self._assert_admin_remaining(
+                    existing.project_id, exclude_member_id=member_id
+                )
+        await self.member_dao.update(member_id, member)
+
+    async def get(self, member_id: str) -> ProjectMember | None:
+        """
+        获取项目成员详情
+        :param member_id: 项目成员ID
+        :return: 项目成员对象
+        """
+        return await self.member_dao.get(member_id)
+
+    async def list_by_project(
+        self, project_id: str, pagination: PaginationParams,
+        role: str | None = None,
+        user_keyword: str | None = None,
+    ) -> PaginationResponse:
+        """
+        分页获取项目成员列表(支持角色/用户关键字过滤)
+        :param project_id: 项目ID
+        :param pagination: 分页参数
+        :param role: 项目角色精确过滤(owner/admin/editor/viewer)
+        :param user_keyword: 用户名/昵称模糊过滤
+        :return: 分页项目成员列表
+        """
+        items = await self.member_dao.list_by_project(
+            project_id, pagination, role=role, user_keyword=user_keyword
+        )
+        total = await self.member_dao.count_by_project(
+            project_id, role=role, user_keyword=user_keyword
+        )
+        return PaginationResponse.create(items, total, pagination)
+
+    async def list_my_projects(
+        self, user_id: str, pagination: PaginationParams
+    ) -> PaginationResponse:
+        """
+        获取我参与的项目列表（前端展示"我参与的项目及我的身份"）
+        :param user_id: 用户ID
+        :param pagination: 分页参数
+        :return: 分页项目列表
+        """
+        items = await self.member_dao.list_my_projects(user_id, pagination)
+        total = await self.member_dao.count_my_projects(user_id)
+        return PaginationResponse.create(items, total, pagination)

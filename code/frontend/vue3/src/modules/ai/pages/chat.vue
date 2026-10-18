@@ -1,0 +1,288 @@
+<template>
+  <div flex flex-col h-app w-full bg-note-paper overflow-hidden>
+    <!-- 通用 AI 聊天: 模型选择 + 富文本消息流(markdown/公式/图表) + 可中断流式 -->
+    <!-- 消息流 -->
+    <ChatMessageList
+      ref="messageListRef"
+      :messages="messages"
+      :streaming-message-id="streamingMessageId"
+      flex-1
+    >
+      <!-- 空状态: 问候 + 建议问题卡片 -->
+      <template #empty>
+        <div class="min-h-[60%]" flex flex-col items-center justify-center py-8 text-center>
+          <div w-16 h-16 rounded-2xl bg-note-tint flex-center shadow-note mb-4>
+            <el-icon :size="30" text-note-green><ChatDotRound /></el-icon>
+          </div>
+          <h2 text-xl font-bold text-note>AI 助手</h2>
+          <p mt-1 text-sm text-note-sub>选择模型，支持 Markdown、公式与图表渲染</p>
+          <div grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-8 w-full max-w-lg>
+            <button
+              v-for="s in suggestions" :key="s.label"
+              flex items-center gap-3 p-3.5 rounded-xl bg-note-card text-left
+              hover:shadow-note hover:-translate-y-0.5 transition-all
+              @click="applySuggestion(s.question)"
+            >
+              <div w-8 h-8 rounded-lg bg-note-tint flex-center shrink-0>
+                <el-icon :size="16" text-note-green><component :is="s.icon" /></el-icon>
+              </div>
+              <div min-w-0>
+                <div text-sm font-medium text-note>{{ s.label }}</div>
+                <div text-xs text-note-sub truncate>{{ s.question }}</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </template>
+    </ChatMessageList>
+
+    <!-- 输入区 -->
+    <div px-3 md:px-4 pb-3 md:pb-4>
+      <div max-w-3xl mx-auto>
+        <ChatComposer
+          v-model="inputMessage"
+          :is-sending="isSending"
+          :disabled="!model_id"
+          :hint="inputHint"
+          @send="handleSend"
+          @stop="handleStop"
+        />
+        <!-- 输入框下方选项: 模型选择 + 上下文 token 统计 + 清空对话 -->
+        <div flex flex-wrap items-center gap-2 mt-2 px-1>
+          <LLMSelect
+            v-model:model-id="model_id"
+            :model-list="tableData"
+            :disabled="isSending"
+            size="small"
+            @change="handleModelChange"
+          />
+          <!-- 上下文历史 token 统计(发送给模型的上下文汇总) -->
+          <span
+            v-if="countedMessageCount > 0"
+            flex items-center gap-1 text-xs text-note-sub select-none
+          >
+            <el-icon :size="13"><DataAnalysis /></el-icon>
+            上下文 {{ contextTokens }} tokens · {{ countedMessageCount }} 条
+          </span>
+          <el-button
+            text
+            size="small"
+            type="danger"
+            :disabled="messages.length === 0 || isSending"
+            @click="clearMessages"
+          >
+            清空对话
+          </el-button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ChatDotRound, EditPen, DataAnalysis, Cpu, List } from '@element-plus/icons-vue'
+import type { PaginationParams, PaginationResponse } from '@/common/types/common'
+import type { ModelConfig } from '../types/model_config'
+import type { ChatMessageWithBlocks } from '@/common/types/chat'
+import { listModelConfigs } from '../api/model_config'
+import { countTokens, sendChatMessageAguiStream } from '../api/chat'
+import { useAguiMessages } from '@/common/composables/useAguiMessages'
+import LLMSelect from '../components/LLMSelect.vue'
+import ChatMessageList from '@/common/components/chat/ChatMessageList.vue'
+import ChatComposer from '@/common/components/chat/ChatComposer.vue'
+
+// ===== 模型配置 =====
+const pagination = ref<PaginationParams>({ page: 1, size: 50 })
+const model_id = ref('')
+const tableData = ref<ModelConfig[]>([])
+
+// ===== 聊天状态 =====
+const messages = ref<ChatMessageWithBlocks[]>([])
+const inputMessage = ref('')
+const isSending = ref(false)
+const streamingMessageId = ref<string | null>(null)
+const messageListRef = ref<InstanceType<typeof ChatMessageList>>()
+
+// 停止生成(中止 SSE)
+let abortController: AbortController | null = null
+let stopRequested = false
+
+// ===== token 统计(输入/输出/上下文历史, 计数口径与后端一致) =====
+// 输入草稿 token 数(防抖统计, null=未统计/空)
+const draftTokenCount = ref<number | null>(null)
+let draftCountTimer: ReturnType<typeof setTimeout> | null = null
+
+// 输入草稿变化: 停止输入 500ms 后向后端请求计数(避免逐键请求)
+watch(inputMessage, (val) => {
+  if (draftCountTimer) clearTimeout(draftCountTimer)
+  if (!val.trim()) {
+    draftTokenCount.value = null
+    return
+  }
+  draftCountTimer = setTimeout(async () => {
+    try {
+      const res = await countTokens([val])
+      // 停留期间内容又变化时丢弃过期结果
+      if (val === inputMessage.value) draftTokenCount.value = res.counts[0] ?? 0
+    } catch { /* 统计失败静默, 不影响聊天 */ }
+  }, 500)
+})
+
+/** 单条文本 token 计数(失败返回 null, 不影响聊天主流程) */
+const countTextTokens = async (text: string): Promise<number | null> => {
+  if (!text) return 0
+  try {
+    const res = await countTokens([text])
+    return res.counts[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+// 上下文历史汇总: 已统计消息的 token 合计与条数(发送给模型的上下文)
+const contextTokens = computed(() =>
+  messages.value.reduce((sum, m) => sum + (m.tokenCount ?? 0), 0)
+)
+const countedMessageCount = computed(
+  () => messages.value.filter((m) => m.tokenCount != null).length
+)
+
+// 输入区提示: 未选模型提示选模型; 有草稿时显示草稿 token 数; 否则回默认快捷键提示
+const inputHint = computed(() => {
+  if (!model_id.value) return '请先选择模型'
+  return draftTokenCount.value != null ? `输入 ${draftTokenCount.value} tokens` : ''
+})
+
+// 空状态建议问题(点击即发送)
+const suggestions = [
+  { label: '解释概念', question: '用通俗的语言解释一下什么是向量数据库', icon: markRaw(Cpu) },
+  { label: '总结归纳', question: '帮我总结最近的工作进展，输出为要点列表', icon: markRaw(List) },
+  { label: '撰写文稿', question: '帮我起草一份项目周报模板', icon: markRaw(EditPen) },
+  { label: '数据分析', question: '用 mermaid 画一个用户注册流程图', icon: markRaw(DataAnalysis) },
+]
+
+const handleModelChange = (modelId: string) => {
+  console.log('模型已切换至:', modelId)
+}
+
+// 清空对话
+const clearMessages = () => {
+  messages.value = []
+  streamingMessageId.value = null
+}
+
+// 点击建议问题直接发送
+const applySuggestion = (question: string) => {
+  inputMessage.value = question
+  handleSend()
+}
+
+// ===== 发送/停止(AG-UI 协议) =====
+// AG-UI 事件聚合器: 流式期间把事件聚合为 content/blocks
+const {
+  message: aguiMessage,
+  applyEvent: applyAguiEvent,
+  reset: resetAguiMessage,
+} = useAguiMessages()
+
+const handleSend = async () => {
+  const message = inputMessage.value.trim()
+  if (!message || !model_id.value || isSending.value) return
+
+  // 追加用户消息(异步补充 token 统计)
+  const userMsg = reactive<ChatMessageWithBlocks>({
+    id: `${Date.now()}`,
+    chatId: '',
+    role: 'user',
+    content: message,
+    timestamp: new Date(),
+  })
+  messages.value.push(userMsg)
+  countTextTokens(message).then((c) => { userMsg.tokenCount = c })
+  inputMessage.value = ''
+
+  // 助手消息占位(流式填充正文与过程区块)
+  const assistantMsg = reactive<ChatMessageWithBlocks>({
+    id: `${Date.now() + 1}`,
+    chatId: '',
+    role: 'assistant',
+    content: '',
+    timestamp: new Date(),
+    isStreaming: true,
+    blocks: [],
+  })
+  messages.value.push(assistantMsg)
+  streamingMessageId.value = assistantMsg.id
+  isSending.value = true
+  stopRequested = false
+  abortController = null
+  resetAguiMessage()
+
+  // 结束收尾(幂等)
+  const finishStream = () => {
+    assistantMsg.isStreaming = false
+    streamingMessageId.value = null
+    isSending.value = false
+    if (!assistantMsg.content && !assistantMsg.blocks?.length) {
+      // 兜底文案属占位提示(非模型输出), 不计入 token 统计
+      assistantMsg.content = stopRequested ? '（已停止生成）' : '（未收到回复，请重试）'
+    } else if (assistantMsg.content) {
+      // 模型输出完成后异步补充 token 统计(停止生成时统计已生成的部分)
+      countTextTokens(assistantMsg.content).then((c) => { assistantMsg.tokenCount = c })
+    }
+    messageListRef.value?.scrollToBottom(true)
+  }
+
+  try {
+    await sendChatMessageAguiStream(
+      {
+        model_id: model_id.value,
+        // 携带历史上下文(排除流式中的占位消息)
+        messages: messages.value
+          .filter((m) => !m.isStreaming)
+          .map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
+        streaming: true,
+      },
+      {
+        // 事件聚合 → 同步到助手占位消息
+        onEvent: (event) => {
+          applyAguiEvent(event)
+          assistantMsg.content = aguiMessage.content
+          assistantMsg.blocks = aguiMessage.blocks
+        },
+        onError: (error: string) => {
+          if (!stopRequested) assistantMsg.content = `> [错误] ${error}`
+        },
+        onComplete: () => {},
+        onController: (controller: AbortController) => {
+          abortController = controller
+        },
+      },
+    )
+  } catch (error) {
+    console.error('发送消息失败:', error)
+    if (!stopRequested) assistantMsg.content = '发送失败，请重试'
+  } finally {
+    finishStream()
+  }
+}
+
+// 停止生成(中止 SSE 请求)
+const handleStop = () => {
+  stopRequested = true
+  abortController?.abort()
+}
+
+// 加载模型配置列表(默认选中第一个)
+onMounted(async () => {
+  // 仅加载对话类模型配置(过滤掉 asr/tts/ocr 等其它类型)
+  const response: PaginationResponse<ModelConfig> = await listModelConfigs({
+    ...pagination.value,
+    model_type: 'chat',
+  } as PaginationParams)
+  tableData.value = response.items
+  if (response.items.length > 0) {
+    model_id.value = response.items[0].id
+  }
+})
+</script>

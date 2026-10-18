@@ -1,0 +1,197 @@
+"""AI 模型接入模块 model_config 表模型与请求/响应体定义"""
+
+from sqlmodel import Column, DateTime, Field, SQLModel, JSON
+from sqlalchemy import Enum as SAEnum
+from uuid import uuid4
+from datetime import datetime, timezone
+from enum import StrEnum
+from module_ai.utils.llm.types import ModelType, ModelServerType
+from pydantic import model_validator
+
+
+class ModelScope(StrEnum):
+    """模型可见/归属范围: 公共、部门、个人"""
+
+    PUBLIC = "public"
+    DEPT = "dept"
+    USER = "user"
+
+
+class ModelConfigBase(SQLModel):
+    """
+    模型配置基础模型
+    """
+
+    # 枚举字段以 VARCHAR(native_enum=False) 存储(存量库列为 varchar, 避免 PG enum 类型不匹配),
+    # values_callable 按枚举 value 存取, 读取时自动转回枚举实例
+    model_type: ModelType = Field(
+        ModelType.CHAT,
+        sa_type=SAEnum(ModelType, native_enum=False, length=20, values_callable=lambda e: [m.value for m in e]),
+        description="模型类型",
+    )
+    # type openai  vllm 枚举
+    server_type: ModelServerType = Field(
+        ModelServerType.OPENAI,
+        sa_type=SAEnum(ModelServerType, native_enum=False, length=30, values_callable=lambda e: [m.value for m in e]),
+        description="模型服务类型",
+    )
+    # 模型标识
+    model: str = Field(..., description="模型标识名称")
+    url: str | None = Field(None, description="API基础URL")
+    api_key: str | None = Field(None, description="API访问密钥")
+    # 归属范围: public=所有人可看/可用, dept=所属部门及以下可见, user=仅本人可见
+    scope: ModelScope = Field(
+        ModelScope.USER,
+        sa_type=SAEnum(ModelScope, native_enum=False, length=20, values_callable=lambda e: [m.value for m in e]),
+        description="归属范围(public/dept/user)",
+    )
+    # 归属部门ID(scope=dept 时必填)
+    dept_id: str | None = Field(None, description="归属部门ID(scope=dept 时使用)")
+    # 是否为该模型类型的默认公共模型(scope=public 且同类型唯一)
+    is_default: bool = Field(default=False, description="是否为该类型默认公共模型")
+    # 是否生效: 不生效的模型(如启动 seed 未启用/管理员手动停用)前端灰色显示且不可被使用
+    is_active: bool = Field(default=True, description="是否生效(不生效时灰色显示且不可用)")
+    # 显示名称: 用于区分同名但来源/配置不同的模型(留空取 model)
+    display_name: str | None = Field(None, max_length=100, description="显示名称(区分同名模型)")
+
+    # 成本
+    pay_in: float | None = Field(0.0, ge=0, description="模型调用成本")
+    pay_out: float | None = Field(0.0, ge=0, description="模型输出成本")
+
+    # 配置
+    input_tokens: int | None = Field(8192, description="输入最大token数")
+    out_tokens: int | None = Field(
+        8192, gt=0, description="生成最大token数/向量化模型是维度"
+    )
+    temperature: float | None = Field(0.7, ge=0, le=2, description="生成温度系数")
+    timeout: int | None = Field(60, gt=0, description="请求超时时间(秒)")
+    no_think: bool | None = Field(False, description="是否禁用思考 默认否不考虑")
+    # 其余配置统一放在json字段中,使用时遍历
+    extra: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),  # ！
+        description="额外配置",
+    )
+
+    @model_validator(mode='before')
+    @classmethod
+    def set_default_url(cls, data) -> dict:
+        """在验证前根据 server_type 设置默认 url(非 dict 输入原样返回)"""
+        if not isinstance(data, dict):
+            return data
+        server_type = data.get("server_type", ModelServerType.OPENAI)
+        url = data.get("url")
+
+        # 仅当 url 未提供时才设置默认值
+        if url is None:
+            if server_type == ModelServerType.OPENAI:
+                data["url"] = "https://api.openai.com/v1"
+            elif server_type == ModelServerType.DASHSCOPE:
+                data["url"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            elif server_type == ModelServerType.VLLM:
+                data["url"] = "http://localhost:8000/v1"
+            elif server_type == ModelServerType.AWS:
+                data["url"] = "https://bedrock-runtime.us-east-1.amazonaws.com"
+            elif server_type == ModelServerType.OLLAMA:
+                data["url"] = "http://localhost:11434"
+
+        return data
+
+
+class ModelConfig(ModelConfigBase, table=True):
+    """
+    模型配置数据库模型
+    """
+    __tablename__ = "model_config"
+    
+    user_id: str = Field(..., description="用户ID")
+    id: str = Field(
+        default_factory=lambda: uuid4().hex,
+        primary_key=True,
+        index=True,
+        description="唯一标识符",
+    )
+    # 最近校验结果(创建/更新后由后台自动校验回写, 前端展示能力标签)
+    check_valid: bool | None = Field(None, description="最近一次校验是否可用")
+    check_format: bool | None = Field(None, description="最近一次校验是否支持格式化输出(仅chat类)")
+    checked_at: datetime | None = Field(
+        None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+        description="最近一次校验时间",
+    )
+    # 各能力测试明细(capability -> {ok/detail/error/elapsed/checked_at}), 由能力测试回写, 前端能力标签常驻展示
+    check_result: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description="能力测试明细(JSON: capability -> {ok, detail, error, elapsed, checked_at})",
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+        description="创建时间",
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
+            nullable=False,
+        ),
+        description="最后更新时间",
+    )
+
+
+class ModelConfigCreateRequest(ModelConfigBase):
+    """
+    创建模型配置的请求模型
+    """
+
+    pass
+
+
+class ModelConfigCreate(ModelConfigCreateRequest):
+    """
+    创建模型配置的添加模型
+    """
+
+    user_id: str = Field(..., description="用户ID")
+
+
+class ModelConfigUpdate(SQLModel):
+    """
+    更新模型配置的请求模型
+    """
+
+    model_type: ModelType | None = None
+    # type openai  vllm 枚举
+    server_type: ModelServerType | None = None
+    # 模型标识
+    model: str | None = None
+    url: str | None = None
+    api_key: str | None = None
+    # 归属范围/部门/默认/显示名
+    scope: ModelScope | None = None
+    dept_id: str | None = None
+    is_default: bool | None = None
+    is_active: bool | None = None
+    display_name: str | None = None
+
+    # 成本
+    pay_in: float | None = None
+    pay_out: float | None = None
+
+    # 配置
+    input_tokens: int | None = None
+    out_tokens: int | None = None
+    temperature: float | None = None
+    timeout: int | None = None
+    no_think: bool | None = None
+    # 其余配置统一放在json字段中,使用时遍历
+    extra: dict | None = None
+
+    # 最近校验结果(仅由后台自动校验回写, 前端不直接提交)
+    check_valid: bool | None = None
+    check_format: bool | None = None
+    checked_at: datetime | None = None
+    # 能力测试明细(仅由能力测试接口/后台校验回写, 前端不直接提交)
+    check_result: dict | None = None

@@ -1,0 +1,210 @@
+import { fileURLToPath, URL } from 'node:url'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import { defineConfig, loadEnv } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import vueDevTools from 'vite-plugin-vue-devtools'
+// 开发插件
+import VueRouter from 'unplugin-vue-router/vite'// 自动引入路由
+import AutoImport from 'unplugin-auto-import/vite' //自动导入 API
+import Components from 'unplugin-vue-components/vite'//自动导入组件
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers';
+import { VueRouterAutoImports } from 'unplugin-vue-router'
+import UnoCSS from 'unocss/vite'// css 辅助
+import Icons from 'unplugin-icons/vite'//图标
+import IconsResolver from 'unplugin-icons/resolver' //图标插件
+// 代码根路径
+import path from 'path'
+const pathSrc = path.resolve(__dirname, 'src')
+// 打包时从 package.json 读取版本号: 注入 __APP_VERSION__ 常量 + 构建产物 version.json
+const pkgVersion = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')).version as string
+// 构建结束把版本写入产物根目录 version.json, 供线上前端轮询检测新版本
+const versionFilePlugin = {
+  name: 'write-version-file',
+  apply: 'build' as const,
+  closeBundle() {
+    mkdirSync(resolve(__dirname, 'dist'), { recursive: true })
+    writeFileSync(
+      resolve(__dirname, 'dist', 'version.json'),
+      JSON.stringify({ version: pkgVersion }),
+    )
+  },
+}
+// 代理
+import { createProxy } from './tools/vite/proxy'; // 代理
+import { killPort } from './tools/vite/kill_port';
+// https://vite.dev/config/
+export default defineConfig(
+  ({ mode }) => {
+    const env = loadEnv(mode, process.cwd(), '');
+    // console.log('test_', env.VITE_PORT)
+    killPort(env.VITE_PORT)
+
+    const proxys = createProxy(JSON.parse(env.VITE_PROXY as string) as string[][])
+    return {
+      // 设置基础路径
+      base: env.BASE_URL,
+
+      // 打包时注入 package.json 版本号(运行时与 version.json 比对判断是否有新版本)
+      define: {
+        __APP_VERSION__: JSON.stringify(pkgVersion),
+      },
+
+      // 插件配置
+      plugins: [
+        versionFilePlugin,
+        vue(),
+        // 自动路由(特性/模块化架构):
+        // 1. src/pages            —— 全局页面(首页/后台工作台/账户设置/404 等)
+        // 2. src/modules/*/pages  —— 各业务模块页面, 按模块规范生成路由 /<模块名>/<页面>,
+        //    如 src/modules/authorization/pages/user.vue -> /authorization/user
+        //    页面与所在模块的 api/components/types 同目录, 删除模块文件夹即删除整个功能
+        VueRouter({
+          routesFolder: [
+            'src/pages',
+            {
+              src: 'src/modules',
+              // 匹配 pages 下任意层级页面(插件会追加 .vue 扩展名, 末段须为 *,
+              // 否则 **.vue 无法跨目录, pages 子文件夹内的页面不会被注册)
+              filePatterns: '**/pages/**/*',
+              path: (file) => {
+                // D:/.../src/modules/<模块>/pages/<页面>.vue -> <模块>/<页面>.vue
+                const posixFile = file.replace(/\\/g, '/')
+                const rest = posixFile.slice(posixFile.lastIndexOf('src/modules') + 'src/modules'.length + 1)
+                return rest.replace('/pages/', '/')
+              },
+            },
+          ],
+          // 路由 meta 标记(登录拦截与侧边栏显示的依据):
+          // 1. 首页与 404 为公开页, 不加标记
+          // 2. 前台应用模块(rag 知识库问答)标记 app: 需登录, 但无侧边栏,
+          //    从首页直接进入, 模块内孙页面导航由各模块页面自行承担
+          // 3. 其余(后台工作台/账户设置/后台管理模块页面)标记 admin: 需登录 + 显示侧边栏,
+          //    仅经头像下拉"后台管理"入口可达
+          extendRoute: (route) => {
+            const file = (route.component ?? '').replace(/\\/g, '/')
+            const isPublic = file.endsWith('/src/pages/index.vue') || file.includes('/[..all].vue')
+            const isMainApp = /\/src\/modules\/rag\//.test(file)
+            if (file && !isPublic) route.addToMeta(isMainApp ? { app: true } : { admin: true })
+            // 独立页面(如账户设置): 属后台路由(需登录), 但页面自带导航, 不渲染侧边栏
+            if (file.endsWith('/src/pages/setting.vue')) route.addToMeta({ standalone: true })
+            // 版本信息页(系统介绍+版本时间线): 属后台路由(需登录), 页面自带布局, 不渲染侧边栏
+            if (file.endsWith('/src/pages/version.vue')) route.addToMeta({ standalone: true })
+          },
+        }),
+        vueDevTools(),
+
+        // 辅助导入和设定 tailwindcss 等 css 框架
+        UnoCSS(),
+
+        // Auto-import Element Plus APIs (ElMessage, ElNotification, etc.)
+        AutoImport({
+          // 自动导入 Vue 相关函数，如：ref, reactive, toRef 等
+          imports: ['vue', VueRouterAutoImports, 'pinia'],
+          // composition API 函数（例如 ElMessage, ElLoading
+          resolvers: [ElementPlusResolver()
+
+          ],
+          dts: path.resolve(pathSrc, 'auto-imports.d.ts')
+        }),
+
+        // Auto-import Element Plus components from templates
+        Components({
+          // 自动注册全局公共组件(模板中无需 import):
+          // src/common/components —— 与业务无关的通用组件(TableSearchBar/chat/ide/icons)
+          // src/app/components    —— 应用壳组件(SysHeader/SysSidebar/SysFooter/设置面板)
+          // 业务模块私有组件放在 src/modules/*/components, 使用时显式 import
+          dirs: ['src/common/components', 'src/app/components'],
+          resolvers: [
+            // https://icones.netlify.app/ 自动注册图标组件“前缀-使用的图标库名称-图标名”  <i-ep-edit />
+            IconsResolver({
+              // prefix: 'Icon', // 修改前缀 默认 i
+              enabledCollections: ['ep'] // 指定需要自动导入的图标库
+            }),
+            //自动导入 Element Plus 组件
+            ElementPlusResolver(
+              // 表示自动导入组件时，同步引入其对应的 CSS 样式文件。
+              { importStyle: 'css' })
+          ],
+          dts: path.resolve(pathSrc, 'components.d.ts'), // 组件类型声明文件位置
+          // 排除 MonacoEditor 组件(由页面 defineAsyncComponent 异步加载, 避免打进主包)
+          exclude: [/BaseMonacoEdit\.vue$/],
+        }),
+        Icons({ autoInstall: true }), //自动下载图标库 必须在 Components 之后或独立存在
+
+      ],
+      resolve: {
+        alias: {
+          '@': fileURLToPath(new URL('./src', import.meta.url))
+        },
+      },
+
+      // 开发服务设置
+      server: {
+        port: Number(env.VITE_PORT),
+        strictPort: true,
+        host: '0.0.0.0',
+        allowedHosts: true, // 允许所有 Host
+        headers: {
+          'Access-Control-Allow-Origin': '*'
+        },
+        // 代理
+        proxy: proxys
+      },
+
+      // 构建产物预览服务(与开发服务同套代理, 便于绕开 dev 预构建直接验证 dist)
+      preview: {
+        proxy: proxys
+      },
+
+      // 生产构建: 体积/缓存优化
+      build: {
+        // 现代浏览器目标: 减少语法降级与 helper 体积
+        target: 'es2020',
+        cssCodeSplit: true,
+        // 无需 gzip 体积统计, 加快构建
+        reportCompressedSize: false,
+        // 重型库已拆为独立 chunk(见下), 调高阈值避免无谓告警
+        chunkSizeWarningLimit: 1200,
+        rollupOptions: {
+          output: {
+            // 分包策略: 变更频率低的大库独立成块, 利于长效缓存;
+            // 页面本身已由 unplugin-vue-router 懒加载, 此处只切第三方依赖
+            manualChunks(id: string) {
+              if (!id.includes('node_modules')) return
+              // Vue 全家桶(最高频, 单独缓存)
+              if (/[\\/]node_modules[\\/](@vue|vue|vue-router|pinia|vue-i18n|@vueuse)[\\/]/.test(id)) {
+                return 'vue-vendor'
+              }
+              if (id.includes('element-plus') || id.includes('@element-plus')) {
+                return 'element-plus'
+              }
+              // Mermaid 及其图形依赖(聊天/导出时动态加载)
+              if (/[\\/]node_modules[\\/](mermaid|cytoscape|d3|d3-[^\\/]+|dagre[^\\/]*|elkjs|roughjs|khroma|@viz-js)[\\/]/.test(id)) {
+                return 'mermaid'
+              }
+              if (id.includes('monaco-editor')) return 'monaco'
+              if (id.includes('katex')) return 'katex'
+              if (id.includes('exceljs')) return 'exceljs'
+              if (id.includes('marked')) return 'markdown'
+              // Babylon.js 3D 引擎(独立 chunk 长效缓存)
+              if (id.includes('babylonjs') || id.includes('earcut')) return 'babylon'
+            },
+          },
+        },
+      },
+
+      // 依赖优化配置
+      optimizeDeps: {
+        // 显式包含常用依赖，避免运行时动态发现
+        // include: [
+        //   'element-plus/es',
+        //   '@microsoft/fetch-event-source',
+        // ]
+        // 首次启动时强制预构建所有依赖（启动稍慢，但后续稳定）
+        // force: true,
+      }
+    }
+  })
+

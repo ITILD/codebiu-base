@@ -1,0 +1,143 @@
+<template>
+  <!-- append-to-body: 吸顶 header 带 backdrop-filter 会成为 fixed 后代的包含块,
+       不传送门到 body 弹窗会被困在顶栏内 -->
+  <el-dialog v-model="visible" width="90%" class="auth-note-dialog max-w-[400px]" :modal="true" :close-on-click-modal="true"
+    append-to-body draggable @close="handleClose">
+    <template #header>
+      <!-- 标题行: 手写体标题 + 朱砂闲章(pr-8 避让右上关闭键) -->
+      <div class="flex items-center gap-12px pr-8">
+        <span class="font-hand text-[1.45rem] font-semibold tracking-[0.08em] text-[var(--note-green-deep)]">{{
+          $t('sign_in') }}</span>
+        <span class="note-seal" aria-hidden="true">憩</span>
+      </div>
+    </template>
+
+    <div p-10px>
+      <el-form ref="loginFormRef" :model="loginForm" :rules="loginRules" label-position="top"
+        @submit.prevent="handleLogin">
+        <el-form-item :label="$t('username')" prop="username">
+          <el-input v-model="loginForm.username" :placeholder="$t('username')" autocomplete="username" />
+        </el-form-item>
+
+        <el-form-item label="密码" prop="password">
+          <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" autocomplete="current-password"
+            show-password />
+        </el-form-item>
+
+        <el-form-item>
+          <el-checkbox v-model="loginForm.remember">记住我</el-checkbox>
+        </el-form-item>
+
+        <el-form-item>
+          <el-button type="primary" w-full native-type="submit" :loading="loading">
+            {{ $t('sign_in') }}
+          </el-button>
+        </el-form-item>
+      </el-form>
+
+      <div text-center mt-20px>
+        <el-button type="info" link @click="handleSignUp">
+          {{ $t('sign_up') }}
+        </el-button>
+      </div>
+    </div>
+  </el-dialog>
+</template>
+
+<script setup lang="ts">
+// 弹窗样式(渐变/纸纤维顶盖/EP 内部类覆盖)集中在模块内, 不污染全局
+import '../styles/auth-dialog.css'
+import { ElMessage } from 'element-plus'
+import type { FormInstance } from 'element-plus'
+import { loginUser } from '../api/auth'
+import type {
+  AuthLoginRequest,
+  AuthResponse,
+} from '../types/auth';
+
+
+// 定义组件属性
+const props = defineProps<{
+  modelValue: boolean
+}>()
+
+// 定义事件发射
+const emit = defineEmits<{
+  'update:modelValue': [boolean]
+  'login':  [AuthResponse]
+  'register': []
+}>()
+
+// 控制弹窗显示
+const visible = computed({
+  get: () => props.modelValue,
+  set: (val) => emit('update:modelValue', val)
+})
+
+// 登录表单引用
+const loginFormRef = ref<FormInstance>()
+
+// 加载状态
+const loading = ref(false)
+
+// 登录表单数据
+const loginForm = reactive({
+  username: '',
+  password: '',
+  remember: false
+})
+
+// 表单验证规则
+const loginRules = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' }
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 6, message: '密码至少6位', trigger: 'blur' }
+  ]
+}
+
+// 关闭弹窗
+const handleClose = () => {
+  visible.value = false
+  // 重置表单
+  loginFormRef.value?.resetFields()
+}
+
+// 处理登录
+const handleLogin = async () => {
+  if (!loginFormRef.value) return
+  await loginFormRef.value.validate(async (valid) => {
+    if (valid) {
+      loading.value = true
+      try {
+        // 准备登录数据
+        const loginData: AuthLoginRequest = {
+          username: loginForm.username,
+          password: loginForm.password
+        }
+        // 调用登录API
+        const authResponse: AuthResponse = await loginUser(loginData)
+        // 发射登录事件
+        emit('login', authResponse)
+        handleClose()
+      } catch (error: unknown) {
+        console.error('登录失败:', error)
+        // 添加错误提示
+        ElMessage.error((error as { message?: string }).message || '登录失败，请检查用户名和密码')
+      } finally {
+        loading.value = false
+      }
+    }
+  })
+}
+
+// 处理切换到注册
+const handleSignUp = () => {
+  handleClose()
+  emit('register')
+}
+
+
+</script>

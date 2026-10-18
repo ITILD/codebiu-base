@@ -1,0 +1,97 @@
+[project]
+name = "base-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
+
+dependencies = [
+    "aiohttp>=3.12.15",
+    "aiofiles>=25.1.0",
+    # 权限
+    "casbin>=1.43.0",
+    "casbin-async-sqlalchemy-adapter>=1.13.0",
+    "dynaconf>=3.2.11",
+    "fakeredis>=2.32.1",
+    "fastapi>=0.116.1",
+    "httpx>=0.28.1",
+    "numpy>=2.3.2",
+    "psutil>=7.0.0",
+    "pydantic>=2.11.7",
+    "python-dotenv>=1.1.0",
+    # auth
+    "pyjwt>=2.10.1",
+    "pwdlib[argon2]>=0.2.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.1.0",
+    "python-multipart>=0.0.20",
+    "pyyaml>=6.0.2",
+    "requests>=2.32.5",
+    "sqlmodel>=0.0.24",
+    "uvicorn>=0.35.0",
+    # ocr/图像处理(4.13 在部分环境 cv2 二进制加载失败, 暂限上界; headless 无 GUI 依赖, 仅用 imdecode/resize/imencode 基础 API)
+    "opencv-python-headless>=4.11.0.86,<4.13",
+    "pillow>=11.3.0",
+    "beautifulsoup4>=4.14.3",
+    "lxml>=6.0.2",
+    # 语音 asr/tts(在线外部服务, 音频解码/重采样)
+    "soundfile>=0.13.1",
+    # langchain
+    "langchain>=1.2.15",
+    "langchain-openai>=1.1.0",
+    "langchain-aws>=1.1.0",
+    "langchain-ollama>=1.0.1",
+    "langchain-text-splitters>=1.1.0",
+    # databases(基线: postgres/sqlite + redis/fakeredis; 向量库: milvus 远程后端 / lancedb 本地后端, 未启用的 SDK 不打包按需安装)
+    "aiosqlite>=0.21.0",
+    "asyncpg>=0.30.0",
+    # 当前使用的向量后端: milvus(远程 47.94.107.62)
+    "pymilvus>=2.6.5",
+    "celery>=5.6.1",
+    "aioboto3>=15.5.0",
+    "sse-starlette>=3.3.2",
+    # 流式 AG-UI 协议(rag_chat 流式事件)
+    "ag-ui-protocol>=1.0.0",
+    # token 计数(轻量, 不依赖 transformers)
+    "tiktoken>=0.12.0",
+    # rag 会话 langgraph checkpointer(postgres)
+    "langgraph-checkpoint-postgres>=3.1.2",
+    "psycopg[binary]>=3.3.4",
+    # 注册邮箱验证码发送
+    "aiosmtplib>=5.1.2",
+    "rich>=15.0.0",
+]
+
+[[tool.uv.index]]# uv的索引
+# 清华源
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# 阿里源
+# url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
+[tool.ruff]
+# 格式化规则
+line-length = 100
+
+[tool.ruff.lint.per-file-ignores]# ruff校验规则
+# 起始函数验证规则排除
+"app.py" = ["F401"]
+"__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"  # 可选值："auto", "strict", "off"
+# session 级 loop: lifespan(连接池)/测试同 loop,避免 asyncpg 跨 loop 崩溃
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+pythonpath = ["src"]
+# ; 设置输出
+# importlib 导入模式: 允许不同目录存在同名测试文件(如两处 test_db.py)而不冲突
+addopts = "-v -s --log-cli-level=WARNING --import-mode=importlib"
+
+
+# uv python install 3.13.14 --mirror https://cnb.cool/astral-sh/python-build-standalone/-/releases/download/

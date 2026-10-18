@@ -1,0 +1,16 @@
+"""权限认证模块 casbin_rule FastAPI 依赖注入"""
+
+from fastapi import Depends
+from module_authorization.service.casbin_rule import CasbinRuleService
+from module_authorization.dao.casbin_rule import CasbinRuleDao
+
+async def get_casbin_rule_dao():
+    """Casbin规则DAO工厂(FastAPI依赖注入)"""
+    return CasbinRuleDao()
+    
+    
+async def get_casbin_rule_service(
+    dao: CasbinRuleDao = Depends(get_casbin_rule_dao)
+):
+    """Service工厂"""
+    return CasbinRuleService(dao)
