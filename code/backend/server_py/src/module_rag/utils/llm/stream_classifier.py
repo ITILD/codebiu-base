@@ -1,0 +1,301 @@
+"""RAG 流式意图分类(问答/闲聊/工具调用分流)"""
+
+from collections.abc import Generator
+
+from langchain_core.runnables.schema import StreamEvent
+
+from module_rag.do.rag_chat import (
+    RagHelpInfo,
+    StreamEventType,
+    StreamOne,
+    NODE_EVENT_MAP,
+    NODE_STATUS_MAP,
+    GraphEvent,
+    GraphNode,
+)
+
+
+# 只允许 chat 节点逐 token 流式输出
+# 如果希望意图分析节点也流式输出，可以加入 GraphNode.INTENT.value
+_TOKEN_STREAM_NODES: set[str] = {
+    GraphNode.CHAT.value,
+    GraphNode.INTENT.value
+}
+
+
+def extract_text(content: object) -> str:
+    """从 LangChain message content 中提取文本"""
+    match content:
+        case str():
+            return content
+
+        case list():
+            parts: list[str] = []
+
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+
+                if block.get("type") != "text":
+                    continue
+
+                text = block.get("text", "")
+                if isinstance(text, str):
+                    parts.append(text)
+
+            return "".join(parts)
+
+        case _:
+            return ""
+
+
+class StreamEventClassifier:
+    """LangGraph 事件分类器"""
+
+    def _not_allowed_event(self, event: StreamEvent) -> bool:
+        """判断是否为图节点根事件，而不是节点内部 Runnable 事件"""
+        event_name = event.get("name")
+        bool_allowed = event_name in ["RunnableSequence","RunnableLambda"]
+        return bool_allowed
+
+    def classify(self, event: StreamEvent) -> Generator[StreamOne, None, None]:
+        """将 LangGraph 原始事件转换为业务 StreamOne"""
+        event_name = event.get("event") or ""
+        if self._not_allowed_event(event):
+            return
+
+        if event_name == GraphEvent.MODEL_STREAM:
+            yield from self._model_stream(event)
+
+        elif event_name == GraphEvent.NODE_START:
+            yield from self._node_start(event)
+
+        elif event_name == GraphEvent.NODE_END:
+            yield from self._node_end(event)
+
+    def _model_stream(self, event: StreamEvent) -> Generator[StreamOne, None, None]:
+        """处理 LLM token 事件"""
+        node_name = self._node_name(event)
+
+        if node_name not in _TOKEN_STREAM_NODES:
+            return
+
+        chunk = self._event_data(event).get("chunk")
+        if not chunk:
+            return
+
+        if reasoning := self._reasoning_text(chunk):
+            yield StreamOne(
+                content=reasoning,
+                node_name=node_name,
+                stream_event_type=StreamEventType.LLM_THINKING,
+            )
+
+        if content := self._content_text(chunk):
+            yield StreamOne(
+                content=content,
+                node_name=node_name,
+                stream_event_type=NODE_EVENT_MAP.get(
+                    node_name,
+                    StreamEventType.ANSWER,
+                ),
+            )
+
+    def _node_start(self, event: StreamEvent) -> Generator[StreamOne, None, None]:
+        """处理节点开始事件"""
+        
+        node_name = self._node_name(event)
+        if text := NODE_STATUS_MAP.get(node_name):
+            yield StreamOne(
+                content=text,
+                node_name=node_name,
+                stream_event_type=StreamEventType.STATUS,
+            )
+
+    def _node_end(self, event: StreamEvent) -> Generator[StreamOne, None, None]:
+        """处理节点结束事件"""
+        node_name = self._node_name(event)
+        output = self._event_output(event)
+
+        if node_name == GraphNode.INTENT:
+            info: RagHelpInfo | None = output.get("rag_help_info")
+
+            if info:
+                yield StreamOne(
+                    content=self._format_intent(info),
+                    node_name=node_name,
+                    stream_event_type=StreamEventType.AGENT_THINKING_CONCLUSION,
+                    data=self._structured_intent(info),
+                )
+
+        elif node_name == GraphNode.SEARCH:
+            yield StreamOne(
+                content=self._format_search(output),
+                node_name=node_name,
+                stream_event_type=StreamEventType.TOOL_CALL,
+                data=self._structured_search(output),
+            )
+
+        elif node_name in (GraphNode.CLARIFY, GraphNode.GAP):
+            spec = output.get("pending_interaction")
+            if isinstance(spec, dict):
+                yield StreamOne(
+                    content=str(spec.get("question", "")),
+                    node_name=node_name,
+                    stream_event_type=StreamEventType.INTERACTION,
+                    data=spec,
+                )
+
+    @staticmethod
+    def _event_data(event: StreamEvent) -> dict:
+        """读取事件 data"""
+        data = event.get("data")
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _event_output(event: StreamEvent) -> dict:
+        """读取节点输出"""
+        data = event.get("data")
+        if not isinstance(data, dict):
+            return {}
+
+        output = data.get("output")
+        return output if isinstance(output, dict) else {}
+
+    @staticmethod
+    def _node_name(event: StreamEvent) -> str:
+        """读取节点名"""
+        metadata = event.get("metadata")
+        if not isinstance(metadata, dict):
+            return ""
+
+        node_name = metadata.get("langgraph_node")
+        return node_name if isinstance(node_name, str) else ""
+
+    @staticmethod
+    def _content_text(chunk: object) -> str:
+        """读取回答内容"""
+        return extract_text(getattr(chunk, "content", ""))
+
+    @staticmethod
+    def _reasoning_text(chunk: object) -> str:
+        """读取推理内容"""
+        reasoning = getattr(chunk, "reasoning_content", None)
+
+        if not reasoning:
+            additional = getattr(chunk, "additional_kwargs", None)
+            if not isinstance(additional, dict):
+                additional = {}
+
+            reasoning = additional.get("reasoning_content")
+
+        return reasoning if isinstance(reasoning, str) else ""
+
+    @staticmethod
+    def _format_intent(info: RagHelpInfo) -> str:
+        """格式化意图分析结果"""
+        return f"""意图: {info.intent}
+        需要检索: {info.is_need_external_info}"""
+
+    @staticmethod
+    def _structured_intent(info: RagHelpInfo) -> dict:
+        """意图分析结论的结构化载荷(AG-UI CUSTOM rag.intent_result)"""
+        return {
+            "tool_name": "intent_analysis",
+            "intent": info.intent,
+            "vector_search": info.vector_search,
+            "full_text_search": info.full_text_search,
+            "is_need_external_info": info.is_need_external_info,
+            "needs_clarification": info.needs_clarification,
+        }
+
+    @staticmethod
+    def _structured_search(output: dict) -> dict:
+        """知识检索结果的结构化载荷(AG-UI TOOL_CALL_RESULT, 前端免正则解析)
+
+        联网开启时附 web_results(标题/链接/来源/相关度), 前端可与知识片段并列展示
+        """
+        search_error = output.get("search_error")
+        knowledge_context_list = output.get("knowledge_context_list") or []
+        results = []
+        for chunk in knowledge_context_list:
+            content = (getattr(chunk, "content", "") or "").replace("\n", " ")
+            results.append(
+                {
+                    "source": getattr(chunk, "source", "") or "未知来源",
+                    "score": getattr(chunk, "score", None),
+                    "document_id": getattr(chunk, "document_id", None),
+                    "chunk_id": getattr(chunk, "id", None),
+                    "project_id": getattr(chunk, "project_id", None),
+                    "summary": content[:120] + ("…" if len(content) > 120 else ""),
+                    "content": content[:400] + ("…" if len(content) > 400 else ""),
+                }
+            )
+        web_results = [
+            {
+                "title": getattr(web, "title", ""),
+                "url": getattr(web, "url", ""),
+                "source": getattr(web, "source", ""),
+                "score": getattr(web, "score", None),
+                "summary": (getattr(web, "description", "") or "")[:120],
+            }
+            for web in (output.get("web_results") or [])
+        ]
+        return {
+            "tool_name": "knowledge_search",
+            "hit_count": len(knowledge_context_list),
+            "search_error": search_error,
+            "web_count": len(web_results),
+            "web_search_error": output.get("web_search_error"),
+            "web_results": web_results,
+            "results": results,
+        }
+
+    @staticmethod
+    def _format_search(output: dict) -> str:
+        """格式化知识库检索结果(含引用溯源: 来源/得分/片段摘要, 供前端折叠区展示)
+
+        联网开启时追加网络搜索结果段(标题/来源/相关度); 联网失败追加失败原因
+        """
+        # 检索失败(模型网络错误/无 embedding 模型等)时显示真实原因,
+        # 避免"未检索到相关片段"误导用户以为是知识库内容不匹配
+        search_error = output.get("search_error")
+        knowledge_context_list = output.get("knowledge_context_list") or []
+        lines: list[str] = []
+
+        if search_error:
+            lines.append(f"知识库检索失败: {search_error}")
+        else:
+            hit_count = len(knowledge_context_list)
+            if hit_count == 0:
+                lines.append("未检索到相关片段")
+            else:
+                lines.append(f"检索到 {hit_count} 条相关片段：")
+                for idx, chunk in enumerate(knowledge_context_list[:8], start=1):
+                    source = getattr(chunk, "source", "") or "未知来源"
+                    score = getattr(chunk, "score", None)
+                    score_text = f"{score:.3f}" if isinstance(score, (int, float)) else "-"
+                    # 片段摘要(去除换行, 截断前120字)
+                    content = (getattr(chunk, "content", "") or "").replace("\n", " ")
+                    summary = content[:120] + ("…" if len(content) > 120 else "")
+                    lines.append(f"{idx}. [{source}] (相关度 {score_text}) {summary}")
+                if hit_count > 8:
+                    lines.append(f"…其余 {hit_count - 8} 条略")
+
+        # 网络搜索结果段(联网失败静默降级, 仅在过程区块提示原因)
+        web_error = output.get("web_search_error")
+        if web_error:
+            lines.append(f"网络搜索失败: {web_error}")
+        else:
+            web_results = output.get("web_results") or []
+            if web_results:
+                lines.append(f"网络搜索到 {len(web_results)} 条结果：")
+                for idx, web in enumerate(web_results[:5], start=1):
+                    score = getattr(web, "score", None)
+                    score_text = f"{score:.3f}" if isinstance(score, (int, float)) else "-"
+                    source = getattr(web, "source", "") or "web"
+                    title = (getattr(web, "title", "") or "")[:60]
+                    lines.append(f"{idx}. [网络|{source}] (相关度 {score_text}) {title}")
+                if len(web_results) > 5:
+                    lines.append(f"…其余 {len(web_results) - 5} 条略")
+        return "\n".join(lines)

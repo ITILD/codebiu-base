@@ -1,0 +1,374 @@
+"""权限认证模块 auth 业务逻辑层"""
+
+from common.utils.security.token_util import TokenType
+from common.utils.security.password import verify_password
+from module_authorization.service.user import UserService
+from module_authorization.service.token import TokenService
+from module_authorization.do.user import UserCreate, UserResponse, User, UserUpdate
+from module_authorization.do.token import (
+    TokenCreateRequest,
+    TokenResponseFull,
+    TokenResponseBase,
+)
+from module_authorization.do.auth import AuthResponse, AuthLogoutRequest, SelfProfileUpdate
+
+# db_cache redis客户端 用于存储已吊销的 access_token 的黑名单
+from common.config.db import db_cache
+from common.config.dynamic import get_settings
+from common.config.dynamic.schemas import TokenSettings
+from module_authorization.config.register import (
+    email_verify_enabled,
+    REGISTER_CODE_COOLDOWN_KEY,
+    REGISTER_CODE_COOLDOWN_SECONDS,
+    REGISTER_CODE_KEY,
+    REGISTER_CODE_LENGTH,
+    REGISTER_CODE_TTL_SECONDS,
+)
+# 邮件发送能力由本模块内置轻量 EmailService 提供(注册邮箱验证码)
+from module_authorization.service.email import EmailService
+
+import logging
+import secrets
+
+logger = logging.getLogger(__name__)
+
+
+class AuthService:
+    """认证服务"""
+
+    def __init__(
+        self,
+        user_service: UserService,
+        token_service: TokenService,
+        email_service: EmailService | None = None,
+    ):
+        """
+        初始化认证服务
+        :param user_service: 用户服务对象
+        :param token_service: 令牌服务对象
+        :param email_service: 邮件服务对象(注册邮箱验证码发送, 默认取全局单例)
+        """
+        self.user_service = user_service
+        self.token_service = token_service
+        self.email_service = email_service or EmailService()
+
+    async def register(
+        self, user_create: UserCreate, code: str | None = None
+    ) -> AuthResponse:
+        """
+        用户注册
+        :param user_create: 用户创建数据
+        :param code: 邮箱验证码(开启注册邮箱验证 email.use_for_register 时必填)
+        :return: 注册成功的用户信息
+        :raises: ValueError 如果用户名已存在/邮箱验证码缺失或错误
+        """
+        if await email_verify_enabled():
+            if not user_create.email:
+                raise ValueError("注册需要邮箱验证, 请填写邮箱")
+            await self._verify_register_code(user_create.email, code)
+        user = await self.user_service.add(user_create)
+        if not user:
+            raise ValueError("用户创建失败")
+        # 创建令牌响应
+        return await self._create_token_response_full(user)
+
+    async def send_register_code(self, email: str) -> bool:
+        """
+        发送注册邮箱验证码(需开启注册邮箱验证 email.use_for_register)
+        :param email: 接收验证码的邮箱
+        :return: 是否发送成功
+        :raises: ValueError 如果未开启邮箱验证/发送过于频繁/邮件发送失败
+        """
+        if not await email_verify_enabled():
+            raise ValueError("未开启注册邮箱验证")
+        # 发送冷却限制, 防止同一邮箱被频繁发送
+        cooldown_key = REGISTER_CODE_COOLDOWN_KEY.format(email=email)
+        if await db_cache.async_cache.get(cooldown_key):
+            raise ValueError("验证码已发送, 请稍后再试")
+        # 生成验证码并发送(先发送成功再落缓存, 发送失败可直接重试)
+        code = f"{secrets.randbelow(10 ** REGISTER_CODE_LENGTH):0{REGISTER_CODE_LENGTH}d}"
+        sent = await self.email_service.send_register_code(
+            email, code, REGISTER_CODE_TTL_SECONDS // 60
+        )
+        if not sent:
+            raise ValueError("验证码邮件发送失败, 请稍后重试")
+        await db_cache.async_cache.set(
+            REGISTER_CODE_KEY.format(email=email), code, ex=REGISTER_CODE_TTL_SECONDS
+        )
+        await db_cache.async_cache.set(
+            cooldown_key, "1", ex=REGISTER_CODE_COOLDOWN_SECONDS
+        )
+        return True
+
+    async def login(self, username: str, password: str) -> AuthResponse:
+        """
+        用户登录
+        :param username: 用户名
+        :param password: 密码
+        :return: 令牌响应
+        :raises: ValueError 如果用户名或密码错误
+        """
+        # 验证用户凭据
+        user = await self.user_service.authenticate(username, password)
+        if not user:
+            raise ValueError("用户名或密码错误")
+
+        # 检查用户是否激活
+        if not user.is_active:
+            raise ValueError("用户账户已被禁用")
+
+        # 创建令牌请求
+        return await self._create_token_response_full(user)
+
+    async def _create_token_response_full(self, user: User) -> AuthResponse:
+        """
+        创建令牌响应
+        :param user: 用户对象
+        :return: 令牌响应
+        """
+        token_access = await self.token_service.create_token(
+            TokenCreateRequest(
+                user_id=user.id,
+                token_type=TokenType.access,
+            )
+        )
+        token_refresh = await self.token_service.create_token(
+            TokenCreateRequest(
+                user_id=user.id,
+                token_type=TokenType.refresh,
+            )
+        )
+        return AuthResponse(
+            tokens=TokenResponseFull(
+                access=token_access,
+                refresh=token_refresh,
+            ),
+            user=UserResponse.model_validate(user),
+        )
+
+    async def logout(self, logout_request: AuthLogoutRequest) -> bool:
+        """
+        用户登出
+        :param logout_request: 登出请求
+        :return: 登出是否成功
+        """
+        try:
+            # 验证访问令牌有效性 无效会抛错
+            await self.verify_token(logout_request.token_access)
+            # logger.info(f"用户 {user_id} 登出成功")
+        except Exception:
+            logger.info(f"访问令牌无效: {logout_request.token_access}")
+            # 防止重复登出
+            raise ValueError("访问令牌无效")
+        try:
+            # 对于安全性要求较高的系统，采用黑名单/废止列表来使 access_token 立即失效
+            # 注意: db_cache 为连接包装器,实际 Redis 客户端在 async_cache 属性上
+            # 黑名单过期时间取当前动态令牌配置(与访问令牌有效期对齐)
+            ex_seconds = (await get_settings(TokenSettings)).expire_minutes * 60
+            await db_cache.async_cache.set(
+                logout_request.token_access,
+                "revoked",
+                ex=ex_seconds,
+            )
+            # 撤销刷新令牌
+            await self.token_service.revoke_token(
+                logout_request.token_refresh,
+                logout_request.token_refresh_id,
+            )
+        except Exception:
+            # 刷新令牌无效，继续执行登出逻辑
+            logger.info(f"刷新令牌无效: {logout_request.token_access}")
+        return True
+
+    async def verify_token(self, token_access: str) -> dict:
+        """
+        验证访问令牌
+        :param token_access: 访问令牌
+        :return: 令牌载荷数据
+        :raises: ValueError 如果令牌无效
+        """
+        try:
+            # 黑名单 检查令牌是否已被吊销
+            # 注意: db_cache 为连接包装器,实际 Redis 客户端在 async_cache 属性上
+            revoked = None
+            try:
+                revoked = await db_cache.async_cache.get(token_access)
+            except Exception as e:
+                # 缓存不可用时降级: 仅告警不阻断认证(JWT 签名校验仍正常执行)
+                logger.warning(f"令牌黑名单缓存不可用,跳过吊销检查: {e}")
+            if revoked == b"revoked":
+                raise ValueError("令牌已被吊销")
+            return await self.token_service.verify_token(token_access)
+        except Exception as e:
+            raise ValueError(f"令牌验证失败: {str(e)}")
+
+    async def revoke_all_user_tokens(self, user_id: str) -> bool:
+        """
+        撤销用户的所有令牌
+        :param user_id: 用户ID
+        :return: 操作是否成功
+        """
+        try:
+            await self.token_service.revoke_all_tokens_by_user(user_id)
+            return True
+        except Exception:
+            return False
+
+    async def get_current_user_id(self, token: str) -> str:
+        """
+        获取当前用户ID
+        :param token: 访问令牌
+        :return: 当前用户ID
+        :raises: ValueError 如果令牌无效
+        """
+        try:
+            # 验证令牌有效性
+            payload = await self.verify_token(token)
+            user_id = payload.get("sub")
+            if not user_id:
+                raise ValueError("令牌中缺少用户ID")
+            return user_id
+        except Exception as e:
+            raise ValueError(f"获取当前用户ID失败: {str(e)}")
+
+    async def get_current_user(self, token: str) -> User:
+        """
+        获取当前用户
+        :param token: 访问令牌
+        :return: 当前用户
+        :raises: ValueError 如果令牌无效或用户不存在
+        """
+        try:
+            user_id = await self.get_current_user_id(token)
+            user = await self.user_service.get(user_id)
+            if not user:
+                # 令牌有效但用户已删除: 统一按认证失败处理(依赖层映射为 401)
+                raise ValueError("用户不存在")
+            return user
+        except Exception as e:
+            raise ValueError(f"获取当前用户失败: {str(e)}")
+
+    async def get_user_permission_info(self, user_id: str) -> dict:
+        """
+        获取用户的角色与权限码信息(前端菜单过滤/按钮权限判断依据)
+        :param user_id: 用户ID
+        :return: {"roles": {域: [角色键]}, "permissions": [权限码]}
+                 全局管理员 permissions 为 ["*"](拥有全部权限)
+        """
+        from module_authorization.config.casbin_rule import auth_manager
+        from module_authorization.config.registry import permission_registry
+
+        if auth_manager.enforcer is None:
+            return {"roles": {}, "permissions": []}
+        enforcer = auth_manager.enforcer
+
+        # 角色绑定: 遍历用户-角色绑定规则,按域分组
+        roles: dict[str, list[str]] = {}
+        # 注: AsyncEnforcer 的 get_grouping_policy 是同步方法(返回list),不能 await
+        for grouping in enforcer.get_grouping_policy():
+            uid, role_key, dom = grouping[0], grouping[1], grouping[2]
+            if uid == user_id:
+                roles.setdefault(dom, []).append(role_key)
+
+        # 权限码展开: 全局管理员直接返回通配符
+        if "admin" in roles.get("*", []):
+            return {"roles": roles, "permissions": ["*"]}
+
+        # 普通用户: 遍历全部模块声明节点,逐条校验后收集权限码
+        permissions: list[str] = []
+        for dom, obj, act in permission_registry.iter_node_policies():
+            # 注: AsyncEnforcer 的 enforce 是同步方法(返回bool),不能 await
+            if enforcer.enforce(user_id, dom, obj, act):
+                permissions.append(f"{dom}:{obj}:{act}")
+        return {"roles": roles, "permissions": permissions}
+
+
+    async def update_my_profile(self, user_id: str, profile: SelfProfileUpdate) -> UserResponse:
+        """
+        自助更新个人资料(仅昵称/邮箱/电话/头像等展示类字段)
+        :param user_id: 当前登录用户ID
+        :param profile: 资料更新数据
+        :return: 更新后的用户信息
+        :raises: ValueError 如果用户不存在
+        """
+        user = await self.user_service.get(user_id)
+        if not user:
+            raise ValueError("用户不存在")
+        update = UserUpdate(
+            nickname=profile.nickname,
+            email=profile.email,
+            phone=profile.phone,
+            avatar=profile.avatar,
+        )
+        await self.user_service.update(user_id, update)
+        updated = await self.user_service.get(user_id)
+        return UserResponse.model_validate(updated)
+
+    async def change_my_password(self, user_id: str, old_password: str, new_password: str) -> None:
+        """
+        自助修改密码(需先验证旧密码)
+        :param user_id: 当前登录用户ID
+        :param old_password: 旧密码
+        :param new_password: 新密码
+        :raises: ValueError 如果用户不存在/旧密码错误/新旧密码相同
+        """
+        # get 返回 UserResponse(不含密码),需按用户名取完整 User 才能校验旧密码哈希
+        profile = await self.user_service.get(user_id)
+        if not profile:
+            raise ValueError("用户不存在")
+        user = await self.user_service.get_by_username(profile.username)
+        if not user:
+            raise ValueError("用户不存在")
+        if not verify_password(old_password, user.password):
+            raise ValueError("旧密码错误")
+        if old_password == new_password:
+            raise ValueError("新密码不能与旧密码相同")
+        # user_service.update 内部会做哈希处理
+        await self.user_service.update(user_id, UserUpdate(password=new_password))
+
+    async def token_refresh(self, token_refresh: str) -> TokenResponseBase:
+        """
+        刷新访问令牌(仅签发新的访问令牌, 刷新令牌不轮换)
+        :param token_refresh: 刷新令牌
+        :return: 新访问令牌(TokenResponseBase)
+        :raises: ValueError 如果刷新令牌无效
+        """
+        # 验证刷新令牌有效性
+        payload = await self.token_service.verify_token(token_refresh, TokenType.refresh)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("刷新令牌中缺少用户ID")
+        # 验证刷新令牌 获取用户信息
+        user = await self.user_service.get(user_id)
+        if user is None:
+            raise ValueError("用户不存在")
+        # 检查用户是否激活
+        if not user.is_active:
+            raise ValueError("用户账户已被禁用")
+
+        # 创建新的令牌请求
+        token_request = TokenCreateRequest(
+            user_id=user.id,
+            token_type=TokenType.access,
+        )
+        # 生成新令牌
+        new_token = await self.token_service.create_token(token_request)
+        return new_token
+
+    async def _verify_register_code(self, email: str, code: str | None) -> None:
+        """
+        校验注册邮箱验证码(校验通过后立即失效, 防止重复使用)
+        :param email: 注册邮箱
+        :param code: 用户提交的验证码
+        :raises: ValueError 如果验证码缺失或错误/已过期
+        """
+        if not code:
+            raise ValueError("请填写邮箱验证码")
+        key = REGISTER_CODE_KEY.format(email=email)
+        saved = await db_cache.async_cache.get(key)
+        # redis 客户端可能返回 bytes, 统一按字符串比较
+        if isinstance(saved, bytes):
+            saved = saved.decode()
+        if not saved or saved != code:
+            raise ValueError("验证码错误或已过期")
+        await db_cache.async_cache.delete(key)

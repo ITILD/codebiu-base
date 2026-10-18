@@ -1,0 +1,33 @@
+<!-- 模板概览页: element-plus/echarts/babylonjs 组件选型入口卡 -->
+<template>
+  <div p-4 md:p-6>
+    <h2 text-xl font-bold mb-4>模板示例概览</h2>
+    <el-row :gutter="16">
+      <el-col v-for="item in templates" :key="item.path" :xs="24" :sm="12" :md="8" :lg="6" mb-4>
+        <el-card shadow="hover" cursor-pointer @click="router.push(item.path)">
+          <div flex flex-col items-center p-4>
+            <el-icon :size="32" mb-3 :class="item.color">
+              <component :is="item.icon" />
+            </el-icon>
+            <span font-semibold>{{ item.title }}</span>
+            <span text-xs text-note-sub mt-1>{{ item.desc }}</span>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { markRaw } from 'vue'
+import { Files, Grid, Box, MagicStick } from '@element-plus/icons-vue'
+
+const router = useRouter()
+
+const templates = [
+  { path: '/template/playground', title: '组件选型', desc: '多主题皮肤示例', icon: markRaw(MagicStick), color: 'text-[var(--note-lotus-core)]' },
+  { path: '/template/template', title: '模板管理', desc: 'CRUD 表格示例', icon: markRaw(Files), color: 'text-[var(--note-accent)]' },
+  { path: '/template/container', title: '布局容器', desc: 'Flex 布局示例', icon: markRaw(Grid), color: 'text-[var(--note-green)]' },
+  { path: '/template/babylon', title: 'Babylon 3D', desc: '3D 场景示例', icon: markRaw(Box), color: 'text-[var(--note-green-deep)]' },
+]
+</script>

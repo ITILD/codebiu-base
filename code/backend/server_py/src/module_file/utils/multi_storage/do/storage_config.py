@@ -1,0 +1,81 @@
+"""存储配置模型"""
+
+from pydantic import BaseModel, Field
+from enum import StrEnum
+
+
+class StorageType(StrEnum):
+    LOCAL = "local"
+    S3 = "s3"
+    # MINIO = "minio"
+    # ALIYUN_OSS = "aliyun_oss"
+
+
+_STORAGE_REGISTRY: dict[str, type["StorageConfig"]] = {}
+
+
+class StorageConfig(BaseModel):
+    # 存储类型(local/s3): 工厂 create(config_type, dict) 时由 dict 自动填充,
+    # 用于运行时读取"实际生效的存储类型"(配置中心改类型需重启才重新装配, 此值不变)
+    storage_type: str | None = Field(None, description="存储类型(local/s3)")
+    # 字段名与 config.yaml 的 file_system.max_size 保持一致(MB)
+    max_size: int = Field(10, description="单文件最大存储（MB）,默认10MB")
+    # 允许的 MIME 类型列表(支持 image/* 通配),空表示不限制
+    allowed_extensions: list[str] = Field(
+        default_factory=list, description="允许的文件MIME类型列表，空表示不限制"
+    )
+
+    def __init_subclass__(cls, config_type: str | None = None, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if config_type is not None:
+            _STORAGE_REGISTRY[config_type] = cls
+
+    # 提供获取最大文件大小的字节表示
+    @property
+    def max_size_bytes(self) -> int:
+        return self.max_size * 1024 * 1024
+
+    def is_mime_allowed(self, mime_type: str | None) -> bool:
+        """
+        校验 MIME 类型是否在允许列表内
+        :param mime_type: 文件 MIME 类型(如 image/png)
+        :return: 允许列表为空返回True;否则按精确/通配(image/*)匹配
+        """
+        if not self.allowed_extensions:
+            return True
+        if not mime_type:
+            return False
+        mime = mime_type.lower()
+        for pattern in self.allowed_extensions:
+            p = pattern.lower()
+            # 通配匹配主类型(如 image/* 匹配 image/png)
+            if p.endswith("/*") and mime.startswith(p[:-1]):
+                return True
+            if p == mime:
+                return True
+        return False
+
+
+class LocalStorage(StorageConfig, config_type=StorageType.LOCAL):
+    base_dir: str | None = Field(None, description="本地存储根目录路径")
+
+
+class S3Storage(StorageConfig, config_type=StorageType.S3):
+    bucket: str = Field(..., description="S3存储桶名称")
+    endpoint_url: str | None = Field(
+        None, description="S3服务端点URL，如使用AWS S3可不填"
+    )
+    region: str | None = Field(None, description="S3区域，默认为us-east-1")
+    access_key: str | None = Field(None, description="S3访问密钥ID")
+    secret_key: str | None = Field(None, description="S3秘密访问密钥")
+    # session_token: str | None = Field(None, description="S3会话令牌")
+
+
+class StorageConfigFactory:
+    @staticmethod
+    def create(config_type: str, config: dict) -> StorageConfig:
+        cls = _STORAGE_REGISTRY.get(config_type)
+        if not cls:
+            raise ValueError(f"Unknown storage config type: {config_type}")
+        # 装配时以 config_type 覆盖填充 storage_type(运行时读到的即实际生效类型)
+        return cls.model_validate({**config, "storage_type": config_type})

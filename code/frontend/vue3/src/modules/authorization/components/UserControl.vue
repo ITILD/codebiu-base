@@ -1,0 +1,115 @@
+<!-- 头像下拉用户控制: 登录态菜单(后台管理/账户设置/版本信息/退出) -->
+<template>
+  <el-dropdown trigger="click" items-center placement="bottom-end" @command="handleCommand">
+    <UserLoginIcon pointer-default w-7 h-7 />
+    <template #dropdown>
+      <el-dropdown-menu>
+        <!-- 用户信息 -->
+        <el-dropdown-item command="profile" disabled>
+          <div flex items-center>
+            <UserLoginIcon m-2 w-8 h-8 />
+            <div>
+              <div text-lg font-5>{{ authState.user.username }}</div>
+              <div text-sm text-note-sub>{{ authState.user.email }}</div>
+            </div>
+          </div>
+        </el-dropdown-item>
+
+        <!-- 菜单项 -->
+        <el-dropdown-item v-for="item in menuItems" :key="item.command" :command="item.command" :divided="item.divided">
+          <el-icon class="mr-2">
+            <component :is="item.icon" />
+          </el-icon>
+          {{ item.label }}
+        </el-dropdown-item>
+      </el-dropdown-menu>
+    </template>
+  </el-dropdown>
+</template>
+
+<script setup lang="ts">
+import { markRaw, computed } from 'vue'
+import { Monitor, Setting, SwitchButton, Document } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/common/stores/auth'
+import { logoutUser } from '@/modules/authorization/api/auth'
+import { useVisibleMenu } from '@/app/composables/useMenu'
+import UserLoginIcon from './UserLoginIcon.vue'
+
+const router = useRouter()
+const authStore = useAuthStore()
+const authState = authStore.authState
+const initAuthState = authStore.initAuthState
+// 后台入口权限门禁: 至少持有一个声明权限的后台分组(如 sys/task/main:file)才显示
+// "后台管理", 普通用户(无任何后台权限)完全看不到该入口
+const { visibleMenuItems } = useVisibleMenu()
+const canEnterAdmin = computed(() => visibleMenuItems.value.some((g) => Boolean(g.perm)))
+
+interface MenuItem {
+  command: string
+  label: string
+  icon: unknown
+  divided?: boolean
+  action?: () => void
+}
+
+const allMenuItems: MenuItem[] = [
+  {
+    command: 'admin',
+    label: '后台管理',
+    icon: markRaw(Monitor),
+    divided: true,
+    action: () => {
+      router.push('/admin')
+    },
+  },
+  {
+    command: 'version',
+    label: '版本信息',
+    icon: markRaw(Document),
+    action: () => {
+      // 系统介绍 + 版本时间线(无限滚动)的发布说明页
+      router.push('/version')
+    },
+  },
+  {
+    command: 'settings',
+    label: '账户设置',
+    icon: markRaw(Setting),
+    action: () => {
+      router.push('/setting')
+    },
+  },
+  {
+    command: 'logout',
+    label: '退出登录',
+    icon: markRaw(SwitchButton),
+    divided: true,
+    action: async () => {
+      // 先通知后端吊销令牌(写入黑名单并撤销刷新令牌), 失败不阻断本地清理
+      try {
+        await logoutUser({
+          token_access: authState.tokens.access.token,
+          token_refresh: authState.tokens.refresh.token,
+          token_refresh_id: authState.tokens.refresh.token_id ?? '',
+        })
+      } catch (error) {
+        console.error('后端登出失败:', error)
+      }
+      initAuthState()
+      router.push('/')
+    },
+  },
+]
+
+// 无任何后台菜单权限时剔除"后台管理"入口
+const menuItems = computed<MenuItem[]>(() =>
+  allMenuItems.filter((item) => item.command !== 'admin' || canEnterAdmin.value)
+)
+
+const handleCommand = (command: string) => {
+  const item = menuItems.value.find((item) => item.command === command)
+  if (item?.action) {
+    item.action()
+  }
+}
+</script>

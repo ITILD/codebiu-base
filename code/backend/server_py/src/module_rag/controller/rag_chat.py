@@ -1,0 +1,110 @@
+"""
+RAG 聊天控制器
+- 流式聊天(SSE)：从 conversation.py 迁移过来
+- 对话总结：压缩历史消息并生成标题
+"""
+
+from fastapi import APIRouter, Depends, File, Request, UploadFile
+from sse_starlette import EventSourceResponse
+from module_rag.do.rag_chat import ConversationSummary
+from module_rag.do.conversation import ChatRequest
+from module_rag.service.rag_chat import RagChatService
+from module_rag.dependencies.rag_chat import get_rag_chat_service_single
+from module_authorization.dependencies.auth import get_current_user_id
+from module_authorization.dependencies.permission import require_permission
+from module_rag.config.server import module_app
+from module_ai.utils.llm.stream.sse import agui_event_generator
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+@router.post(
+    "/parse-temp-file",
+    summary="解析会话临时文件(异步非阻塞, 不入知识库)",
+)
+async def parse_temp_file_endpoint(
+    file: UploadFile = File(..., description="临时文件(版式文档/图片走 MinerU, 纯文本直读)"),
+    current_user_id: str = Depends(require_permission("rag", "chat", "write")),
+    rag_chat_service: RagChatService = Depends(get_rag_chat_service_single),
+) -> dict:
+    """
+    解析会话临时文件为文本, 供前端随聊天请求回传(不入知识库/向量库):
+    - 支持版式文档 pdf/doc/docx/ppt/pptx + 图片 png/jpg/jpeg(经 MinerU 引擎)
+    - 纯文本 txt/md/csv/log/json 直接解码
+    - 全程异步(分片读取 + 异步解析), 不阻塞事件循环上的其他接口
+    :param file: 上传的临时文件
+    :return: {file_name, content, chars, truncated}
+    """
+    return await rag_chat_service.parse_temp_file(file)
+
+@router.post("/{conversation_id}/chat", summary="流式聊天(SSE, AG-UI 协议)")
+async def chat_stream(
+    conversation_id: str,
+    chat_request: ChatRequest,
+    request_obj: Request,
+    current_user_id: str = Depends(require_permission("rag", "chat", "write")),
+    rag_chat_service: RagChatService = Depends(get_rag_chat_service_single),
+) -> EventSourceResponse:
+    """
+    流式聊天接口(SSE, AG-UI 协议)
+
+    AG-UI(Agent User Interaction Protocol)是事件驱动的开放交互协议,
+    事件模型由官方 SDK `ag-ui-protocol` 提供, 本端点输出标准事件流:
+    - 生命周期 RUN_STARTED/RUN_FINISHED/RUN_ERROR + STEP_*(步骤=图节点)
+    - 正文 TEXT_MESSAGE_* 增量流; 推理 REASONING_* 流
+    - 检索 TOOL_CALL_*(RESULT 携带结构化引用溯源)
+    - CUSTOM 业务扩展(rag.status 进度 / rag.intent_result 意图结论 /
+      rag.interaction 交互卡片)
+
+    业务能力:
+    - 根据对话ID获取上下文(langgraph postgres checkpointer)
+    - 支持传入知识库列表，有内容时先做意图分析
+    - 支持 interaction_response 响应交互卡片(澄清/知识缺口补充)续跑流程
+    """
+    # 不做 try/except 包装: 建流前的校验错误(BizError 等)由全局异常处理器映射状态码,
+    # 流式体内的异常由 agui_event_generator 转为 RUN_ERROR 事件推送
+    responses = rag_chat_service.chat_stream(
+        conversation_id=conversation_id, user_id=current_user_id, chat_request=chat_request
+    )
+    return EventSourceResponse(
+        agui_event_generator(
+            responses,
+            request_obj,
+            # threadId 即会话ID: AG-UI 语义的会话线程标识
+            thread_id=conversation_id,
+            # 初始状态快照(STATE_SNAPSHOT): 前端可据此恢复会话上下文
+            initial_state={
+                "conversationId": conversation_id,
+                "projectIds": chat_request.project_ids,
+                "deepThinking": chat_request.deep_thinking,
+            },
+        ),
+        media_type="text/event-stream",
+    )
+
+
+@router.post(
+    "/{conversation_id}/summarize",
+    summary="总结历史对话(压缩消息)并生成标题",
+    response_model=ConversationSummary,
+)
+async def summarize_conversation(
+    conversation_id: str,
+    current_user_id: str = Depends(require_permission("rag", "chat", "write")),
+    rag_chat_service: RagChatService = Depends(get_rag_chat_service_single),
+):
+    """
+    对指定会话执行结构化总结并持久化: 生成的新标题写入对话记录,
+    总结失败时降级返回默认空摘要
+    - 从 checkpointer 拉取完整消息历史
+    - 调用 LLM 生成对话摘要和简短标题
+    - 持久化更新对话标题
+    """
+    return await rag_chat_service.summarize_conversation(conversation_id, current_user_id)
+
+
+# 注册路由(挂在 /rag/rag-chat 前缀下)
+module_app.include_router(router, prefix="/rag-chat", tags=["RAG聊天"])

@@ -1,0 +1,73 @@
+"""文件模块 子应用装配: 路由挂载与模块级初始化"""
+
+from common.config.server import app
+# lib
+from common.utils.fastapi_ex.exceptions import BizFastAPI
+import logging
+from sqlalchemy import inspect, text
+
+from common.config.db import db_manager
+from common.config.lifespan import register_init_hook
+
+logger = logging.getLogger(__name__)
+
+module_app = BizFastAPI()
+
+app.mount("/file", module_app)
+
+logger.debug("ok...server module_file服务配置")
+
+
+@register_init_hook
+async def ensure_storage_ready():
+    """启动时确保物理存储就绪: S3协议存储(minio/s3)桶不存在时自动创建"""
+    from module_file.config.filesystem import init_storage_config, storage
+    from module_file.utils.multi_storage.session.impl.storage_s3 import (
+        S3StorageInterface,
+    )
+
+    # 幂等装配(不依赖钩子注册顺序; 已装配时直接返回)
+    await init_storage_config()
+
+    if isinstance(storage, S3StorageInterface):
+        try:
+            await storage.ensure_bucket()
+        except Exception as e:
+            # 不阻断启动,上传时会再次暴露具体错误
+            logger.warning(f"存储桶检查/自动创建失败: {e}")
+
+
+@register_init_hook
+async def ensure_file_entry_source_module():
+    """存量表补列: file_entry.source_module(来源模块标记, 幂等; create_all 不为旧表加列)"""
+    if db_manager.db_rel is None:
+        return
+    engine = db_manager.db_rel.engine
+    async with engine.begin() as conn:
+        cols = await conn.run_sync(
+            lambda sc: {c["name"] for c in inspect(sc).get_columns("file_entry")}
+        )
+        if "source_module" not in cols:
+            await conn.execute(
+                text("ALTER TABLE file_entry "
+                     "ADD COLUMN source_module VARCHAR(50) DEFAULT NULL")
+            )
+            logger.info("file_entry.source_module 来源模块列已补齐")
+
+
+@register_init_hook
+async def ensure_file_entry_tags():
+    """存量表补列: file_entry.tags(关键词标签组 JSON, 幂等; create_all 不为旧表加列)"""
+    if db_manager.db_rel is None:
+        return
+    engine = db_manager.db_rel.engine
+    async with engine.begin() as conn:
+        cols = await conn.run_sync(
+            lambda sc: {c["name"] for c in inspect(sc).get_columns("file_entry")}
+        )
+        if "tags" not in cols:
+            await conn.execute(
+                text("ALTER TABLE file_entry "
+                     "ADD COLUMN tags JSON DEFAULT '[]'")
+            )
+            logger.info("file_entry.tags 标签列已补齐")

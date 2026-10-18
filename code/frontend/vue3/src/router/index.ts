@@ -1,0 +1,54 @@
+import { createRouter, createWebHistory } from 'vue-router'
+/**
+ * 自动路由
+ * 原本routes更换
+ * 路由规则 https://uvr.esm.is/guide/file-based-routing.html
+ */
+import { routes, handleHotUpdate } from "vue-router/auto-routes"
+import { RouterStore } from '@/common/stores/router'
+import { useAuthStore } from '@/common/stores/auth'
+import { ElMessage } from 'element-plus'
+
+// 路由 meta 类型扩展(admin 由 vite.config.ts 的 extendRoute 统一标记:
+// 首页与 404 为公开页, 后台工作台/账户设置/各模块页面均为后台路由)
+declare module 'vue-router' {
+  interface RouteMeta {
+    /** 后台管理路由: 需登录访问, 且显示左侧模块列表 */
+    admin?: boolean
+    /** 独立页面: 属后台路由(需登录), 但不渲染左侧模块侧边栏(如账户设置) */
+    standalone?: boolean
+  }
+}
+
+// 生成路由  注意nginx发布配置 添加跳转
+const router = createRouter({
+  history: createWebHistory(import.meta.env.BASE_URL),
+  routes: routes,
+  // 滚动记忆: 浏览器后退/前进恢复原位置; 锚点跳转交给 CSS scroll-padding-top 让出吸顶栏
+  scrollBehavior(to, _from, savedPosition) {
+    if (savedPosition) return savedPosition
+    if (to.hash) return { el: to.hash, behavior: 'smooth', top: 72 }
+    return { top: 0 }
+  },
+})
+
+// 路由监听(返回值风格: vue-router 4.2+ 已弃用 next() 第三参数形态)
+router.beforeEach((to) => {
+  const routerStore = RouterStore()
+  routerStore.setRouterPath(to.path)
+  // 登录拦截: 前台应用(app)与后台管理(admin)均需登录, 未登录回首页并引导登录
+  const authStore = useAuthStore()
+  if ((to.meta.admin || to.meta.app) && !authStore.authState.user.id) {
+    ElMessage.warning('请先登录后再访问')
+    return { path: '/', query: { login: '1' } }
+  }
+})
+
+// 开发模式
+if (import.meta.env.DEV) {
+  console.log('开发模式')
+  // 热更新并刷新路由
+  if (import.meta.hot) handleHotUpdate(router)
+}
+
+export default router

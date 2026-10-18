@@ -1,0 +1,95 @@
+<!-- 对话模型选择下拉: 拉取当前用户可用 LLM 列表并回显当前选择 -->
+<template>
+  <div flex items-center gap-2>
+    <span text-sm font-medium text-note-sub>模型:</span>
+    <el-select
+      v-model="selectedModelId"
+      placeholder="选择模型"
+      w-60
+      :size="size"
+      :disabled="disabled"
+      @change="handleModelChange"
+    >
+      <el-option
+        v-for="item in modelList"
+        :key="modelKeyLabel(item)"
+        :value="item.id"
+        :label="modelMainLabel(item)"
+      >
+        <div flex flex-col>
+          <div flex items-center gap-1>
+            <span>{{ modelMainLabel(item) }}</span>
+            <el-tag v-if="item.is_default" type="warning" size="small">默认</el-tag>
+          </div>
+          <div text-xs text-note-sub>{{ item.model }} · {{ serverTypeLabel(item.server_type) }} · {{ scopeShortLabel(item.scope) }}</div>
+        </div>
+      </el-option>
+    </el-select>
+  </div>
+</template>
+
+<script setup lang="ts">
+import type { ModelConfig } from '../types/model_config'
+import { modelMainLabel, modelKeyLabel, scopeShortLabel, serverTypeLabel } from '../types/model_config'
+
+// 组件属性定义
+interface Props {
+  /** 模型配置列表 */
+  modelList: ModelConfig[]
+  /** 当前选中的模型ID */
+  modelId?: string
+  /** 是否禁用选择器 */
+  disabled?: boolean
+  /** 选择器尺寸 */
+  size?: 'small' | 'default' | 'large'
+}
+
+// 组件事件定义
+interface Emits {
+  /** 模型选择变化事件 */
+  (e: 'update:modelId', value: string): void
+  /** 模型变更事件 */
+  (e: 'change', value: string): void
+}
+
+// 定义属性和事件
+const props = withDefaults(defineProps<Props>(), {
+  modelList: () => [],
+  modelId: '',
+  disabled: false,
+  size: 'default'
+})
+
+const emit = defineEmits<Emits>()
+
+// 内部选中的模型ID
+const selectedModelId = ref(props.modelId)
+
+// 监听外部modelId变化
+watch(() => props.modelId, (newValue) => {
+  selectedModelId.value = newValue
+})
+
+// 处理模型选择变化
+const handleModelChange = (value: string) => {
+  emit('update:modelId', value)
+  emit('change', value)
+}
+
+// 暴露方法：获取当前选中的模型
+const getSelectedModel = () => {
+  return props.modelList.find(item => item.id === selectedModelId.value)
+}
+
+// 暴露方法：设置选中的模型
+const setSelectedModel = (modelId: string) => {
+  selectedModelId.value = modelId
+  handleModelChange(modelId)
+}
+
+// 暴露组件方法
+defineExpose({
+  getSelectedModel,
+  setSelectedModel
+})
+</script>

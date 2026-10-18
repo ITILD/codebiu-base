@@ -1,0 +1,66 @@
+"""数据库配置模型: 关系/缓存/向量库连接配置"""
+
+from pydantic import BaseModel, Field
+
+_DB_REGISTRY: dict[str, type["DBConfig"]] = {}
+
+
+class DBConfig(BaseModel):
+    database: str = Field(..., description="数据库名/持久化地址")
+
+    def __init_subclass__(cls, config_type: str | None = None, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if config_type is not None:
+            _DB_REGISTRY[config_type] = cls
+
+
+# 模型配置对象
+class PostgresConfig(DBConfig, config_type="postgres"):
+    host: str = Field(..., description="数据库地址")
+    port: int = Field(..., description="数据库端口")
+    user: str = Field(..., description="数据库用户名")
+    password: str = Field(..., description="数据库密码")
+
+
+class SqliteConfig(DBConfig, config_type="sqlite"):
+    pass
+
+
+class RedisConfig(DBConfig, config_type="redis"):
+    db: int = Field(0, description="数据库索引")
+    host: str = Field(..., description="数据库地址")
+    port: int = Field(..., description="数据库端口")
+    password: str | None = Field(None, description="数据库密码")
+
+
+class FakeredisConfig(DBConfig, config_type="fakeredis"):
+    pass
+
+
+class LancedbConfig(DBConfig, config_type="lancedb"):
+    pass
+
+
+class MilvusConfig(DBConfig, config_type="milvus"):
+    """Milvus 向量库配置(host+port 与 uri 二选一)"""
+
+    uri: str | None = Field(None, description="完整连接地址(如 http://ip:port), 配置了则忽略 host/port")
+    host: str | None = Field(None, description="数据库地址")
+    port: int | None = Field(None, description="数据库端口")
+    user: str | None = Field(None, description="数据库用户名")
+    password: str | None = Field(None, description="数据库密码")
+    token: str | None = Field(None, description="数据库token")
+
+
+class DBConfigFactory:
+    @staticmethod
+    def create(type_: str, config_dict: dict) -> DBConfig:
+        """
+        根据 type_ 自动选择并实例化对应的配置模型
+        """
+        config_cls = _DB_REGISTRY.get(type_)
+        if config_cls is None:
+            raise ValueError(
+                f"未知的数据库类型: {type_}. 支持的类型: {list(_DB_REGISTRY.keys())}"
+            )
+        return config_cls.model_validate(config_dict)

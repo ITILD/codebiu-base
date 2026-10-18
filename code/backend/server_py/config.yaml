@@ -1,0 +1,163 @@
+# ############################# 配置分层(只有 2 层 + 环境变量) #############################
+#   1. config.yaml             基线层(本文件, 入 git): 引导配置 + 全部业务组的零依赖默认值,
+#                              开箱即用 —— 不建任何环境文件即可直接启动(SQLite+Fakeredis+LanceDB)
+#   2. config.<APP_ENV>.yaml   环境层(gitignored): 该环境需要覆盖的一切(数据库连接/模型种子/密钥),
+#                              .env 写 APP_ENV=dev 即自动加载 config.dev.yaml; 缺失自动跳过
+#   3. CODEBIU_* 环境变量      键级覆盖最高优先级(容器/K8s 密钥注入, 嵌套键用双下划线):
+#                              CODEBIU_TOKEN__SECRET_KEY=xxx → token.secret_key
+# 环境切换: 改 .env 的 APP_ENV 即完成(dev/prod/study…任意名字, 文件名对上即可)
+# 部署覆盖: CONFIG_PATH 环境变量可显式指定覆盖文件(逗号分隔按序覆盖, 缺失即启动失败)
+# 密钥管理: 密钥只放 gitignored 环境层或环境变量, 严禁写入本文件
+# 业务配置: 下列业务组首启以同名节为种子入库, 之后以 系统管理→通用配置页 为准(改 yaml 不再生效)
+
+# ############################# 全局标识 #############################
+global:
+  name: codebiu       # 应用名称
+  version: 0.0.1      # 应用版本
+
+# ############################# 运行状态 #############################
+state:
+  is_dev: true        # 开发模式(影响日志级别/模式)
+  check_db: true      # 启动自检: 自动建表 + 首启种子入库(全新项目保持 true 即可; 库已就绪的生产可关)
+
+# ############################# 后端服务 #############################
+server:
+  server_root_path: ""  # 根路由代理(反向代理子路径时填)
+  host: 0.0.0.0
+  port: 2001
+
+# 中间件(引导级: app 构建期读取, 早于数据库可用)
+middleware:
+  cors: true
+  gzip: true
+
+# ############################# 文档解析(MinerU 外部服务) #############################
+# 唯一解析引擎: 远程 mineru.net API(默认)或本地 docker mineru-api
+# 新解析服务接入点: module_office/utils/file_parse/factory.py 引擎注册表
+mineru:
+  mode: remote                # remote(mineru.net, 支持批量) / local(本地 docker)
+  remote_base_url: https://mineru.net/api/v4
+  token: ""                   # mineru.net 申请(https://mineru.net/apiManage/docs); 也可 CODEBIU_MINERU__TOKEN 注入
+  local_base_url: http://127.0.0.1:8000
+  local_endpoint: /file_parse
+  model_version: pipeline     # pipeline / vlm
+  language: ch
+  is_ocr: false               # false 自动判断是否 OCR
+  enable_formula: true
+  enable_table: true
+  timeout: 300                # 单次 HTTP 超时(秒)
+  poll_interval: 5            # 远程结果轮询间隔(秒)
+  poll_timeout: 1800          # 远程任务最长等待(秒)
+
+# ############################# 目录 #############################
+dir:
+  base: temp_source           # 基础根目录
+  base_child:                 # 子目录(按功能划分)
+    source:     source        # 源代码/原始文件
+    upload:     upload        # 用户上传文件(默认目录)
+    log:        log           # 日志
+    sys_out:    sys_out       # 系统输出(导出文件等)
+    temp:       temp          # 临时文件
+    db:         db            # 数据库文件(SQLite/缓存/LanceDB)
+    test:       test          # 测试资源
+    model:      model         # 模型文件
+    lib_third:  lib_third     # 第三方库文件
+  public: public              # 静态资源目录
+
+# ############################# 关系库(引导级, 动态配置中心依赖它) #############################
+db_rel:
+  type: sqlite                # 零依赖默认; 环境层覆盖为 postgres 等
+  database: temp_source\db\data.db
+
+# ############################# 业务组零依赖默认值(首启种子, 之后以通用配置页为准) #############################
+# 只想快速启动 = 不用动这些; 换环境/换库/配模型 → 在环境层覆盖同名节即可
+
+# 默认管理员(通用引导账户, admin 组首启种子; 忘记密码时 reset_password 改 true 重启恢复)
+admin:
+  username: admin
+  password: admin123
+  nickname: 系统管理员
+  email: admin@codebiu.local
+  reset_password: false
+
+# 缓存库: fakeredis=零依赖本地(持久化到 db 目录); 换 Redis 在环境层覆盖
+db_cache:
+  type: fakeredis
+  db: 0
+  database: temp_source\db\redis.db
+
+# 向量库: lancedb=零依赖本地文件(基线唯一向量库, 更换后需重建向量索引)
+db_vector:
+  type: lancedb
+  database: temp_source\db\lancedb
+
+# 任务队列: local=进程内协程零依赖; celery 需 Redis(在环境层配 broker_url)
+tasks:
+  engine: local
+
+# 文件存储: local=本地 upload 目录; 切 S3/MinIO 在环境层覆盖并填连接信息
+file_system:
+  storage_type: local
+  max_size: 10                # 上传大小限制(MB)
+
+# 令牌认证: 下方为开发默认密钥, 生产必须在环境层覆盖(修改后所有登录态失效)
+token:
+  secret_key: "dev-only-change-me-32-chars-minimum-key"
+  expire_minutes: 30
+  refresh_expire_days: 20
+
+# 默认公共模型种子: 基线不启用(reset_models=false); 环境层示例见 config.dev.yaml
+# (chat/embeddings/rerank/asr/tts/ocr 全部为外部服务接入, api_key 放环境层)
+default_models:
+  reset_models: false
+
+
+
+
+############################# 网页搜索种子 #############################
+# module_websearch 模块,支持 duckduckgo(默认,本地直连无需密钥)/tavily/firecrawl
+websearch:
+  # 默认搜索引擎(tavily/firecrawl)
+  default_engine: tavily
+  # 请求超时(秒)
+  timeout: 15
+  # 默认返回条数上限(接口可覆盖,最大30)
+  max_results: 10
+  # Tavily 搜索(https://app.tavily.com 免费注册获取 API Key)
+  tavily:
+    # API Key(为空则该引擎不可用)
+    api_key: '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'
+    # 搜索深度: basic(快速)/advanced(更全但更慢、消耗额度更多)
+    search_depth: basic
+    # 是否返回 AI 摘要答案
+    include_answer: false
+  # Firecrawl 搜索(https://www.firecrawl.dev 免费注册获取 API Key)
+  firecrawl:
+    # API Key(为空则该引擎不可用)
+    api_key: 'fc-c7b3192b9a814a33837725d8c62c037c'
+    # API 地址(可替换为自部署实例地址)
+    api_base: https://api.firecrawl.dev
+
+# ############################# 文档解析引擎配置 #############################
+# module_office 文档解析默认引擎 mineru(ParserFactory 可选 docling)
+# 密钥管理: 本文件为基线模板(无 dev 层时直接可用), 生产建议经
+# config.dev.yaml(gitignored) 或 CODEBIU_MINERU__TOKEN 环境变量覆盖
+mineru:
+  # 部署模式: remote(mineru.net 远程 API, 默认, 支持批量) / local(本地 docker mineru-api)
+  mode: remote
+  # 远程 API 地址与 token(https://mineru.net/apiManage/docs 申请)
+  remote_base_url: https://mineru.net/api/v4
+  token: "sk-jIFVbQ8Na5xgYym1ksFBh33Ru0UE9TsOnJXAypfnB5LvERqC"
+  # 本地 docker mineru-api 地址; 端点默认为 2.x 契约 /file_parse, 版本差异可调
+  local_base_url: http://127.0.0.1:8000
+  local_endpoint: /file_parse
+  # 解析参数
+  model_version: pipeline   # pipeline / vlm
+  language: ch
+  is_ocr: false             # false 自动判断是否 OCR
+  enable_formula: true
+  enable_table: true
+  # 网络与轮询(秒)
+  timeout: 300              # 单次 HTTP 请求超时
+  poll_interval: 5          # 远程结果轮询间隔
+  poll_timeout: 1800        # 远程任务最长等待

@@ -1,0 +1,48 @@
+"""知识库模块 project_document FastAPI 依赖注入"""
+
+from fastapi import Depends
+from module_rag.dao.project_document import ProjectDocumentDao
+from module_rag.service.project_document import ProjectDocumentService
+from module_rag.dependencies.project import get_project_dao
+from module_rag.dependencies.user_model import get_user_model_service
+from module_ai.dependencies.llm import get_llm_service
+from module_ai.dependencies.model_config import get_model_config_service
+from module_rag.dependencies.project_document_chunk import get_project_document_chunk_service
+from module_file.dependencies.filesystem import get_file_service
+async def get_project_document_dao():
+    """DAO工厂"""
+    return ProjectDocumentDao()
+
+
+async def get_project_document_service(
+    document_dao = Depends(get_project_document_dao),
+    project_dao = Depends(get_project_dao),
+    user_model_service = Depends(get_user_model_service),
+    llm_service=Depends(get_llm_service),
+    model_config_service=Depends(get_model_config_service),
+    project_document_chunk_service=Depends(get_project_document_chunk_service),
+    file_service=Depends(get_file_service),
+):
+    """Service工厂
+
+    module_office 文档解析/分块服务(mineru 外部服务调用)延迟到首次请求才加载
+    """
+    from module_office.dependencies.document_parse import get_document_parse_service
+    from module_office.dependencies.document_chunk import (
+        get_document_chunk_prompt,
+        get_document_chunk_service,
+    )
+
+    document_parse_service = get_document_parse_service()
+    document_chunk_service = get_document_chunk_service(get_document_chunk_prompt())
+    return ProjectDocumentService(
+        document_dao,
+        project_dao,
+        user_model_service,
+        llm_service,
+        model_config_service,
+        document_parse_service,
+        document_chunk_service,
+        project_document_chunk_service,
+        file_service
+    )

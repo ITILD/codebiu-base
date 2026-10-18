@@ -1,0 +1,328 @@
+<template>
+  <div p-4 md:p-6 w-full>
+    <!-- 水墨页头 -->
+    <InkPageHead title="用户管理" sub="账户、部门与角色授权的台账" seal="员" />
+
+    <!-- 统一搜索栏: 多字段筛选 -->
+    <TableSearchBar
+      v-model="queryParams"
+      :fields="searchFields"
+      @search="handleSearch"
+      @reset="handleSearch"
+    >
+      <template #actions>
+        <el-button type="primary" @click="handleCreate">新增用户</el-button>
+      </template>
+    </TableSearchBar>
+
+    <!-- 数据表格 -->
+    <el-table :data="tableData" v-loading="loading" stripe w-full>
+      <el-table-column prop="username" label="用户名" min-width="120" show-overflow-tooltip />
+      <el-table-column prop="nickname" label="昵称" min-width="100" show-overflow-tooltip />
+      <el-table-column label="部门" min-width="120">
+        <template #default="{ row }">
+          {{ getDeptName(row.dept_id) }}
+        </template>
+      </el-table-column>
+      <el-table-column prop="email" label="邮箱" min-width="150" show-overflow-tooltip />
+      <el-table-column prop="phone" label="电话" min-width="120" />
+      <el-table-column label="状态" min-width="80">
+        <template #default="{ row }">
+          <el-switch v-model="row.is_active" disabled :active-text="row.is_active ? '启用' : '禁用'" />
+        </template>
+      </el-table-column>
+      <el-table-column label="创建时间" min-width="180" sortable>
+        <template #default="{ row }">
+          {{ row.created_at ? new Date(row.created_at).toLocaleString() : '' }}
+        </template>
+      </el-table-column>
+      <!-- 操作列: 平板及以上固定右侧, 手机取消固定避免遮挡 -->
+      <el-table-column label="操作" min-width="200" :fixed="isMd ? 'right' : false">
+        <template #default="{ row }">
+          <el-button size="small" @click="handleEdit(row)" plain>编辑</el-button>
+          <el-button size="small" type="success" @click="handleAssignRole(row)" plain>分配角色</el-button>
+          <el-button size="small" type="danger" @click="handleDelete(row)" plain>删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <!-- 分页(手机居中, 桌面靠右) -->
+    <div mt-4 flex flex-wrap justify-center sm:justify-end>
+      <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size"
+        :total="total" layout="total, prev, pager, next"
+        @size-change="fetchData" @current-change="fetchData" />
+    </div>
+
+    <!-- 编辑/创建对话框 -->
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="90%" class="max-w-[500px]">
+      <el-form :model="form" :rules="rules" ref="formRef" label-width="80px">
+        <el-form-item prop="username" label="用户名">
+          <el-input v-model="form.username" placeholder="请输入用户名" />
+        </el-form-item>
+        <el-form-item label="部门">
+          <el-tree-select v-model="form.dept_id" :data="deptTreeData" :props="{ value: 'id', label: 'name', children: 'children' }"
+            check-strictly placeholder="请选择部门" clearable w-full />
+        </el-form-item>
+        <el-form-item prop="email" label="邮箱">
+          <el-input v-model="form.email" placeholder="请输入邮箱地址" />
+        </el-form-item>
+        <el-form-item prop="phone" label="电话">
+          <el-input v-model="form.phone" placeholder="请输入电话号码" />
+        </el-form-item>
+        <el-form-item prop="nickname" label="昵称">
+          <el-input v-model="form.nickname" placeholder="请输入昵称" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch v-model="form.is_active" active-text="启用" inactive-text="禁用" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span>
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSubmit" :loading="submitting">确认</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 分配角色对话框 -->
+    <el-dialog v-model="roleDialogVisible" title="分配角色" width="90%" class="max-w-[500px]">
+      <div mb-3>
+        <span>用户名: <strong>{{ currentUserForRole?.username }}</strong></span>
+      </div>
+      <el-checkbox-group v-model="selectedRoleKeys">
+        <div v-for="role in allRoles" :key="role.id" mb-2>
+          <el-checkbox :value="role.role_key" :label="`${role.name} (${role.role_key})`" />
+        </div>
+      </el-checkbox-group>
+      <template #footer>
+        <span>
+          <el-button @click="roleDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSubmitRoles" :loading="roleSubmitting">确认</el-button>
+        </span>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { createUser, deleteUser, updateUser, getUser, listUsers } from '../api/user'
+import { getDeptTree } from '../api/dept'
+import { listAllRoles } from '../api/role'
+import { getRolesForUser, batchAddUserRoles } from '../api/casbin'
+import type { User, UserCreate, UserUpdate } from '../types/user'
+import type { DeptTree } from '../types/dept'
+import type { Role } from '../types/role'
+import type { SearchField } from '@/common/components/TableSearchBar.vue'
+import { useResponsive } from '@/common/composables/useResponsive'
+import { useTableQuery } from '@/common/composables/useTableQuery'
+import { useCrudDialog } from '@/common/composables/useCrudDialog'
+import { ElMessage, ElMessageBox, type FormRules } from 'element-plus'
+
+// 响应式: 平板及以上操作列固定右侧
+const { isMd } = useResponsive()
+
+// 搜索字段配置(用户名/昵称/状态多字段筛选)
+const searchFields: SearchField[] = [
+  { prop: 'username', label: '用户名' },
+  { prop: 'nickname', label: '昵称' },
+  {
+    prop: 'is_active', label: '状态', type: 'select', options: [
+      { label: '启用', value: true },
+      { label: '禁用', value: false },
+    ]
+  },
+]
+
+// 表格列表: 分页/查询/拉取统一收口(useTableQuery, 内置末页空页回退)
+const {
+  pagination, queryParams, tableData, total, loading,
+  fetchData, handleSearch, refreshAfterRemove,
+} = useTableQuery<User>(async (params) => {
+  const { username, nickname, is_active } = params
+  // 空值不传递, 由后端进行模糊/精确过滤
+  const query = {
+    ...params,
+    username: username || undefined,
+    nickname: nickname || undefined,
+    is_active: is_active ?? undefined,
+  }
+  return listUsers(query)
+}, { defaultQuery: { username: '', nickname: '', is_active: undefined } })
+
+// 部门树数据
+const deptTreeData = ref<DeptTree[]>([])
+
+// 验证规则
+const rules: FormRules = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 3, max: 50, message: '长度在 3 到 50 个字符', trigger: 'blur' }
+  ],
+  email: [
+    { type: 'email', message: '请输入正确的邮箱地址', trigger: 'blur' }
+  ],
+  phone: [
+    { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的手机号码', trigger: 'blur' }
+  ],
+}
+
+// 编辑对话框: 新增/编辑共用(useCrudDialog, 内置校验/重置/提交收口)
+const {
+  dialogVisible, formRef, submitting, editingId, form, dialogTitle,
+  openCreate: handleCreate, openEdit, handleSubmit,
+} = useCrudDialog({
+  formBase: () => ({
+    username: '',
+    dept_id: null as string | null,
+    email: '',
+    phone: '',
+    nickname: '',
+    is_active: true,
+  }),
+  submit: async (form, editingId) => {
+    if (editingId) {
+      const updateData: UserUpdate = {
+        username: form.username,
+        dept_id: form.dept_id || undefined,
+        email: form.email,
+        phone: form.phone,
+        nickname: form.nickname,
+        is_active: form.is_active
+      }
+      await updateUser(editingId, updateData)
+      ElMessage.success('用户更新成功')
+    } else {
+      const createData: UserCreate = {
+        username: form.username,
+        password: '123456',
+        dept_id: form.dept_id || undefined,
+        email: form.email,
+        phone: form.phone,
+        nickname: form.nickname,
+        is_active: form.is_active
+      }
+      await createUser(createData)
+      ElMessage.success('用户创建成功')
+    }
+  },
+  onSaved: fetchData,
+  titles: ['新增用户', '编辑用户'],
+})
+
+// 角色分配相关
+const roleDialogVisible = ref(false)
+const roleSubmitting = ref(false)
+const currentUserForRole = ref<User | null>(null)
+const allRoles = ref<Role[]>([])
+const selectedRoleKeys = ref<string[]>([])
+
+// 获取部门名称
+const getDeptName = (deptId?: string) => {
+  if (!deptId) return ''
+  const findDept = (nodes: DeptTree[]): string => {
+    for (const node of nodes) {
+      if (node.id === deptId) return node.name
+      if (node.children?.length) {
+        const found = findDept(node.children)
+        if (found) return found
+      }
+    }
+    return ''
+  }
+  return findDept(deptTreeData.value)
+}
+
+// 加载部门树
+const fetchDeptTree = async () => {
+  try {
+    deptTreeData.value = await getDeptTree()
+  } catch (error) {
+    console.error('获取部门树失败:', error)
+  }
+}
+
+// 加载所有角色
+const fetchAllRoles = async () => {
+  try {
+    allRoles.value = await listAllRoles()
+  } catch (error) {
+    console.error('获取角色列表失败:', error)
+  }
+}
+
+// 打开编辑对话框(先拉取用户详情再回填表单)
+const handleEdit = (row: User) =>
+  openEdit(row, async (r) => {
+    const user = await getUser(r.id)
+    return {
+      username: user.username,
+      dept_id: user.dept_id || null,
+      email: user.email || '',
+      phone: user.phone || '',
+      nickname: user.nickname || '',
+      is_active: user.is_active ?? true,
+    }
+  })
+
+// 删除操作
+const handleDelete = async (row: User) => {
+  try {
+    await ElMessageBox.confirm('确定要删除此用户吗？此操作不可恢复。', '警告', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
+    await deleteUser(row.id)
+    ElMessage.success('删除成功')
+    refreshAfterRemove()
+  } catch (error: any) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error('删除失败，请重试')
+    }
+  }
+}
+
+// 分配角色
+const handleAssignRole = async (row: User) => {
+  currentUserForRole.value = row
+  selectedRoleKeys.value = []
+  roleDialogVisible.value = true
+  // 确保角色列表已加载
+  if (allRoles.value.length === 0) {
+    await fetchAllRoles()
+  }
+  // 加载用户当前角色
+  try {
+    const res = await getRolesForUser(row.id)
+    selectedRoleKeys.value = res.data || []
+  } catch (error) {
+    console.error('获取用户角色失败:', error)
+  }
+}
+
+// 提交角色分配
+const handleSubmitRoles = async () => {
+  if (!currentUserForRole.value) return
+  try {
+    roleSubmitting.value = true
+    await batchAddUserRoles({
+      user_id: currentUserForRole.value.id,
+      role_keys: selectedRoleKeys.value,
+      dom: '*'
+    })
+    ElMessage.success('角色分配成功')
+    roleDialogVisible.value = false
+  } catch (error) {
+    console.error('角色分配失败:', error)
+    ElMessage.error('角色分配失败，请重试')
+  } finally {
+    roleSubmitting.value = false
+  }
+}
+
+// 初始化加载辅助数据(列表已由 useTableQuery 自动拉取)
+onMounted(() => {
+  fetchDeptTree()
+  fetchAllRoles()
+})
+</script>
