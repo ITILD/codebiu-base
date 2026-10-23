@@ -19,6 +19,8 @@ interface Props {
   messages: DisplayMessage[]
   /** 流式接收中的助手消息ID(显示光标与过程区块展开态) */
   streamingMessageId?: string | null
+  /** 是否还有更早的消息可加载(触顶时触发 load-more) */
+  canLoadMore?: boolean
 }
 
 const props = defineProps<Props>()
@@ -27,6 +29,8 @@ const emit = defineEmits<{
   (e: 'copy', text: string): void
   /** 用户响应交互卡片(澄清/知识缺口补充), 由页面回传后端续跑流程 */
   (e: 'interact', messageId: string, payload: InteractionResponsePayload): void
+  /** 触顶请求加载更早消息(页面拉取完成后须调用 finishPrepend 锚定视口) */
+  (e: 'load-more'): void
 }>()
 
 // 滚动容器
@@ -53,13 +57,43 @@ watch(
   () => props.streamingMessageId,
   (id) => { if (id) scrollToBottom(true) },
 )
-// 流式内容增长时跟随(长度签名变化即触发, 避免深度监听)
+// 流式内容增长时跟随(长度签名变化即触发, 避免深度监听);
+// 只签最后一条消息(正在流式生成的那条), 避免每个 token 对全部消息做 map+join
 watch(
-  () => props.messages.map((m) => `${m.content.length}-${m.blocks?.length ?? 0}-${m.interactions?.length ?? 0}`).join(','),
+  () => {
+    const last = props.messages[props.messages.length - 1]
+    return last
+      ? `${props.messages.length}:${last.content.length}-${last.blocks?.length ?? 0}-${last.interactions?.length ?? 0}`
+      : ''
+  },
   () => scrollToBottom(),
 )
 
-defineExpose({ scrollToBottom })
+defineExpose({ scrollToBottom, finishPrepend })
+
+/* ===== 触顶加载更早消息(向上翻页) ===== */
+// 触顶时向页面请求上一页(prepend), 页面完成后调 finishPrepend:
+// 按 prepend 前后 scrollHeight 差锚定视口, 阅读位置不跳动
+let awaitingPrepend = false
+let prevScrollHeight = 0
+
+const handleScroll = () => {
+  const el = scrollRef.value
+  if (!el || awaitingPrepend || !props.canLoadMore) return
+  if (el.scrollTop <= 0) {
+    awaitingPrepend = true
+    prevScrollHeight = el.scrollHeight
+    emit('load-more')
+  }
+}
+
+/** 页面加载请求收尾(含无更多/失败): 锚定视口并复位触顶守卫 */
+function finishPrepend() {
+  if (scrollRef.value && awaitingPrepend) {
+    scrollRef.value.scrollTop = scrollRef.value.scrollHeight - prevScrollHeight
+  }
+  awaitingPrepend = false
+}
 
 /* ===== 消息操作 ===== */
 /** 用户消息的临时文件附件名( blocks 中的 temp_file 标记, 实时与历史恢复共用 ) */
@@ -99,7 +133,7 @@ const handleExportPdf = async (msg: DisplayMessage) => {
 </script>
 
 <template>
-  <div ref="scrollRef" class="h-full overflow-y-auto overscroll-contain">
+  <div ref="scrollRef" class="h-full overflow-y-auto overscroll-contain" @scroll="handleScroll">
     <div class="max-w-[48rem] mx-auto w-full px-4 pt-[1.2rem] pb-6 flex flex-col gap-[1.4rem]">
       <slot name="empty" v-if="messages.length === 0" />
 

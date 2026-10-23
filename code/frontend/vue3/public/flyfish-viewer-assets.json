@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "@file-viewer/vite-plugin",
+  "rendererIds": [
+    "image",
+    "code",
+    "markdown",
+    "pdf",
+    "office-word-openxml",
+    "office-word-binary",
+    "open-document",
+    "spreadsheet-openxml",
+    "spreadsheet-dbf",
+    "office-presentation-binary",
+    "office-presentation"
+  ],
+  "copiedAt": "2026-10-22T22:33:14.506Z",
+  "assets": [
+    {
+      "rendererId": "pdf",
+      "id": "pdf-worker",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/pdf/pdf.worker.mjs",
+      "copied": true,
+      "sourcePackage": "pdfjs-dist",
+      "sourceVersion": "5.4.624"
+    },
+    {
+      "rendererId": "pdf",
+      "id": "pdf-cmaps",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/pdf/cmaps",
+      "copied": true,
+      "sourcePackage": "pdfjs-dist",
+      "sourceVersion": "5.4.624"
+    },
+    {
+      "rendererId": "pdf",
+      "id": "pdf-wasm",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/pdf/wasm",
+      "copied": true,
+      "sourcePackage": "pdfjs-dist",
+      "sourceVersion": "5.4.624"
+    },
+    {
+      "rendererId": "pdf",
+      "id": "pdf-standard-fonts",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/pdf/standard_fonts",
+      "copied": true,
+      "sourcePackage": "pdfjs-dist",
+      "sourceVersion": "5.4.624"
+    },
+    {
+      "rendererId": "pdf",
+      "id": "pdf-cjk-font-fallback",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/pdf/fonts",
+      "copied": true,
+      "required": true
+    },
+    {
+      "rendererId": "office-presentation",
+      "id": "pptx-worker",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/pptx/pptx.worker.js",
+      "copied": true
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-module",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/index.mjs",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-worker",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/worker.mjs",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-frame-cache",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/frame-cache.mjs",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-wasm",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/ppt-native.wasm",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-cjk-font",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/ppt-font-cjk.otf",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-manifest",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/manifest.json",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-package",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/package.json",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-license",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/LICENSE",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-presentation-binary",
+      "id": "ppt-notice",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/ppt/NOTICE",
+      "copied": true,
+      "sourcePackage": "@file-viewer/ppt",
+      "sourceVersion": "0.3.6"
+    },
+    {
+      "rendererId": "office-word-openxml",
+      "id": "docx-worker",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/docx/docx.worker.js",
+      "copied": true
+    },
+    {
+      "rendererId": "office-word-openxml",
+      "id": "docx-worker-jszip",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/docx/jszip.min.js",
+      "copied": true
+    },
+    {
+      "rendererId": "spreadsheet-openxml",
+      "id": "spreadsheet-worker",
+      "to": "/home/hrzn/D/a_project/itild/codebiu-base/code/frontend/vue3/public/vendor/xlsx/sheet.worker.js",
+      "copied": true,
+      "sourcePackage": "@file-viewer/renderer-spreadsheet",
+      "sourceVersion": "3.2.2"
+    }
+  ]
+}

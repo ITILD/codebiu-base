@@ -8,7 +8,6 @@ import type { AguiStreamCallbacks } from '@/common/api/aguiStream'
 import type {
   ChatRequest,
   ChatResponse,
-  ChatHistory,
   ChatStreamEvent
 } from '@/common/types/chat'
 
@@ -129,95 +128,4 @@ export const clearModelCache = async (model_id?: string) => {
  */
 export const checkModelConfig = async (modelConfig: any) => {
   return http_base_server.post<{ message: string }>('/ai/llm/check-config', modelConfig)
-}
-
-// 本地存储相关的辅助函数
-export const LocalStorageHelper = {
-  /**
-   * 保存聊天历史到本地存储
-   */
-  saveChatHistory: (history: ChatHistory[]) => {
-    try {
-      localStorage.setItem('ai_chat_history', JSON.stringify(history))
-    } catch (error) {
-      console.error('保存聊天历史失败:', error)
-    }
-  },
-
-  /**
-   * 从本地存储加载聊天历史
-   */
-  loadChatHistory: (): ChatHistory[] => {
-    try {
-      const stored = localStorage.getItem('ai_chat_history')
-      if (stored) {
-        const history = JSON.parse(stored)
-        // 转换日期字符串为Date对象
-        return history.map((item: any) => ({
-          ...item,
-          createdAt: new Date(item.createdAt),
-          updatedAt: new Date(item.updatedAt)
-        }))
-      }
-    } catch (error) {
-      console.error('加载聊天历史失败:', error)
-    }
-    return []
-  },
-
-  /**
-   * 保存当前选中的聊天会话
-   */
-  saveCurrentChat: (chat: ChatHistory | null) => {
-    try {
-      localStorage.setItem('ai_current_chat', JSON.stringify(chat))
-    } catch (error) {
-      console.error('保存当前聊天失败:', error)
-    }
-  },
-
-  /**
-   * 加载当前选中的聊天会话
-   */
-  loadCurrentChat: (): ChatHistory | null => {
-    try {
-      const stored = localStorage.getItem('ai_current_chat')
-      if (stored) {
-        const chat = JSON.parse(stored)
-        if (chat) {
-          return {
-            ...chat,
-            createdAt: new Date(chat.createdAt),
-            updatedAt: new Date(chat.updatedAt)
-          }
-        }
-      }
-    } catch (error) {
-      console.error('加载当前聊天失败:', error)
-    }
-    return null
-  },
-
-  /**
-   * 保存选中的模型
-   */
-  saveSelectedModel: (model_id: string) => {
-    try {
-      localStorage.setItem('ai_selected_model', model_id)
-    } catch (error) {
-      console.error('保存选中模型失败:', error)
-    }
-  },
-
-  /**
-   * 加载选中的模型
-   */
-  loadSelectedModel: (): string => {
-    try {
-      return localStorage.getItem('ai_selected_model') || ''
-    } catch (error) {
-      console.error('加载选中模型失败:', error)
-      return ''
-    }
-  }
 }

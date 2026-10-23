@@ -138,13 +138,12 @@ const {
   pagination, queryParams, tableData, total, loading,
   fetchData, handleSearch, refreshAfterRemove,
 } = useTableQuery<User>(async (params) => {
-  const { username, nickname, is_active } = params
-  // 空值不传递, 由后端进行模糊/精确过滤
+  // 空值不传递, 由后端进行模糊/精确过滤(queryParams 为宽类型, 此处收敛为标量)
   const query = {
     ...params,
-    username: username || undefined,
-    nickname: nickname || undefined,
-    is_active: is_active ?? undefined,
+    username: (params.username as string) || undefined,
+    nickname: (params.nickname as string) || undefined,
+    is_active: (params.is_active as boolean | undefined) ?? undefined,
   }
   return listUsers(query)
 }, { defaultQuery: { username: '', nickname: '', is_active: undefined } })

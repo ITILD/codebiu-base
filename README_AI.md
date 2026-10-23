@@ -28,8 +28,10 @@ code/backend/server_py/src/
 ├── module_file/       # 虚拟文件树/local+S3 上传下载
 ├── module_ai/         # 模型配置/LLM/重排/OCR/在线语音 (仅接入, 不含本地推理)
 ├── module_rag/        # 知识库: 项目/文档/分块/授权/AG-UI 流式问答
+├── module_agent/      # AI 助手: Agent 配置/Skill 注册表/手工 tool-calling 执行循环(AG-UI 流式)
 ├── module_office/     # 文档解析(仅 MinerU 外部服务调用, 工厂接口可扩展其他服务), 库模式无路由
 ├── module_task/       # 任务队列(local 协程 + Celery 双引擎)
+├── module_contact/    # 联系触达: 验证码收发 + 通知中心(站内信必达+邮件/短信按订阅路由)
 └── module_template/   # 新模块脚手架示例(CRUD/组件选型/布局/Babylon 3D)
 
 # 每个业务线模块标准结构(五件套齐全 + utils):
@@ -88,7 +90,12 @@ frontend/vue3/src/
 | 文件 | 说明 |
 | :--- | :--- |
 | `src/app.py` | 服务入口 + **模块 router 注册中心**（新模块必须在此 import） |
-| `src/app_task.py` | Celery Worker 入口（tasks.engine=celery 时需要） |
+| `src/app_task.py` | Celery Worker 入口（tasks.engine=celery 时需要；定时任务另启 `celery -A src.app_task beat`） |
+| `src/module_task/tasks/scheduler.py` + `schedule_beat.py` | 周期调度(REQ-012)：local 单协程调度循环 / celery beat 每分钟 tick，调度定义落库热更（详见 deveops/运维手册/任务与调度运维.md） |
+| `src/module_contact/service/notification.py` | 通知中心统一入口(REQ-011)：`notify(user_id, notify_type, title, content)` 站内必达 + 邮件/短信按订阅路由；任务终态埋点见 `module_task/tasks/__init__.py` |
+| `src/module_agent/service/runner.py` | Agent 执行循环(REQ-013)：`chat_stream` 手工 tool-calling（bind_tools→astream→skill 执行回填→续跑，8 轮上限）；Skill 注册表见 `module_agent/skills/`（增删 skill 零改循环） |
+| `login_security` 动态配置组 + `src/module_authorization/service/login_security.py` | 登录安全(REQ-014)：失败锁定/密码强度/二次验证参数管理员通用配置页可调即改即生效（默认锁 5 次/15 分钟）；失败计数走缓存键 TTL 到期自动恢复 |
+| `GET /file/filesystem/preview/{entry_id}` + 前端 `modules/file/components/FilePreviewDialog.vue` | 文件在线预览(REQ-016)：鉴权同下载判定链，服务端流式代理(inline + RFC5987)规避对象存储跨域；前端 file-viewer 浏览器端渲染(依赖 @file-viewer/vue3，渲染器 6 件显式限定独立 chunk 按需懒加载，白名单见组件内 PREVIEWABLE_EXTENSIONS；不含 .ppt 老格式——其链路 16M CJK 字体) |
 | `src/common/config/lifespan.py` | 启动流程（连接/建表/种子/权限初始化） |
 | `src/common/config/db.py` | 数据库管理器（关系/缓存/向量装配） |
 | `src/common/config/dynamic/schemas.py` | 动态配置组 schema（通用配置页由它驱动） |
@@ -96,6 +103,7 @@ frontend/vue3/src/
 | `src/module_authorization/config/permissions.py` | sys/main 域权限声明 |
 | `src/module_rag/config/permissions.py` | rag/task 域权限声明 |
 | `config.yaml` / `config.<APP_ENV>.yaml` | 基线层(零依赖默认, 单文件可启动) / 环境层(数据库/模型种子/密钥, gitignored) |
+| `alembic/`、`alembic.ini`、`src/common/utils/db/migration.py` | 数据库结构迁移(REQ-008)：首启 create_all+自动 stamp；演进 `alembic revision --autogenerate` + `upgrade head`(详见 deveops/运维手册/数据库运维.md) |
 | `doc/dev/permission.md` | 新模块权限接入指南 |
 
 ### 前端
@@ -125,6 +133,7 @@ python -m pytest tests -x   # 测试
 cd code/frontend/vue3
 pnpm i
 pnpm run dev            # 开发 → http://localhost:2002（端口取 .env 的 VITE_PORT）
+pnpm vitest run         # 单元测试（配置在 vitest.config.ts，用例 src/**/*.spec.ts）
 pnpm run build          # 构建（含 type-check: vue-tsc）
 
 # 默认管理员: admin / admin123（config.yaml admin 段）

@@ -21,6 +21,7 @@ declare module 'vue-router/auto-routes' {
     '/': RouteRecordInfo<'/', '/', Record<never, never>, Record<never, never>>,
     '/[..all]': RouteRecordInfo<'/[..all]', '/:ll(.*)', { ll: ParamValue<true> }, { ll: ParamValue<false> }>,
     '/admin': RouteRecordInfo<'/admin', '/admin', Record<never, never>, Record<never, never>>,
+    '/agent/manage': RouteRecordInfo<'/agent/manage', '/agent/manage', Record<never, never>, Record<never, never>>,
     '/ai/chat': RouteRecordInfo<'/ai/chat', '/ai/chat', Record<never, never>, Record<never, never>>,
     '/ai/model_config': RouteRecordInfo<'/ai/model_config', '/ai/model_config', Record<never, never>, Record<never, never>>,
     '/ai/ocr': RouteRecordInfo<'/ai/ocr', '/ai/ocr', Record<never, never>, Record<never, never>>,
@@ -31,6 +32,7 @@ declare module 'vue-router/auto-routes' {
     '/authorization/role': RouteRecordInfo<'/authorization/role', '/authorization/role', Record<never, never>, Record<never, never>>,
     '/authorization/user': RouteRecordInfo<'/authorization/user', '/authorization/user', Record<never, never>, Record<never, never>>,
     '/file/': RouteRecordInfo<'/file/', '/file', Record<never, never>, Record<never, never>>,
+    '/main/audit': RouteRecordInfo<'/main/audit', '/main/audit', Record<never, never>, Record<never, never>>,
     '/main/config': RouteRecordInfo<'/main/config', '/main/config', Record<never, never>, Record<never, never>>,
     '/main/db': RouteRecordInfo<'/main/db', '/main/db', Record<never, never>, Record<never, never>>,
     '/main/dict': RouteRecordInfo<'/main/dict', '/main/dict', Record<never, never>, Record<never, never>>,
@@ -41,6 +43,7 @@ declare module 'vue-router/auto-routes' {
     '/rag/project': RouteRecordInfo<'/rag/project', '/rag/project', Record<never, never>, Record<never, never>>,
     '/setting': RouteRecordInfo<'/setting', '/setting', Record<never, never>, Record<never, never>>,
     '/task/queue': RouteRecordInfo<'/task/queue', '/task/queue', Record<never, never>, Record<never, never>>,
+    '/task/schedule': RouteRecordInfo<'/task/schedule', '/task/schedule', Record<never, never>, Record<never, never>>,
     '/template/babylon': RouteRecordInfo<'/template/babylon', '/template/babylon', Record<never, never>, Record<never, never>>,
     '/template/container': RouteRecordInfo<'/template/container', '/template/container', Record<never, never>, Record<never, never>>,
     '/template/editor': RouteRecordInfo<'/template/editor', '/template/editor', Record<never, never>, Record<never, never>>,
@@ -52,6 +55,7 @@ declare module 'vue-router/auto-routes' {
     '/template/playground/harry_potter': RouteRecordInfo<'/template/playground/harry_potter', '/template/playground/harry_potter', Record<never, never>, Record<never, never>>,
     '/template/template': RouteRecordInfo<'/template/template', '/template/template', Record<never, never>, Record<never, never>>,
     '/version': RouteRecordInfo<'/version', '/version', Record<never, never>, Record<never, never>>,
+    '/websearch/search': RouteRecordInfo<'/websearch/search', '/websearch/search', Record<never, never>, Record<never, never>>,
   }
 
   /**
@@ -75,6 +79,10 @@ declare module 'vue-router/auto-routes' {
     }
     'src/pages/admin.vue': {
       routes: '/admin'
+      views: never
+    }
+    'src/modules/agent/pages/manage.vue': {
+      routes: '/agent/manage'
       views: never
     }
     'src/modules/ai/pages/chat.vue': {
@@ -117,6 +125,10 @@ declare module 'vue-router/auto-routes' {
       routes: '/file/'
       views: never
     }
+    'src/modules/main/pages/audit.vue': {
+      routes: '/main/audit'
+      views: never
+    }
     'src/modules/main/pages/config.vue': {
       routes: '/main/config'
       views: never
@@ -155,6 +167,10 @@ declare module 'vue-router/auto-routes' {
     }
     'src/modules/task/pages/queue.vue': {
       routes: '/task/queue'
+      views: never
+    }
+    'src/modules/task/pages/schedule.vue': {
+      routes: '/task/schedule'
       views: never
     }
     'src/modules/template/pages/babylon.vue': {
@@ -199,6 +215,10 @@ declare module 'vue-router/auto-routes' {
     }
     'src/pages/version.vue': {
       routes: '/version'
+      views: never
+    }
+    'src/modules/websearch/pages/search.vue': {
+      routes: '/websearch/search'
       views: never
     }
   }

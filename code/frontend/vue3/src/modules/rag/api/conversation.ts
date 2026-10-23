@@ -36,6 +36,17 @@ export const listMyConversations = (params: PaginationParams) => {
 };
 
 /**
+ * 获取我的智能体对话列表(AI 助手页 agent 模式使用, 仅 agent_id 非空的会话)
+ * @param params 分页参数
+ */
+export const listAgentConversations = (params: PaginationParams) => {
+  return http_base_server.get<PaginationResponse<Conversation>>(
+    '/rag/conversations/my',
+    { params: { ...params, scope: 'agent' } }
+  );
+};
+
+/**
  * 获取对话详情
  * @param conversationId 对话ID
  */

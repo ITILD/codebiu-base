@@ -4,6 +4,10 @@ from common.utils.security.token_util import TokenType
 from common.utils.security.password import verify_password
 from module_authorization.service.user import UserService
 from module_authorization.service.token import TokenService
+from module_authorization.service.login_security import (
+    LoginSecurityService,
+    password_policy_error,
+)
 from module_authorization.do.user import UserCreate, UserResponse, User, UserUpdate
 from module_authorization.do.token import (
     TokenCreateRequest,
@@ -15,7 +19,7 @@ from module_authorization.do.auth import AuthResponse, AuthLogoutRequest, SelfPr
 # db_cache redis客户端 用于存储已吊销的 access_token 的黑名单
 from common.config.db import db_cache
 from common.config.dynamic import get_settings
-from common.config.dynamic.schemas import TokenSettings
+from common.config.dynamic.schemas import LoginSecuritySettings, TokenSettings
 from module_authorization.config.register import email_verify_enabled
 # 邮件/短信触达与验证码能力由 module_contact 提供(注册验证码收发经依赖注入调用)
 from module_contact.service.verify_code import VerifyCodeService
@@ -43,6 +47,8 @@ class AuthService:
         self.user_service = user_service
         self.token_service = token_service
         self.verify_code_service = verify_code_service or VerifyCodeService()
+        # 登录安全策略(REQ-014): 无状态服务, 默认新建
+        self.login_security = LoginSecurityService()
 
     async def register(
         self, user_create: UserCreate, code: str | None = None
@@ -52,8 +58,14 @@ class AuthService:
         :param user_create: 用户创建数据
         :param code: 邮箱验证码(开启注册邮箱验证 email.use_for_register 时必填)
         :return: 注册成功的用户信息
-        :raises: ValueError 如果用户名已存在/邮箱验证码缺失或错误
+        :raises: ValueError 如果用户名已存在/邮箱验证码缺失或错误/密码不符合强度策略
         """
+        # 密码强度策略(REQ-014, 开启时注册与改密两处生效)
+        sec = await get_settings(LoginSecuritySettings)
+        if sec.password_policy_enabled:
+            error = password_policy_error(user_create.password, sec)
+            if error:
+                raise ValueError(error)
         if await email_verify_enabled():
             if not user_create.email:
                 raise ValueError("注册需要邮箱验证, 请填写邮箱")
@@ -76,25 +88,58 @@ class AuthService:
         # 生成/冷却/发送/落缓存统一由 module_contact 验证码服务管理
         return await self.verify_code_service.send(email, scene="register")
 
-    async def login(self, username: str, password: str) -> AuthResponse:
+    async def login(self, username: str, password: str, code: str | None = None) -> AuthResponse:
         """
         用户登录
         :param username: 用户名
         :param password: 密码
+        :param code: 登录二次验证码(开启 login_security.mfa_enabled 时必填, 发送至绑定邮箱)
         :return: 令牌响应
-        :raises: ValueError 如果用户名或密码错误
+        :raises: ValueError 如果用户名或密码错误/账户锁定/禁用/验证码缺失或错误
         """
+        sec = await get_settings(LoginSecuritySettings)
+        # 登录失败锁定(REQ-014): 锁定期内直接拒绝, 不再校验凭据
+        if sec.lock_enabled:
+            await self.login_security.check_lock(username, sec)
+
         # 验证用户凭据
         user = await self.user_service.authenticate(username, password)
         if not user:
+            if sec.lock_enabled:
+                await self.login_security.record_failure(username, sec)
             raise ValueError("用户名或密码错误")
 
         # 检查用户是否激活
         if not user.is_active:
             raise ValueError("用户账户已被禁用")
 
+        # 登录二次验证(REQ-014): 密码通过后校验邮箱验证码(scene=login, 一次一用)
+        if sec.mfa_enabled:
+            if not user.email:
+                raise ValueError("账户未配置邮箱, 无法完成登录二次验证, 请联系管理员")
+            await self.verify_code_service.verify(user.email, code, scene="login")
+
+        # 登录成功清空失败计数
+        if sec.lock_enabled:
+            await self.login_security.clear_failures(username)
+
         # 创建令牌请求
         return await self._create_token_response_full(user)
+
+    async def send_login_code(self, username: str) -> bool:
+        """
+        发送登录二次验证邮箱验证码(需开启 login_security.mfa_enabled)
+        :param username: 登录用户名(验证码发送至其绑定邮箱)
+        :return: 是否发送成功
+        :raises: ValueError 如果未开启二次验证/用户不存在或未配置邮箱/发送过于频繁
+        """
+        sec = await get_settings(LoginSecuritySettings)
+        if not sec.mfa_enabled:
+            raise ValueError("未开启登录二次验证")
+        user = await self.user_service.get_by_username(username)
+        if not user or not user.email:
+            raise ValueError("用户不存在或未配置邮箱")
+        return await self.verify_code_service.send(user.email, scene="login")
 
     async def _create_token_response_full(self, user: User) -> AuthResponse:
         """
@@ -238,13 +283,12 @@ class AuthService:
             return {"roles": {}, "permissions": []}
         enforcer = auth_manager.enforcer
 
-        # 角色绑定: 遍历用户-角色绑定规则,按域分组
+        # 角色绑定: 按 user_id 定向过滤绑定规则(避免全库拉取后在 Python 内逐条比对),按域分组
         roles: dict[str, list[str]] = {}
-        # 注: AsyncEnforcer 的 get_grouping_policy 是同步方法(返回list),不能 await
-        for grouping in enforcer.get_grouping_policy():
-            uid, role_key, dom = grouping[0], grouping[1], grouping[2]
-            if uid == user_id:
-                roles.setdefault(dom, []).append(role_key)
+        # 注: get_filtered_grouping_policy 是同步方法(第0列过滤 user_id),不能 await
+        for grouping in enforcer.get_filtered_grouping_policy(0, user_id):
+            _, role_key, dom = grouping[0], grouping[1], grouping[2]
+            roles.setdefault(dom, []).append(role_key)
 
         # 权限码展开: 全局管理员直接返回通配符
         if "admin" in roles.get("*", []):
@@ -299,6 +343,12 @@ class AuthService:
             raise ValueError("旧密码错误")
         if old_password == new_password:
             raise ValueError("新密码不能与旧密码相同")
+        # 密码强度策略(REQ-014, 与注册同规则)
+        sec = await get_settings(LoginSecuritySettings)
+        if sec.password_policy_enabled:
+            error = password_policy_error(new_password, sec)
+            if error:
+                raise ValueError(error)
         # user_service.update 内部会做哈希处理
         await self.user_service.update(user_id, UserUpdate(password=new_password))
 

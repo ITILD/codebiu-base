@@ -99,8 +99,37 @@ const renderSegments = async () => {
   if (seq === renderSeq) segments.value = result
 }
 
-// 内容变化(含流式增量)即触发重渲染
-watch(() => props.content, () => { void renderSegments() }, { immediate: true })
+// 内容变化(含流式增量)触发重渲染;
+// 流式下每个 token 都会触发, 全量 lexer/parser 成本随消息增长 O(n²) 攀升,
+// 节流窗口内合并为一次 trailing 渲染(终态内容必达, 卸载时清理定时器)
+const RENDER_THROTTLE_MS = 150
+let lastRenderAt = 0
+let trailingTimer: ReturnType<typeof setTimeout> | null = null
+
+const scheduleRender = () => {
+  const elapsed = Date.now() - lastRenderAt
+  if (elapsed >= RENDER_THROTTLE_MS) {
+    lastRenderAt = Date.now()
+    void renderSegments()
+    return
+  }
+  if (trailingTimer === null) {
+    trailingTimer = setTimeout(() => {
+      trailingTimer = null
+      lastRenderAt = Date.now()
+      void renderSegments()
+    }, RENDER_THROTTLE_MS - elapsed)
+  }
+}
+
+onBeforeUnmount(() => {
+  if (trailingTimer !== null) {
+    clearTimeout(trailingTimer)
+    trailingTimer = null
+  }
+})
+
+watch(() => props.content, scheduleRender, { immediate: true })
 
 /** mermaid 源码被编辑(向上冒泡, 供页面回写消息内容) */
 const handleMermaidUpdate = (payload: { id: string; code: string }) => {

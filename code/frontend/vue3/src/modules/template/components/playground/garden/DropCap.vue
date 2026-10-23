@@ -10,10 +10,12 @@
         艺是最古老的慢艺术：你把一粒种子交给时间，然后日复一日地观察、等待、修正。没有立竿见影的回报，却处处是不动声色的惊喜——第一片真叶、第一个花苞、第一只来访的蜜蜂。
       </p>
       <p class="mb-2 text-justify">
-        古籍排版同样信奉"慢"的美学：章节之首放大数倍的首字母沉入两三行文字之间，读者的目光被它稳稳接住，再顺着行间滑入正文。这个技巧只需要一个浮动 span。
+        古籍排版同样信奉"慢"的美学：章节之首放大数倍的首字母沉入两三行文字之间，读者的目光被它稳稳接住，再顺着行间滑入正文。这个技巧只需要一个浮动
+        span。
       </p>
       <p class="text-justify">
-        CSS 也提供了更语义化的 initial-letter 属性，可惜浏览器支持尚未普及；在那之前，float + font-size + line-height 的组合就是最稳的替代方案。
+        CSS 也提供了更语义化的 initial-letter 属性，可惜浏览器支持尚未普及；在那之前，float +
+        font-size + line-height 的组合就是最稳的替代方案。
       </p>
     </article>
 
@@ -29,7 +31,14 @@
       </div>
       <div class="flex items-center gap-2">
         <span class="w-14 shrink-0 text-xs text-[var(--el-text-color-secondary)]">行高</span>
-        <el-slider v-model="state.lineHeight" :min="1.4" :max="2.2" :step="0.05" size="small" class="flex-1" />
+        <el-slider
+          v-model="state.lineHeight"
+          :min="1.4"
+          :max="2.2"
+          :step="0.05"
+          size="small"
+          class="flex-1"
+        />
       </div>
       <p class="pt-1 text-xs leading-5 text-[var(--el-text-color-secondary)]">
         首字 float 左浮后, 后续文字环绕下沉字符排列; font-size 放大 n 倍时 line-height 需同步压缩,
@@ -42,6 +51,8 @@
 <script setup lang="ts">
 // 首字下沉(garden.bradwoods.io 排版类笔记): float 首字方案, 兼容性优于 initial-letter
 import type { CSSProperties } from 'vue'
+// .prose 排版样式改为静态文件随本组件懒加载(见 prose.css 头注释)
+import './prose.css'
 
 /** 可调参数 */
 const state = reactive({ on: true, em: 3, lineHeight: 1.8 })

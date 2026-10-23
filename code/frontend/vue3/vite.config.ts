@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { defineConfig, loadEnv } from 'vite'
@@ -16,6 +16,10 @@ import { VueRouterAutoImports } from 'unplugin-vue-router'
 import UnoCSS from 'unocss/vite'// css 辅助
 import Icons from 'unplugin-icons/vite'//图标
 import IconsResolver from 'unplugin-icons/resolver' //图标插件
+// 文件在线预览(file-viewer): 自动发现已安装的 renderer preset 并复制 worker/wasm 离线资产
+import { fileViewerRenderers, createFileViewerManualChunks } from '@file-viewer/vite-plugin'
+// file-viewer 渲染器分包函数(与下方 manualChunks 组合)
+const fvManualChunks = createFileViewerManualChunks()
 // 代码根路径
 import path from 'path'
 const pathSrc = path.resolve(__dirname, 'src')
@@ -31,6 +35,25 @@ const versionFilePlugin = {
       resolve(__dirname, 'dist', 'version.json'),
       JSON.stringify({ version: pkgVersion }),
     )
+  },
+}
+// .ppt(97-2003 老格式)渲染链路清理: 其 wasm 引擎 + 16M CJK 字体包重 18M,
+// 预览白名单已排除 .ppt(见 FilePreviewDialog), 构建后剔除该格式全部产物
+// (源资产在 node_modules 完好, 恢复 .ppt 预览时移除本插件重新构建即可)
+const pptLegacyPrunePlugin = {
+  name: 'prune-ppt-legacy-assets',
+  apply: 'build' as const,
+  closeBundle() {
+    const dist = resolve(__dirname, 'dist')
+    // 老格式专用 vendor 目录(wasm 引擎 + 字体包)
+    rmSync(resolve(dist, 'vendor', 'ppt'), { recursive: true, force: true })
+    // 老格式专用 chunk 与字体/wasm 产物(含 .gz/.br 预压缩副本)
+    if (!existsSync(resolve(dist, 'assets'))) return
+    for (const name of readdirSync(resolve(dist, 'assets'))) {
+      if (/^ppt-(font-cjk-.*\.otf|native-.*\.wasm|[\w-]+\.js)(\.(br|gz))?$/.test(name)) {
+        rmSync(resolve(dist, 'assets', name), { force: true })
+      }
+    }
   },
 }
 // 代理
@@ -139,6 +162,24 @@ export default defineConfig(
           exclude: [/BaseMonacoEdit\.vue$/],
         }),
         Icons({ autoInstall: true }), //自动下载图标库 必须在 Components 之后或独立存在
+        // file-viewer 预览器: 显式限定渲染器(REQ-016 范围 = 图片/文本 + PDF/Word/Excel/PPT),
+        // 排除 preset-office 附带的 hangul/iwork/wordperfect 等无关重型链路;
+        // 构建时复制 worker/wasm 资产到 dist
+        // inject: false —— 不把渲染器注册模块注入首屏入口(默认注入会让入口静态
+        // 拉起全部 6 个渲染器 chunk, 约 2.3MB JS); 注册模块改由 FilePreviewDialog
+        // 引入(见该文件), 渲染器随文件管理页懒加载, 首屏零开销
+        fileViewerRenderers({
+          autoPresets: false,
+          renderers: ['image', 'text', 'pdf', 'word', 'spreadsheet', 'presentation'],
+          formats: ['pdf', 'docx', 'docm', 'xlsx', 'xlsm', 'csv', 'pptx', 'pptm', 'ppsx',
+            'txt', 'md', 'log', 'json', 'xml', 'yaml', 'yml', 'html',
+            'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tiff', 'avif'],
+          copyAssets: true,
+          inject: false,
+        }),
+
+        // 构建后剔除 .ppt 老格式渲染链路产物(须在 copyAssets 之后执行)
+        pptLegacyPrunePlugin,
 
       ],
       resolve: {
@@ -180,27 +221,44 @@ export default defineConfig(
           output: {
             // 分包策略: 变更频率低的大库独立成块, 利于长效缓存;
             // 页面本身已由 unplugin-vue-router 懒加载, 此处只切第三方依赖
-            manualChunks(id: string) {
-              if (!id.includes('node_modules')) return
-              // Vue 全家桶(最高频, 单独缓存)
-              if (/[\\/]node_modules[\\/](@vue|vue|vue-router|pinia|vue-i18n|@vueuse)[\\/]/.test(id)) {
-                return 'vue-vendor'
-              }
-              if (id.includes('element-plus') || id.includes('@element-plus') || id.includes('dayjs')) {
-                return 'element-plus'
-              }
-              // ECharts 图表库(db 关系图用), 独立缓存
-              if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
-              // Mermaid 及其图形依赖(聊天/导出时动态加载)
-              if (/[\\/]node_modules[\\/](mermaid|cytoscape|d3|d3-[^\\/]+|dagre[^\\/]*|elkjs|roughjs|khroma|@viz-js)[\\/]/.test(id)) {
-                return 'mermaid'
-              }
-              if (id.includes('monaco-editor')) return 'monaco'
-              if (id.includes('katex')) return 'katex'
-              if (id.includes('exceljs')) return 'exceljs'
-              if (id.includes('marked')) return 'markdown'
-              // Babylon.js 3D 引擎(独立 chunk 长效缓存)
-              if (id.includes('babylonjs') || id.includes('earcut')) return 'babylon'
+            // 注: rolldown 中 manualChunks 由 advancedChunks 仿真, 二者互斥
+            // (同时给出时 manualChunks 整体被忽略), 故统一写在 advancedChunks.groups
+            advancedChunks: {
+              groups: [
+                // 共享运行时助手(vite 预加载助手 / oxc transform helpers)单独成块:
+                // 这类全图共用的小模块若不认领, 会被并入 file-viewer 渲染器分包,
+                // 入口为取 2 个符号就得静态拉起数百 KB 渲染器代码。必须用 test
+                // 认领 —— manualChunks 函数对虚拟模块(\0 前缀 id)的返回值不生效
+                { name: 'runtime-helpers', priority: 10, test: /(?:vite\/preload-helper|@oxc-project)/ },
+                // 其余按模块路径分组(与常见 manualChunks 写法等价)
+                {
+                  name(id: string) {
+                    // file-viewer 按渲染器独立分包(worker/wasm 长效缓存, 不进主包)
+                    const fvChunk = fvManualChunks(id)
+                    if (fvChunk) return fvChunk
+                    if (!id.includes('node_modules')) return
+                    // Vue 全家桶(最高频, 单独缓存)
+                    if (/[\\/]node_modules[\\/](@vue|vue|vue-router|pinia|vue-i18n|@vueuse)[\\/]/.test(id)) {
+                      return 'vue-vendor'
+                    }
+                    if (id.includes('element-plus') || id.includes('@element-plus') || id.includes('dayjs')) {
+                      return 'element-plus'
+                    }
+                    // ECharts 图表库(db 关系图用), 独立缓存
+                    if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
+                    // Mermaid 及其图形依赖(聊天/导出时动态加载)
+                    if (/[\\/]node_modules[\\/](mermaid|cytoscape|d3|d3-[^\\/]+|dagre[^\\/]*|elkjs|roughjs|khroma|@viz-js)[\\/]/.test(id)) {
+                      return 'mermaid'
+                    }
+                    if (id.includes('monaco-editor')) return 'monaco'
+                    if (id.includes('katex')) return 'katex'
+                    if (id.includes('exceljs')) return 'exceljs'
+                    if (id.includes('marked')) return 'markdown'
+                    // Babylon.js 3D 引擎(独立 chunk 长效缓存)
+                    if (id.includes('babylonjs') || id.includes('earcut')) return 'babylon'
+                  },
+                },
+              ],
             },
           },
         },

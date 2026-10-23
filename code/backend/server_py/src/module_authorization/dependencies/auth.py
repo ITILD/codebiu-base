@@ -1,6 +1,6 @@
 """权限认证模块 auth FastAPI 依赖注入"""
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from module_authorization.service.auth import AuthService
 from module_authorization.service.user import UserService
@@ -24,12 +24,16 @@ async def get_auth_service(
 
 
 async def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """获取当前用户"""
     try:
-        return await auth_service.get_current_user(token)
+        user = await auth_service.get_current_user(token)
+        # 写入 request.state 供审计中间件读取操作人(REQ-009)
+        request.state.user_id = user.id
+        return user
 
     except Exception as e:
         # 捕获所有其他异常，确保错误信息能够传递给前端
@@ -37,18 +41,23 @@ async def get_current_user(
 
 
 async def get_current_user_id(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """获取当前用户ID"""
     try:
-        return await auth_service.get_current_user_id(token)
+        user_id = await auth_service.get_current_user_id(token)
+        # 写入 request.state 供审计中间件读取操作人(REQ-009)
+        request.state.user_id = user_id
+        return user_id
     except Exception as e:
         # 捕获所有其他异常，确保错误信息能够传递给前端
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
 
 async def get_current_user_id_optional(
+    request: Request,
     token: str | None = Depends(
         OAuth2PasswordBearer(tokenUrl="/authorization/auth/token", auto_error=False)
     ),
@@ -58,6 +67,9 @@ async def get_current_user_id_optional(
     if not token:
         return None
     try:
-        return await auth_service.get_current_user_id(token)
+        user_id = await auth_service.get_current_user_id(token)
+        if user_id:
+            request.state.user_id = user_id
+        return user_id
     except Exception:
         return None

@@ -1,6 +1,7 @@
 # self
 from common.config.index import conf
 from common.config.lifespan import lifespan
+from common.middleware.audit import AuditMiddleware
 from common.utils.fastapi_ex.exceptions import BizFastAPI
 
 # lib
@@ -32,7 +33,10 @@ app = BizFastAPI(
 
 
 ############################### middleware 中间件 ###############################
-if conf.middleware.gzip: # 启用gzip 
+# 操作审计(REQ-009): 写操作与登录登出落库, 任何审计异常不影响业务请求
+app.add_middleware(AuditMiddleware)
+
+if conf.middleware.gzip: # 启用gzip
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 if conf.middleware.cors:  # 跨域

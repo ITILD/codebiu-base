@@ -6,6 +6,7 @@ import {
   Promotion, VideoPause, Plus, CaretBottom, Check,
   Loading, Document, CircleCloseFilled, Microphone,
 } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import type { ChatAttachment } from '@/common/types/chat'
 import { useVoiceInput } from '@/common/composables/useVoiceInput'
 

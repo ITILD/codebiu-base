@@ -1,6 +1,6 @@
 """权限认证模块 auth 接口层: 参数校验并调度 service"""
 
-from fastapi import APIRouter, Depends, status, UploadFile, File
+from fastapi import APIRouter, Depends, Form, status, UploadFile, File
 from fastapi.security import OAuth2PasswordRequestForm
 from common.utils.fastapi_ex.exceptions import UnauthorizedError
 from module_authorization.do.token import (
@@ -20,11 +20,15 @@ from module_authorization.dependencies.avatar import get_avatar_service
 from module_authorization.do.user import UserCreate,User
 from module_authorization.do.auth import AuthResponse,AuthLogoutRequest,SelfProfileUpdate,PasswordChange
 from module_authorization.do.auth import (
+    LoginCodeRequest,
+    LoginPolicyResponse,
     RegisterCodeRequest,
     RegisterConfigResponse,
     RegisterRequest,
 )
 from module_authorization.config.register import email_verify_enabled
+from common.config.dynamic import get_settings
+from common.config.dynamic.schemas import LoginSecuritySettings
 
 # 创建路由器
 router = APIRouter()
@@ -142,18 +146,41 @@ async def register_user(
     user_create = UserCreate(**register_request.model_dump(exclude={"code"}))
     return await auth_service.register(user_create, register_request.code)
 
+@router.get("/login-policy", summary="获取登录流程配置")
+async def get_login_policy() -> LoginPolicyResponse:
+    """返回登录流程配置(是否开启二次验证码),供前端决定登录弹窗是否展示验证码输入"""
+    # 匿名可访问: 登录前展示表单所需(仅暴露开关, 不含阈值等其余安全参数)
+    sec = await get_settings(LoginSecuritySettings)
+    return LoginPolicyResponse(mfa_enabled=sec.mfa_enabled)
+
+
+@router.post("/login/code", summary="发送登录二次验证邮箱验证码")
+async def send_login_code(
+    code_request: LoginCodeRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+) -> bool:
+    """向登录用户绑定邮箱发送二次验证码:仅开启 login_security.mfa_enabled 时可用,
+    同一邮箱60秒内限发一次,验证码5分钟内有效且校验通过后立即失效
+    """
+    # 未开启二次验证/用户不存在/发送过于频繁抛 ValueError, 由全局处理器映射为 400
+    return await auth_service.send_login_code(code_request.username)
+
+
 @router.post("/login", summary="登录获取访问令牌")
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
+    code: str | None = Form(default=None, description="登录二次验证码(开启时必填)"),
     auth_service: AuthService = Depends(get_auth_service),
 ) -> AuthResponse:
-    """校验用户名密码并签发登录态:凭据错误或账户被禁用时返回401
+    """校验用户名密码并签发登录态:凭据错误/账户锁定或被禁用时返回401
+    开启登录失败锁定(login_security.lock_enabled)后连续失败达阈值将锁定账户一段时间;
+    开启二次验证(mfa_enabled)时需先调 /login/code 获取验证码并随表单提交
     成功返回 access/refresh 双令牌与用户信息
     """
     try:
-        token_response = await auth_service.login(form_data.username, form_data.password)
+        token_response = await auth_service.login(form_data.username, form_data.password, code)
     except ValueError as e:
-        # 凭据错误/账户禁用 -> 401; 其余意外异常交由全局处理器兜底 500
+        # 凭据错误/账户锁定/禁用/验证码错误 -> 401; 其余意外异常交由全局处理器兜底 500
         raise UnauthorizedError(str(e))
     return token_response
 

@@ -335,14 +335,16 @@ const handleDelete = (row: QueueTask) => {
 
 // ################ 生命周期 ################
 onMounted(async () => {
-  // 加载任务类型注册表(搜索下拉 + 新建对话框)
-  try {
-    registry.value = await getTaskRegistry()
-    searchFields[1].options = registry.value.map(t => ({ label: t.name, value: t.type }))
-  }
-  catch (error) {
-    console.error('获取任务类型注册表失败:', error)
-  }
+  // 任务类型注册表与统计为独立请求, 并行拉取(串行等待会叠加首屏时间)
+  // 加载任务类型注册表(搜索下拉 + 新建对话框), 失败仅降级下拉选项
+  getTaskRegistry()
+    .then((r) => {
+      registry.value = r
+      searchFields[1].options = r.map(t => ({ label: t.name, value: t.type }))
+    })
+    .catch((error) => {
+      console.error('获取任务类型注册表失败:', error)
+    })
   // 列表已由 useTableQuery 自动拉取, 此处补充刷新统计
   await fetchStats()
 })

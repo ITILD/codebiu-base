@@ -97,6 +97,12 @@
       <el-table-column label="操作" min-width="320" align="center" :fixed="isMd ? 'right' : false">
         <template #default="{ row }">
           <el-button size="small" plain @click="handleShowDetail(row)">详情</el-button>
+          <el-tooltip v-if="!row.is_directory && isFilePreviewable(row)" :disabled="row.can_download"
+            content="无下载权限，不可预览" placement="top">
+            <el-button size="small" plain :disabled="!row.can_download" @click="handlePreview(row)">
+              预览
+            </el-button>
+          </el-tooltip>
           <template v-if="!isBusinessEntry(row)">
             <el-tooltip v-if="!row.is_directory" :disabled="row.can_download"
               content="无下载权限(需管理员配置)" placement="top">
@@ -145,6 +151,9 @@
 
     <!-- 条目详情抽屉(子组件 open(row) 拉取详情) -->
     <FileDetailDrawer ref="fileDetailDrawerRef" :source-label="sourceLabel" :format-size="formatSize" />
+
+    <!-- 在线预览对话框(file-viewer 浏览器端渲染, 子组件 open(row) 校验并拉流) -->
+    <FilePreviewDialog ref="filePreviewRef" />
   </div>
 </template>
 
@@ -178,6 +187,7 @@ import FolderDialog from '../components/FolderDialog.vue'
 import FileEditDialog from '../components/FileEditDialog.vue'
 import FileMoveDialog from '../components/FileMoveDialog.vue'
 import FileDetailDrawer from '../components/FileDetailDrawer.vue'
+import FilePreviewDialog, { isFilePreviewable } from '../components/FilePreviewDialog.vue'
 
 // 屏幕档位: 操作列在平板及以上才固定右侧
 const { isMd } = useResponsive()
@@ -290,9 +300,12 @@ const handleSearchDebounced = () => {
   }, 300)
 }
 
-// 打开条目(目录进入,文件忽略)
+// 打开条目(目录进入; 文件有权限且支持预览时直接预览)
 const handleOpen = (row: FileEntry) => {
-  if (!row.is_directory) return
+  if (!row.is_directory) {
+    if (row.can_download && isFilePreviewable(row)) handlePreview(row)
+    return
+  }
   breadcrumbs.value.push({ id: row.id, name: row.name })
   pagination.value.page = 1
   fetchData()
@@ -340,12 +353,16 @@ const folderDialogRef = ref<InstanceType<typeof FolderDialog>>()
 const fileEditDialogRef = ref<InstanceType<typeof FileEditDialog>>()
 const fileMoveDialogRef = ref<InstanceType<typeof FileMoveDialog>>()
 const fileDetailDrawerRef = ref<InstanceType<typeof FileDetailDrawer>>()
+const filePreviewRef = ref<InstanceType<typeof FilePreviewDialog>>()
 
 // 打开新建目录对话框
 const handleCreateFolder = () => folderDialogRef.value?.open()
 
 // 打开编辑对话框(子组件回填行数据)
 const handleEdit = (row: FileEntry) => fileEditDialogRef.value?.open(row)
+
+// 打开在线预览(类型/权限/大小校验在子组件 open 内)
+const handlePreview = (row: FileEntry) => filePreviewRef.value?.open(row)
 
 // ---------------- 批量删除 ----------------
 const handleBatchDelete = async () => {

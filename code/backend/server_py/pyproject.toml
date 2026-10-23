@@ -32,6 +32,10 @@ dependencies = [
     "pyyaml>=6.0.2",
     "requests>=2.32.5",
     "sqlmodel>=0.0.24",
+    # SQLAlchemy 2.1 起 greenlet 仅随 asyncio extra 分发(异步引擎运行时必需)
+    "sqlalchemy[asyncio]>=2.1.5",
+    # 数据库结构迁移(REQ-008): 首启 create_all+stamp, 之后演进走 alembic upgrade
+    "alembic>=1.16.5",
     "uvicorn>=0.35.0",
     # ocr/图像处理(4.13 在部分环境 cv2 二进制加载失败, 暂限上界; headless 无 GUI 依赖, 仅用 imdecode/resize/imencode 基础 API)
     "opencv-python-headless>=4.11.0.86,<4.13",

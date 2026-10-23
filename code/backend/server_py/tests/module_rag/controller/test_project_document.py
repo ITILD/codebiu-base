@@ -49,12 +49,12 @@ async def test_document_upload_list_update_delete_flow(client: httpx.AsyncClient
     project_id = await _create_project(client)
     doc_id = None
     try:
-        # 上传受理(201),内容落盘+记录创建
+        # 上传受理(201),内容落盘+记录创建(注: 白名单不含 txt, 统一用 pdf 后缀)
         content = f"rag test document {uuid.uuid4().hex[:8]} hello rag".encode("utf-8")
-        file_name = f"rag_test_doc_{uuid.uuid4().hex[:6]}.txt"
+        file_name = f"rag_test_doc_{uuid.uuid4().hex[:6]}.pdf"
         resp = await client.post(
             f"{BASE}/{project_id}/upload",
-            files={"file": (file_name, content, "text/plain")},
+            files={"file": (file_name, content, "application/pdf")},
             data={"description": "初始描述"},
         )
         assert resp.status_code == 201, resp.text
@@ -62,7 +62,7 @@ async def test_document_upload_list_update_delete_flow(client: httpx.AsyncClient
         doc_id = body["id"]
         assert body["project_id"] == project_id
         assert body["name"] == file_name
-        assert body["file_extension"] == "txt"
+        assert body["file_extension"] == "pdf"
         assert body["file_size_bytes"] == len(content), "文件大小应与上传内容一致"
         assert body["parse_status"] == "pending", "刚上传的文档解析状态应为 pending"
         assert "parse_steps" in body, "文档响应应包含入库步骤进度字段"
@@ -133,7 +133,7 @@ async def _upload_document(client: httpx.AsyncClient, project_id: str) -> str:
     content = f"ingest progress test {uuid.uuid4().hex[:8]}".encode("utf-8")
     resp = await client.post(
         f"{BASE}/{project_id}/upload",
-        files={"file": (f"ingest_{uuid.uuid4().hex[:6]}.txt", content, "text/plain")},
+        files={"file": (f"ingest_{uuid.uuid4().hex[:6]}.pdf", content, "application/pdf")},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
@@ -273,7 +273,7 @@ async def test_download_chinese_filename(client: httpx.AsyncClient):
         content = "中文文件名下载测试内容".encode("utf-8")
         resp = await client.post(
             f"{BASE}/{project_id}/upload",
-            files={"file": ("接口测试文档.txt", content, "text/plain")},
+            files={"file": ("接口测试文档.pdf", content, "application/pdf")},
             data={"description": "中文文件名下载测试"},
         )
         assert resp.status_code == 201, resp.text
@@ -313,7 +313,7 @@ async def test_document_multipart_upload_flow(client: httpx.AsyncClient):
     doc_id = None
     try:
         content = f"multipart flow test {uuid.uuid4().hex[:8]} rag".encode("utf-8")
-        file_name = f"multipart_{uuid.uuid4().hex[:6]}.txt"
+        file_name = f"multipart_{uuid.uuid4().hex[:6]}.pdf"
         content_hash = hashlib.sha256(content).hexdigest()
 
         # 1.init(凭证签发, local 下应为 proxy 中转模式)
@@ -323,7 +323,7 @@ async def test_document_multipart_upload_flow(client: httpx.AsyncClient):
                 "filename": file_name,
                 "file_size_bytes": len(content),
                 "content_hash": content_hash,
-                "content_type": "text/plain",
+                "content_type": "application/pdf",
             },
         )
         assert resp.status_code == 200, resp.text
@@ -385,12 +385,12 @@ async def test_document_instant_upload_existing(client: httpx.AsyncClient):
     try:
         content = f"instant upload test {uuid.uuid4().hex[:8]}".encode("utf-8")
         content_hash = hashlib.sha256(content).hexdigest()
-        file_name = f"instant_{uuid.uuid4().hex[:6]}.txt"
+        file_name = f"instant_{uuid.uuid4().hex[:6]}.pdf"
 
         # 先经小文件直传落一份内容
         resp = await client.post(
             f"{BASE}/{project_id}/upload",
-            files={"file": (file_name, content, "text/plain")},
+            files={"file": (file_name, content, "application/pdf")},
         )
         assert resp.status_code == 201, resp.text
         doc_ids.append(resp.json()["id"])
@@ -399,7 +399,7 @@ async def test_document_instant_upload_existing(client: httpx.AsyncClient):
         resp = await client.post(
             f"{BASE}/{project_id}/multipart/init",
             json={
-                "filename": f"{file_name}.copy.txt",
+                "filename": f"{file_name}.copy.pdf",
                 "file_size_bytes": len(content),
                 "content_hash": content_hash,
             },
@@ -411,10 +411,10 @@ async def test_document_instant_upload_existing(client: httpx.AsyncClient):
         resp = await client.post(
             f"{BASE}/{project_id}/upload-complete",
             json={
-                "name": f"{file_name}.copy.txt",
+                "name": f"{file_name}.copy.pdf",
                 "content_hash": content_hash,
                 "file_size_bytes": len(content),
-                "mime_type": "text/plain",
+                "mime_type": "application/pdf",
             },
         )
         assert resp.status_code == 201, resp.text
@@ -427,7 +427,7 @@ async def test_document_instant_upload_existing(client: httpx.AsyncClient):
         resp = await client.post(
             f"{BASE}/{project_id}/upload-complete",
             json={
-                "name": "ghost.txt",
+                "name": "ghost.pdf",
                 "content_hash": hashlib.sha256(b"never uploaded").hexdigest(),
                 "file_size_bytes": 13,
             },
@@ -463,7 +463,7 @@ async def test_reparse_task_model_gate(client: httpx.AsyncClient):
     try:
         resp = await client.post(
             f"{BASE}/{project_id}/upload",
-            files={"file": (f"gate_{uuid.uuid4().hex[:6]}.txt", b"model gate test", "text/plain")},
+            files={"file": (f"gate_{uuid.uuid4().hex[:6]}.pdf", b"model gate test", "application/pdf")},
         )
         assert resp.status_code == 201, resp.text
         doc_id = resp.json()["id"]
@@ -510,7 +510,7 @@ async def test_document_folder_and_entries_flow(client: httpx.AsyncClient):
         content = f"folder doc {uuid.uuid4().hex[:8]}".encode("utf-8")
         resp = await client.post(
             f"{BASE}/{project_id}/upload",
-            files={"file": (f"folder_doc_{uuid.uuid4().hex[:6]}.txt", content, "text/plain")},
+            files={"file": (f"folder_doc_{uuid.uuid4().hex[:6]}.pdf", content, "application/pdf")},
             data={"pid": folder_id},
         )
         assert resp.status_code == 201, resp.text

@@ -25,9 +25,7 @@ from module_authorization.config.casbin_rule import is_global_admin
 from module_rag.dao.project_document_chunk import ProjectDocumentChunkDao
 from module_file.service.filesystem import FileService
 from common.utils.fastapi_ex.exceptions import ConflictError, NotFoundError
-from common.config.path import DIR_UPLOAD
 import logging
-import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +70,8 @@ async def ensure_project_folder(
         project.name, module_root.id, owner_user_id, **extra
     )
     if project.root_entry_id != folder.id:
-        await project_dao.update(
-            project_id, ProjectUpdate(root_entry_id=folder.id), **extra
-        )
+        # 回写走专用方法: ProjectUpdate 无 root_entry_id 字段, 经其传递会被静默忽略
+        await project_dao.set_root_entry(project_id, folder.id, **extra)
     return folder.id
 
 
@@ -162,7 +159,7 @@ class ProjectService:
         """
         删除项目(级联清理)
         - 删项目根文件夹(虚拟树递归删条目 + 释放内容引用)
-        - 清理非条目口径文档的物理内容(旧数据兼容)
+        - 清理非条目口径文档的物理内容(内容级引用释放)
         - 清理向量表数据 + 删项目所有文档/成员/部门授权记录
         - 删项目本身
         :param project_id: 项目ID
@@ -170,7 +167,7 @@ class ProjectService:
         """
         project = await self.project_dao.get(project_id, session=session)
 
-        # 1. 查所有文档(用于清理非条目口径的物理内容与向量)
+        # 1. 查所有文档(用于清理内容级口径的物理内容与向量)
         docs = await self.document_dao.list_all_by_project(
             project_id, session=session
         )
@@ -187,22 +184,17 @@ class ProjectService:
             except Exception as e:
                 logger.warning(f"删除项目文件夹失败 {project.root_entry_id}: {e}")
 
-        # 4. 清理非条目口径文档的物理内容(内容级/本地文件旧数据兼容)
+        # 4. 清理内容级口径文档的物理内容(条目级已随文件夹释放, 跳过避免重复扣减)
         for doc in docs:
             if doc.entry_id:
-                # 条目级: 内容引用已随项目文件夹删除释放, 跳过避免重复扣减
                 continue
-            try:
-                if doc.content_hash:
+            if doc.content_hash:
+                try:
                     await self.file_service.release_content(
                         doc.content_hash, session=session
                     )
-                    continue
-                file_path = DIR_UPLOAD / doc.physical_path
-                if file_path.exists():
-                    file_path.unlink()
-            except Exception as e:
-                logger.warning(f"删除物理文件失败 {doc.physical_path}: {e}")
+                except Exception as e:
+                    logger.warning(f"释放内容引用失败 {doc.content_hash}: {e}")
 
         # 5. 删 db 文档记录
         deleted_docs = await self.document_dao.delete_by_project(
@@ -228,15 +220,7 @@ class ProjectService:
             f"删除项目 {project_id}: 已清理 {deleted_depts} 个部门授权记录"
         )
 
-        # 7. 清理旧口径遗留的项目本地目录(历史数据兼容)
-        project_dir = DIR_UPLOAD / project_id
-        try:
-            if project_dir.exists():
-                shutil.rmtree(project_dir, ignore_errors=True)
-        except Exception as e:
-            logger.warning(f"删除项目目录失败 {project_dir}: {e}")
-
-        # 8. 删项目本身
+        # 7. 删项目本身
         await self.project_dao.delete(project_id, session=session)
 
         logger.info(f"项目 {project_id} 删除完成")

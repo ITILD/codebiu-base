@@ -36,7 +36,12 @@ class S3StorageInterface(StorageInterface):
         client_kwargs = {
             "service_name": "s3",
             "endpoint_url": self.config.endpoint_url,
-            "config": async_config(signature_version="s3v4"),
+            "config": async_config(
+                signature_version="s3v4",
+                # 自建 S3 兼容存储(rustfs/minio)必须 path 寻址: 默认 virtual-host
+                # 会把桶名拼进域名(bucket.host), 内网/IP 端点无法解析导致建桶/预签名直传失败
+                s3={"addressing_style": "path"},
+            ),
         }
 
         # 添加认证信息（如果提供的话）

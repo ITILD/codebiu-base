@@ -62,3 +62,13 @@ class RegisterConfigResponse(BaseModel):
     """注册流程配置响应模型(前端据此决定是否展示验证码输入)"""
     email_verify: bool = Field(default=False, description="注册是否需要邮箱验证码")
 
+
+class LoginCodeRequest(BaseModel):
+    """登录二次验证码发送请求模型"""
+    username: str = Field(..., max_length=50, description="登录用户名(验证码发送至其绑定邮箱)")
+
+
+class LoginPolicyResponse(BaseModel):
+    """登录流程配置响应模型(前端据此决定登录弹窗是否展示二次验证码输入)"""
+    mfa_enabled: bool = Field(default=False, description="登录是否需要二次验证码")
+

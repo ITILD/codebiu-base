@@ -38,13 +38,26 @@ export const getUser = (userId: string) => {
   return http_base_server.get<User>(`/authorization/users/${userId}`);
 };
 
+/** 用户列表扩展过滤参数(与后端 /users/list 查询参数对齐) */
+export interface UserListParams extends PaginationParams {
+  /** 用户名模糊搜索 */
+  username?: string;
+  /** 昵称模糊搜索 */
+  nickname?: string;
+  /** 状态过滤 */
+  is_active?: boolean;
+}
+
 /**
- * 分页查询用户列表
- * @param params 分页参数
+ * 分页查询用户列表(支持用户名/昵称模糊搜索)
+ * @param params 分页参数(可带过滤字段)
  * @returns 分页响应结果
  */
-export const listUsers = (params: PaginationParams) => {
-  return http_base_server.get<PaginationResponse<User>>('/authorization/users/list', { params });
+export const listUsers = (params: UserListParams) => {
+  // 接口无索引签名, 经 unknown 断言为 http 层的 query 参数映射类型(字段均为标量)
+  return http_base_server.get<PaginationResponse<User>>('/authorization/users/list', {
+    params: params as unknown as Record<string, string | number | boolean | null | undefined>,
+  });
 };
 
 /**

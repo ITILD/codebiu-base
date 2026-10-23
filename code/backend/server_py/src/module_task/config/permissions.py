@@ -38,6 +38,19 @@ TASK_DEFINE = ModulePermissionDefine(
                 PermNode(name="删除", code="task:queue:delete", menu_type="F"),
             ],
         ),
+        PermNode(
+            name="定时任务",
+            code="task:schedule",
+            menu_type="C",
+            path="/task/schedule",
+            order_num=2,
+            children=[
+                PermNode(name="查询", code="task:schedule:read", menu_type="F"),
+                PermNode(name="创建", code="task:schedule:create", menu_type="F"),
+                PermNode(name="操作", code="task:schedule:update", menu_type="F"),
+                PermNode(name="删除", code="task:schedule:delete", menu_type="F"),
+            ],
+        ),
     ],
     # 默认新模块不带权限(default_policies=[]):
     # 普通用户需管理员在 角色管理→分配权限 中按需勾选本模块权限码

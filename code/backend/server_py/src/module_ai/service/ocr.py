@@ -7,6 +7,7 @@
       model_config 表(model_type=ocr, server_type=dashscope/online)驱动,
       按 updated_at 缓存引擎(配置变更自动重建); 无配置时给出可操作错误提示
 """
+import asyncio
 import logging
 
 from module_ai.service.model_entry import ModelEntryService, get_model_entry
@@ -44,7 +45,9 @@ class OcrService:
             {"ts": {"total": 秒}, "results": [{index, box, text, score}], "engine": "dashscope"}
         """
         engine = await self._get_engine(user_id)
-        result = engine.recognize(image_cv)
+        # 引擎为同步实现(内部同步 httpx + 轮询 sleep, 最长可达数分钟),
+        # 必须放入线程池, 否则单个 OCR 请求会阻塞整个事件循环
+        result = await asyncio.to_thread(engine.recognize, image_cv)
         # 补充行序号(前端表格展示用)
         for i, item in enumerate(result.get("results", [])):
             item.setdefault("index", i)

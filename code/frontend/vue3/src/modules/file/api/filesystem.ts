@@ -230,6 +230,15 @@ export const getFileDownloadUrl = (entryId: string) => {
 };
 
 /**
+ * 获取文件在线预览流地址(内联流式, 供 authFetch 拉取 blob 交给预览器;
+ * 鉴权与下载一致, 统一走服务端代理规避对象存储跨域)
+ * @param entryId 文件ID
+ */
+export const getFilePreviewPath = (entryId: string) => {
+  return `/base_server/file/filesystem/preview/${entryId}`;
+};
+
+/**
  * 批量探测条目下载权限(下载独立于浏览, 后端按 main:file:download +
  * 业务条目来源模块授权判定; 用于列表按钮灰显, 判定口径与下载接口一致)
  * @param entryIds 条目ID列表(上限200)

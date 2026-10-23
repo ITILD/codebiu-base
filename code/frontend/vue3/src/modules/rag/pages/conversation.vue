@@ -32,8 +32,15 @@
             <Expand v-else />
           </el-icon>
         </button>
-        <h2 v-if="currentConversation" flex-1 min-w-0 truncate text-sm font-medium text-note m-0>
-          {{ currentConversation.title || '新对话' }}
+        <h2 v-if="currentConversation" flex-1 min-w-0 truncate text-sm font-medium text-note m-0 flex items-center gap-2>
+          <el-tag
+            v-if="currentConversation.agent_id"
+            size="small" effect="plain" type="success"
+            class="shrink-0"
+          >
+            {{ agentName(currentConversation.agent_id) }}
+          </el-tag>
+          <span truncate>{{ currentConversation.title || '新对话' }}</span>
         </h2>
       </header>
 
@@ -42,8 +49,10 @@
         ref="messageListRef"
         :messages="messages"
         :streaming-message-id="streamingMessageId"
+        :can-load-more="hasMoreMessages"
         flex-1
         @interact="handleInteraction"
+        @load-more="handleLoadMoreMessages"
       >
         <!-- 空状态: 问候 + 建议问题卡片 -->
         <template #empty>
@@ -51,8 +60,8 @@
             <div w-16 h-16 rounded-2xl bg-note-tint flex-center shadow-note mb-4>
               <el-icon :size="30" text-note-green><ChatDotRound /></el-icon>
             </div>
-            <h2 text-xl font-bold text-note>知识库问答</h2>
-            <p mt-1 text-sm text-note-sub>选择关联知识库，回答将基于文档内容生成</p>
+            <h2 text-xl font-bold text-note>AI 助手</h2>
+            <p mt-1 text-sm text-note-sub>{{ agentMode ? `已选择「${agentName(selectedAgentId)}」，助手可自主调用技能完成任务` : '选择关联知识库，回答将基于文档内容生成' }}</p>
             <div grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-8 w-full max-w-lg>
               <button
                 v-for="s in suggestions" :key="s.label"
@@ -81,7 +90,7 @@
             :is-sending="isSending"
             :attachments="tempAttachments"
             :accept="TEMP_ACCEPT"
-            :attachment-disabled="isSending"
+            :attachment-disabled="isSending || agentMode"
             :voice-input="true"
             @send="handleSend"
             @stop="handleStop"
@@ -89,21 +98,38 @@
             @remove-file="removeAttachment"
           >
             <template #toolbar>
+              <!-- 助手选择: 空值=仅知识库问答(原 RAG 链路), 选中后走智能体对话 -->
+              <el-select
+                v-model="selectedAgentId"
+                class="kb-select" size="small"
+                :style="{ width: agentMode ? '150px' : '118px' }"
+                :disabled="isSending"
+                :placeholder="'仅知识库'"
+                title="选择助手切换对话模式"
+              >
+                <el-option label="仅知识库" value="" />
+                <el-option v-for="a in agents" :key="a.id" :label="a.name" :value="a.id" />
+              </el-select>
               <el-select
                 v-model="selectedProjectIds" multiple collapse-tags collapse-tags-tooltip :max-collapse-tags="2"
-                class="kb-select" size="small" placeholder="关联知识库" :disabled="isSending"
+                class="kb-select" size="small" placeholder="关联知识库" :disabled="isSending || agentMode"
               >
                 <el-option v-for="p in myProjects" :key="p.project_id" :label="p.project_name" :value="p.project_id" />
               </el-select>
               <!-- 思考模式: 快速回答/深度思考 下拉切换(胶囊触发器, 当前项带勾选) -->
-              <el-dropdown trigger="click" @command="setThinkingMode">
+              <el-dropdown
+                trigger="click"
+                :disabled="agentMode"
+                @command="setThinkingMode"
+              >
                 <button
                   class="think-btn"
                   :class="{ active: deepThinking }"
                   flex items-center gap-1 py-1 px-2.5 rounded-full border border-transparent
                   bg-note-tint text-note-sub hover:text-note text-xs whitespace-nowrap cursor-pointer
                   note-transition
-                  :title="deepThinking ? '当前：深度思考（更深入的推理分析）' : '当前：快速回答'"
+                  :disabled="agentMode"
+                  :title="agentMode ? '助手模式下由助手自主决策' : (deepThinking ? '当前：深度思考（更深入的推理分析）' : '当前：快速回答')"
                 >
                   <el-icon :size="13"><component :is="deepThinking ? MagicStick : Lightning" /></el-icon>
                   {{ deepThinking ? '思考' : '快速' }}
@@ -127,13 +153,17 @@
                 </template>
               </el-dropdown>
               <!-- 联网搜索开关: 仅保留地球图标(最通用的联网标识), 激活态白底描边 -->
-              <el-tooltip content="开启后回答将结合实时网络搜索结果，并与知识库内容统一精排" placement="top">
+              <el-tooltip
+                :content="agentMode ? '助手模式下由助手自主决定是否联网' : '开启后回答将结合实时网络搜索结果，并与知识库内容统一精排'"
+                placement="top"
+              >
                 <button
                   class="web-btn"
                   :class="{ active: enableWebsearch }"
                   :aria-pressed="enableWebsearch"
-                  title="联网搜索"
-                  @click="enableWebsearch = !enableWebsearch"
+                  :disabled="agentMode"
+                  :title="'联网搜索'"
+                  @click="!agentMode && (enableWebsearch = !enableWebsearch)"
                 >
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -154,6 +184,9 @@
 
 <script setup lang="ts">
 import { onUnmounted } from 'vue'
+// keep-alive 缓存名单(App.vue include 按组件名匹配):
+// 对话页为重状态页(会话列表/流式输出/滚动位置), 缓存后切回免整页重建与重拉
+defineOptions({ name: 'RagConversation' })
 import {
   Fold, Expand, MagicStick, ChatDotRound,
   EditPen, Document, List, DataAnalysis,
@@ -163,6 +196,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createConversation,
   listMyConversations,
+  listAgentConversations,
   getConversation,
   updateConversation,
   deleteConversation,
@@ -171,11 +205,14 @@ import {
   parseTempFile,
 } from '../api/conversation'
 import { listMyProjects } from '../api/member'
+import { listAgents, sendAgentChatAguiStream } from '@/modules/agent/api/agent'
+import type { AgentInfo } from '@/modules/agent/types'
 import ChatMessageList from '@/common/components/chat/ChatMessageList.vue'
 import ChatComposer from '@/common/components/chat/ChatComposer.vue'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
 import { useAguiMessages } from '@/common/composables/useAguiMessages'
 import { StreamEventType } from '@/common/types/chat'
+import type { AguiStreamCallbacks } from '@/common/api/aguiStream'
 import type { MessageBlock, ChatAttachment } from '@/common/types/chat'
 import type {
   InteractionResponsePayload,
@@ -199,8 +236,45 @@ const currentConversation = computed(() =>
 const myProjects = ref<MyProject[]>([])
 const selectedProjectIds = ref<string[]>([])
 
+// ===== 智能体(助手)模式 =====
+// 可见助手列表(公开+自建); 选中后对话走 /agent/chat 链路, 会话列表切到 scope=agent
+const agents = ref<AgentInfo[]>([])
+const selectedAgentId = ref('')
+const agentMode = computed(() => Boolean(selectedAgentId.value))
+const agentName = (id: string) =>
+  agents.value.find((a) => a.id === id)?.name ?? '助手'
+
+/** 加载可见助手列表(失败静默, 不阻断知识库问答) */
+const loadAgents = async () => {
+  try {
+    agents.value = await listAgents()
+  } catch (error) {
+    console.error('获取助手列表失败:', error)
+  }
+}
+
+// 切换助手: 中止在途流并重载对应范围的会话列表(知识库会话/智能体会话分开)
+// restoringAgent: 选中会话时程序恢复助手选择, 跳过重载避免覆盖用户点选的会话
+let restoringAgent = false
+watch(selectedAgentId, () => {
+  if (restoringAgent) {
+    restoringAgent = false
+    return
+  }
+  if (isSending.value) abortActiveStream()
+  currentConversationId.value = null
+  messages.value = []
+  tempAttachments.value = []
+  loadConversations()
+})
+
 // ===== 聊天状态 =====
 const messages = ref<ChatMessage[]>([])
+// 历史消息分页加载: 首屏取最近一页, 触顶按需向上翻页(长会话避免一次性全量渲染)
+const MESSAGE_PAGE_SIZE = 50
+const messagePage = ref(1)
+const hasMoreMessages = ref(false)
+const loadingOlderMessages = ref(false)
 const inputMessage = ref('')
 const isSending = ref(false)
 const deepThinking = ref(false)
@@ -289,10 +363,11 @@ const loadMyProjects = async () => {
   }
 }
 
-// 会话列表(默认选中最近一个)
+// 会话列表(默认选中最近一个; 助手模式拉取智能体会话, 知识库模式拉取知识库会话)
 const loadConversations = async () => {
   try {
-    const res = await listMyConversations({ page: 1, size: 100 })
+    const fetcher = agentMode.value ? listAgentConversations : listMyConversations
+    const res = await fetcher({ page: 1, size: 100 })
     conversations.value = res.items
     if (!currentConversationId.value && conversations.value.length > 0) {
       await selectConversation(conversations.value[0].id)
@@ -331,12 +406,21 @@ const normalizeBlocks = (
   return { blocks, interactions }
 }
 
+/** 历史消息归一化(倒序接口转正序展示, blocks 归一化 + 交互卡片重建) */
+const normalizeHistoryMessages = (items: ChatMessage[]): ChatMessage[] =>
+  [...items].reverse().map((msg) => {
+    if (msg.role !== 'assistant') return msg
+    const { blocks, interactions } = normalizeBlocks(msg)
+    return { ...msg, blocks, interactions: interactions.length ? interactions : null }
+  })
+
 // ===== 会话操作 =====
 const handleCreateConversation = async () => {
   try {
     const id = await createConversation({
       title: '新对话',
       project_ids: selectedProjectIds.value,
+      agent_id: selectedAgentId.value || undefined,
     })
     await loadConversations()
     await selectConversation(id)
@@ -347,7 +431,7 @@ const handleCreateConversation = async () => {
   }
 }
 
-// 选中会话并加载历史消息(桌面保持侧栏展开, 仅移动端抽屉自动收起; 恢复关联知识库与过程区块)
+// 选中会话并加载历史消息(桌面保持侧栏展开, 仅移动端抽屉自动收起; 恢复关联知识库/助手与过程区块)
 const selectConversation = async (conversationId: string) => {
   // 中止进行中的流(旧流收尾经序号检测失效, 不污染新会话的全局发送状态)
   if (currentConversationId.value !== conversationId) abortActiveStream()
@@ -357,20 +441,57 @@ const selectConversation = async (conversationId: string) => {
   messages.value = []
   tempAttachments.value = [] // 切换会话清空未发送的附件(附件仅作用于当前会话)
   try {
-    const conv = await getConversation(conversationId)
+    // 会话详情与历史消息为独立请求, 并行拉取(串行等待会叠加白屏时间);
+    // 首屏只取最近一页, 更早历史触顶按需加载(避免长会话一次性 200 条全量渲染)
+    const [conv, res] = await Promise.all([
+      getConversation(conversationId),
+      listConversationMessages(conversationId, {
+        page: 1,
+        size: MESSAGE_PAGE_SIZE,
+      }),
+    ])
+    // 恢复会话绑定的助手(智能体会话切到对应模式, 知识库会话回到仅知识库)
+    const convAgentId = conv?.agent_id ?? ''
+    if (convAgentId !== selectedAgentId.value) {
+      restoringAgent = true
+      selectedAgentId.value = convAgentId
+    }
     if (conv?.project_ids?.length) {
       selectedProjectIds.value = conv.project_ids
     }
     // 历史消息(倒序接口按时间正序展示, blocks 归一化 + 交互卡片重建)
-    const res = await listConversationMessages(conversationId, { page: 1, size: 200 })
-    messages.value = [...res.items].reverse().map((msg) => {
-      if (msg.role !== 'assistant') return msg
-      const { blocks, interactions } = normalizeBlocks(msg)
-      return { ...msg, blocks, interactions: interactions.length ? interactions : null }
-    })
+    messagePage.value = 1
+    hasMoreMessages.value = res.total > MESSAGE_PAGE_SIZE
+    messages.value = normalizeHistoryMessages(res.items)
     messageListRef.value?.scrollToBottom(true)
   } catch (error) {
     console.error('加载对话失败:', error)
+  }
+}
+
+/** 触顶加载更早的历史消息(倒序接口取上一页正序 prepend, 视口位置由列表组件锚定) */
+const handleLoadMoreMessages = async () => {
+  const conversationId = currentConversationId.value
+  if (!conversationId || loadingOlderMessages.value || !hasMoreMessages.value) {
+    messageListRef.value?.finishPrepend()
+    return
+  }
+  loadingOlderMessages.value = true
+  try {
+    const res = await listConversationMessages(conversationId, {
+      page: messagePage.value + 1,
+      size: MESSAGE_PAGE_SIZE,
+    })
+    // 会话已在请求期间被切换: 丢弃本次结果
+    if (currentConversationId.value !== conversationId) return
+    messagePage.value += 1
+    hasMoreMessages.value = messagePage.value * MESSAGE_PAGE_SIZE < res.total
+    messages.value = [...normalizeHistoryMessages(res.items), ...messages.value]
+  } catch (error) {
+    console.error('加载更早消息失败:', error)
+  } finally {
+    messageListRef.value?.finishPrepend()
+    loadingOlderMessages.value = false
   }
 }
 
@@ -475,6 +596,27 @@ const startStream = async (
   abortController = null
   resetAguiMessage()
 
+  // AG-UI 事件回调组(助手/知识库两条链路共用: 聚合 → 同步到助手占位消息)
+  const streamCallbacks: AguiStreamCallbacks = {
+    onEvent: (event) => {
+      applyAguiEvent(event)
+      assistantMsg.content = aguiMessage.content
+      assistantMsg.blocks = aguiMessage.blocks
+      assistantMsg.interactions = aguiMessage.interactions
+    },
+    onError: (error: string) => {
+      if (!stopRequested) assistantMsg.content += `\n\n> [错误] ${error}`
+    },
+    onComplete: () => {
+      loadConversations()
+      // 首次问答后后端异步生成标题, 延迟再刷新一次让侧栏标题跟进
+      if (messages.value.length === 2) window.setTimeout(loadConversations, 3000)
+    },
+    onController: (controller: AbortController) => {
+      abortController = controller
+    },
+  }
+
   // 结束收尾(幂等; 序号不符说明已被切换会话/新流接管, 跳过全局状态重置)
   const finishStream = () => {
     if (mySeq !== streamSeq) return
@@ -492,26 +634,18 @@ const startStream = async (
   }
 
   try {
-    await sendRagChatAguiStream(currentConversationId.value, request, {
-      // 事件聚合 → 同步到助手占位消息
-      onEvent: (event) => {
-        applyAguiEvent(event)
-        assistantMsg.content = aguiMessage.content
-        assistantMsg.blocks = aguiMessage.blocks
-        assistantMsg.interactions = aguiMessage.interactions
-      },
-      onError: (error: string) => {
-        if (!stopRequested) assistantMsg.content += `\n\n> [错误] ${error}`
-      },
-      onComplete: () => {
-        loadConversations()
-        // 首次问答后后端异步生成标题, 延迟再刷新一次让侧栏标题跟进
-        if (messages.value.length === 2) window.setTimeout(loadConversations, 3000)
-      },
-      onController: (controller: AbortController) => {
-        abortController = controller
-      },
-    })
+    // 助手模式走智能体执行循环(tool-calling), 其余走知识库问答链路(行为不变)
+    const convAgentId = currentConversation.value?.agent_id ?? ''
+    const agentId = agentMode.value ? (selectedAgentId.value || convAgentId) : ''
+    if (agentId) {
+      await sendAgentChatAguiStream(
+        currentConversationId.value,
+        { message: request.message ?? '', agent_id: agentId },
+        streamCallbacks,
+      )
+    } else {
+      await sendRagChatAguiStream(currentConversationId.value, request, streamCallbacks)
+    }
   } catch {
     if (!stopRequested) assistantMsg.content += '\n\n> [发送失败，请重试]'
   } finally {
@@ -540,12 +674,13 @@ const handleSend = async () => {
       }))
     : null
 
-  // 无会话时自动创建(标题取首条消息), 现代聊天交互: 直接输入即可开始
+  // 无会话时自动创建(标题取首条消息; 助手模式会话绑定 agent_id), 现代聊天交互: 直接输入即可开始
   if (!currentConversationId.value) {
     try {
       const id = await createConversation({
         title: message.slice(0, 20),
         project_ids: selectedProjectIds.value,
+        agent_id: selectedAgentId.value || undefined,
       })
       currentConversationId.value = id
       loadConversations()
@@ -595,6 +730,7 @@ const handleStop = () => {
 
 onMounted(() => {
   loadMyProjects()
+  loadAgents()
   loadConversations()
 })
 </script>

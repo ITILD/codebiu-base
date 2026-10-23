@@ -44,10 +44,11 @@ def _sign(params: dict[str, str], access_key_secret: str) -> str:
 class SmsService:
     """阿里云短信服务(异步发送, 按需读取动态配置)"""
 
-    async def _send(self, phone: str, template_param: dict) -> bool:
+    async def _send(self, phone: str, template_param: dict, template_code: str | None = None) -> bool:
         """发送短信
         :param phone: 收件手机号(大陆 11 位)
         :param template_param: 模板变量(如 {"code": "123456"})
+        :param template_code: 模板 CODE(默认取动态配置的验证码模板)
         :return: 是否发送成功(失败仅告警, 由调用方决定提示语)
         """
         cfg = await get_settings(SmsSettings)
@@ -66,7 +67,7 @@ class SmsService:
             "Timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "PhoneNumbers": phone,
             "SignName": cfg.sign_name,
-            "TemplateCode": cfg.template_code,
+            "TemplateCode": template_code or cfg.template_code,
             "TemplateParam": json.dumps(template_param, ensure_ascii=False),
         }
         params["Signature"] = _sign(params, cfg.access_key_secret)
@@ -92,6 +93,20 @@ class SmsService:
         :return: 是否发送成功
         """
         return await self._send(phone, {"code": code})
+
+    async def send_notification(self, phone: str, title: str) -> bool:
+        """发送通知短信(REQ-011 通知中心外部通道)
+        :param phone: 收件手机号
+        :param title: 通知标题(截取前 20 字作模板变量, 模板需含 ${title} 变量)
+        :return: 是否发送成功(通知模板未配置时返回 False, 由通知服务降级站内)
+        """
+        cfg = await get_settings(SmsSettings)
+        if not cfg.notify_template_code:
+            logger.info("通知短信模板未配置(sms.notify_template_code 为空), 跳过通知短信")
+            return False
+        return await self._send(
+            phone, {"title": title[:20]}, template_code=cfg.notify_template_code
+        )
 
 
 # 全局单例(无状态, 复用避免重复构造)

@@ -36,7 +36,7 @@ class WebSearchService:
     async def get_engine(self, engine: Engine | None) -> SearchEngine:
         """
         按标识获取引擎(为空返回动态配置的默认引擎)
-        :param engine: 引擎标识(duckduckgo/tavily/firecrawl)
+        :param engine: 引擎标识(anysearch/duckduckgo/tavily/firecrawl)
         :return: 引擎实例
         :raises ValueError: 引擎不存在或未配置(缺 API Key)时抛出
         """

@@ -189,6 +189,7 @@ class RagChatService:
                 intent=last_content,
                 vector_search=last_content,
                 full_text_search=last_content,
+                web_search=last_content,
             )
         else:
             try:
@@ -196,12 +197,23 @@ class RagChatService:
                 rag_help_info: RagHelpInfo = await structured_llm.ainvoke(
                     [SystemMessage(content=INTENT_ANALYSIS_SYSTEM_PROMPT)] + messages
                 )
+                # 逐路兜底: 模型漏产出的 query 以原问题补位, 保证三路召回都有输入
+                rag_help_info.vector_search = (
+                    rag_help_info.vector_search or last_content
+                )
+                rag_help_info.full_text_search = (
+                    rag_help_info.full_text_search or last_content
+                )
+                rag_help_info.web_search = (
+                    rag_help_info.web_search or rag_help_info.vector_search
+                )
             except Exception as e:
                 logger.warning(f"意图分析失败，回退原问题: {e}")
                 rag_help_info = RagHelpInfo(
                     intent=last_content,
                     vector_search=last_content,
                     full_text_search=last_content,
+                    web_search=last_content,
                 )
         return {"rag_help_info": rag_help_info}
 
@@ -230,9 +242,11 @@ class RagChatService:
                 "search_error": None,
             }
 
-        # 1. 知识库向量粗排(联网开启时粗排不做精排, 合并后统一精排)
+        # 1. 知识库多路粗排: 向量路(语义 query) + 关键词路(全文 query)并行召回合并,
+        #    (联网开启时粗排不做精排, 与网络结果合并后统一精排)
         request = SearchRequest(
             query_content=rag_help_info.vector_search,
+            keyword_query=rag_help_info.full_text_search,
             project_ids=project_ids,
             limit=search_limit,
             rerank_limit=rerank_limit,
@@ -248,7 +262,7 @@ class RagChatService:
             logger.warning(f"知识库检索失败: {e}")
             search_error = str(e)
 
-        # 2. 联网搜索(失败静默降级, 不阻断知识库链路)
+        # 2. 联网搜索(失败静默降级, 不阻断知识库链路); 使用意图分析产出的联网专用 query
         web_results: list[WebCitation] = []
         web_search_error: str | None = None
         if enable_websearch:
@@ -256,7 +270,7 @@ class RagChatService:
             try:
                 response = await WebSearchService().search(
                     WSSearchRequest(
-                        query=rag_help_info.intent or rag_help_info.vector_search,
+                        query=rag_help_info.web_search or rag_help_info.vector_search,
                         limit=ws.web_results_limit,
                     )
                 )

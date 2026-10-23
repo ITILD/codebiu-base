@@ -21,11 +21,12 @@ from module_file.do.filesystem import (
     EntryCreateRequest,
     UploadModeResponse,
     MigrateRequest,
+    SyncRequest,
     BatchDeleteRequest,
     BatchDeleteResult,
     DownloadPermsRequest,
 )
-from module_authorization.dependencies.permission import require_permission
+from module_authorization.dependencies.permission import require_permission, check_permission
 from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
 from common.utils.fastapi_ex.exceptions import BusinessError, NotFoundError
 
@@ -40,6 +41,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import StreamingResponse, RedirectResponse
+from urllib.parse import quote
 
 router = APIRouter()
 
@@ -244,6 +246,36 @@ async def download_file(
     )
 
 
+@router.get("/preview/{entry_id}", summary="预览文件(内联流式,供在线预览器拉取)")
+async def preview_file(
+    entry_id: str,
+    current_user_id: str | None = Depends(get_download_user_id),
+    service: FileService = Depends(get_file_service),
+):
+    """
+    在线预览文件流: 权限与元数据校验后统一走服务端流式代理(不302直链,
+    保证浏览器同源 fetch 拉取, 规避对象存储跨域限制)
+    - Content-Disposition 为 inline(区别于下载端点的 attachment)
+    - 文件名做 RFC 5987 编码(中文文件名兼容)
+    :param entry_id: 文件条目ID
+    :param service: 文件服务依赖注入
+    :return: 文件数据流(inline)
+    """
+    file_name, mime_type, file_key = await service.get_file_info_for_download(entry_id)
+    ascii_name = file_name.encode("ascii", "ignore").decode() or "preview"
+    quoted_name = quote(file_name, safe="")
+    iter_file = service.stream_file_content(file_key)
+    return StreamingResponse(
+        iter_file,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": (
+                f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted_name}"
+            )
+        },
+    )
+
+
 @router.post(
     "/download-perms",
     summary="批量探测条目下载权限(前端下载按钮灰显用)",
@@ -261,12 +293,16 @@ async def check_download_perms(
     :return: {entry_id: 可否下载} 目录与不存在条目为 False
     """
     result: dict[str, bool] = {}
+    # 批量取条目(单次 IN 查询, 避免逐条 get 的 N+1), 不存在的条目统一 False
+    entries = {e.id: e for e in await file_entry_dao.get_by_ids(req.entry_ids)}
+    # 全局下载权限对同一用户判定一次(can_download_entry 内逐条判定会重复 enforce)
+    download_perm = await check_permission(current_user_id, "main", "file", "download")
     for entry_id in req.entry_ids:
-        entry = await file_entry_dao.get(entry_id)
+        entry = entries.get(entry_id)
         result[entry_id] = bool(
             entry
             and not entry.is_directory
-            and await can_download_entry(current_user_id, entry)
+            and await can_download_entry(current_user_id, entry, download_perm=download_perm)
         )
     return result
 
@@ -668,6 +704,28 @@ async def migrate_storage(
     :return: 迁移结果 {total, migrated, skipped, failed}
     """
     return await service.migrate_storage(req)
+
+
+@router.post(
+    "/sync",
+    summary="存储同步(local<->s3 双向镜像补齐,不切换主存储)",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+)
+async def sync_storage(
+    req: SyncRequest,
+    current_user_id: str = Depends(require_permission("main", "file", "migrate")),
+    service: FileService = Depends(get_managed_file_service),
+) -> dict:
+    """
+    把缺失的物理内容在 local/s3 间互相镜像补齐(幂等,支持中断续同; 不改变条目与主存储)
+    典型流程(如主存储 s3 想下线): 1.sync direction=to_local 补齐本地副本
+    2.修改配置 storage_type=local 3.重启即完成切换
+    :param req: 同步请求(direction/to_local|to_s3|both, dry_run 只统计不复制)
+    :param service: 文件服务依赖注入
+    :return: 同步结果 {direction, dry_run, total, details: {"local->s3"/"s3->local": {copied, skipped, failed}}}
+    """
+    return await service.sync_storage(req)
 
 
 # 将路由注册到模块应用

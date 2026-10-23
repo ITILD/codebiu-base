@@ -154,8 +154,8 @@ class BaseScene {
     //   engine.resize()
     // })
 
-    // 监听元素变化
-    let tempSetTime: number | undefined = undefined
+    // 监听元素变化(浏览器/Node 双环境下的 setTimeout 返回类型用 ReturnType 标注)
+    let tempSetTime: ReturnType<typeof setTimeout> | undefined = undefined
     const resizeObserver = new ResizeObserver(() => {
       tempSetTime && clearTimeout(tempSetTime)
       tempSetTime = setTimeout(() => {

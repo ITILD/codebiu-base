@@ -13,7 +13,7 @@ import {
   HomeFilled, UserFilled,
   Monitor, ChatDotRound, Setting,
   Files, Collection, FolderOpened,
-  Timer, Box,
+  Timer, MagicStick, Search,
 } from '@element-plus/icons-vue'
 
 /** 菜单项定义(perm 为权限码:与后端模块权限声明一致;缺省表示登录即可见) */
@@ -60,14 +60,34 @@ export const menuItems: MenuItem[] = [
   {
     index: '/rag',
     icon: markRaw(Collection),
-    title: '知识库',
+    title: 'AI 助手',
     perm: 'rag',
     mainApp: true,
-    desc: '项目、文档、成员与问答,一处管理。',
+    desc: '知识库问答与智能体助手, 一处对话。',
     children: [
-      // 首页入口卡取 children[0] 跳转, 问答页为主入口(管理入口在问答页侧栏)
-      { index: '/rag/conversation', title: '知识库问答', perm: 'rag:chat' },
+      // 首页入口卡取 children[0] 跳转, AI 助手为主入口(知识库/助手切换在对话页工具栏)
+      { index: '/rag/conversation', title: 'AI 助手', perm: 'rag:chat' },
       { index: '/rag/project', title: '知识库管理', perm: 'rag:project' },
+    ],
+  },
+  {
+    index: '/agent',
+    icon: markRaw(MagicStick),
+    title: '智能体',
+    perm: 'agent:manage',
+    desc: '智能体助手与技能注册表管理。',
+    children: [
+      { index: '/agent/manage', title: '助手管理', perm: 'agent:manage' },
+    ],
+  },
+  {
+    index: '/websearch',
+    icon: markRaw(Search),
+    title: '网页搜索',
+    perm: 'websearch:search',
+    desc: '多引擎网页搜索与连通性验证。',
+    children: [
+      { index: '/websearch/search', title: '搜索测试', perm: 'websearch:search' },
     ],
   },
   {
@@ -97,6 +117,7 @@ export const menuItems: MenuItem[] = [
     desc: '异步任务提交、进度与重试管理。',
     children: [
       { index: '/task/queue', title: '任务列表', perm: 'task:queue' },
+      { index: '/task/schedule', title: '定时任务', perm: 'task:schedule' },
     ],
   },
   {
@@ -108,6 +129,7 @@ export const menuItems: MenuItem[] = [
       { index: '/main/overview', title: '数据概览', perm: 'main:db' },
       { index: '/main/db', title: '数据监测', perm: 'main:db' },
       { index: '/main/dict', title: '字段表管理', perm: 'main:dict' },
+      { index: '/main/audit', title: '操作审计', perm: 'sys:audit' },
       { index: '/main/config', title: '通用配置', perm: 'main:config' },
     ],
   },

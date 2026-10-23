@@ -2,8 +2,10 @@
 Celery 任务队列入口(Worker 启动文件 / 消费进程, 仅 tasks.engine=celery 时需要)
 
 用法:
-    python src/app_task.py          # 启动单个 worker(消费 task_queue 队列)
-    celery -A src.app_task worker   # 等价命令行方式(Windows 建议加 --pool=solo)
+    python src/app_task.py         # 启动单个 worker(消费 task_queue 队列)
+    celery -A src.app_task worker  # 等价命令行方式(Windows 建议加 --pool=solo)
+    celery -A src.app_task beat    # 周期调度触发进程(需要定时任务时启动, 单实例;
+                                   # 每分钟 tick 一次, 调度定义在 任务管理→定时任务 热更)
 
 多实例横向扩容:
     同机多开直接重复执行 `python src/app_task.py` 即可 —— 节点名自动携带 PID
@@ -34,7 +36,7 @@ import socket
 from common.config.tasks import app as celery_app
 
 # 导入任务注册(Worker 进程必须导入任务模块, 否则对应任务无法被路由执行)
-from module_task.tasks import demo  # noqa: F401
+from module_task.tasks import demo, maintenance, schedule_beat  # noqa: F401
 from module_rag.tasks import project_document, project_document_chunk  # noqa: F401
 
 logger = logging.getLogger(__name__)

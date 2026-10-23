@@ -15,7 +15,6 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import OpenAIEmbeddings
 
 from common.utils.fastapi_ex.exceptions import NotFoundError
-from common.config.path import DIR_UPLOAD
 from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
 from module_ai.service.llm import LLMService
 from module_ai.service.model_config import ModelConfigService
@@ -417,11 +416,11 @@ class ProjectDocumentService:
         """
         return await self.document_dao.get(document_id)
 
-    async def get_file_for_download(self, document_id: str) -> tuple[str, str | None, str | Path, bool]:
+    async def get_file_for_download(self, document_id: str) -> tuple[str, str | None, str]:
         """
-        获取文件下载所需信息(三口径兼容: 条目级/内容级/本地旧数据)
+        获取文件下载所需信息(统一存储口径: 条目级/内容级)
         :param document_id: 文档ID
-        :return: (原始文件名, MIME类型, 物理存储键或本地绝对路径, 是否统一存储口径)
+        :return: (原始文件名, MIME类型, 物理存储键, 供 S3 预签名或 local 流式代理)
         """
         document = await self.document_dao.get(document_id)
         if not document:
@@ -429,27 +428,22 @@ class ProjectDocumentService:
             raise NotFoundError(f"文档 {document_id} 不存在")
 
         if document.entry_id:
-            # 条目级新口径: 联查虚拟目录条目与内容记录(物理键位于内容表)
+            # 条目级口径: 联查虚拟目录条目与内容记录(物理键位于内容表)
             file_name, mime_type, file_key = (
                 await self.file_service.get_file_info_for_download(document.entry_id)
             )
-            return file_name, mime_type, file_key, True
+            return file_name, mime_type, file_key
 
         if document.content_hash:
-            # 内容级旧口径: 统一存储(物理键相对存储根, 支持 local/S3)
+            # 内容级口径: 统一存储(物理键相对存储根, 支持 local/S3)
             content = await self.file_service.get_content(document.content_hash)
             if not content or not content.physical_storage:
                 logger.error(f"物理内容记录不存在: {document.content_hash}")
                 raise NotFoundError(f"物理内容记录不存在: {document.content_hash}")
-            return document.name, document.mime_type, content.physical_storage, True
+            return document.name, document.mime_type, content.physical_storage
 
-        # 旧口径: 本地磁盘 DIR_UPLOAD/{physical_path}
-        file_path = DIR_UPLOAD / document.physical_path
-        if not file_path.exists():
-            logger.error(f"物理文件 {file_path} 不存在")
-            raise NotFoundError(f"物理文件 {file_path} 不存在")
-
-        return document.name, document.mime_type, file_path, False
+        logger.error(f"文档 {document_id} 缺少条目与内容关联(无效记录)")
+        raise NotFoundError(f"文档 {document_id} 缺少条目与内容关联(无效记录)")
 
     async def list_by_project(
         self,
@@ -495,7 +489,7 @@ class ProjectDocumentService:
 
     async def delete_document(self, document_id: str):
         """
-        删除文档: 释放物理内容(条目级/内容级引用计数/旧口径本地文件)与数据库记录
+        删除文档: 释放物理内容(条目级/内容级引用计数)与数据库记录
         :param document_id: 文档ID
         """
         document = await self.document_dao.get(document_id)
@@ -504,26 +498,18 @@ class ProjectDocumentService:
             raise NotFoundError(f"文档 {document_id} 不存在")
 
         if document.entry_id:
-            # 条目级新口径: 删除虚拟目录条目(内容引用-1, 归零自动清理物理文件)
+            # 条目级口径: 删除虚拟目录条目(内容引用-1, 归零自动清理物理文件)
             try:
                 await self.file_service.delete_file(document.entry_id)
             except (ValueError, NotFoundError) as e:
                 # 条目已被删除(如项目级联清理)时容忍, 继续删文档记录
                 logger.warning(f"删除文件条目失败 {document.entry_id}: {e}")
         elif document.content_hash:
-            # 新口径: 释放统一存储内容引用(计数归零时自动清理物理文件与内容记录)
+            # 内容级口径: 释放统一存储内容引用(计数归零时自动清理物理文件与内容记录)
             try:
                 await self.file_service.release_content(document.content_hash)
             except Exception as e:
                 logger.warning(f"释放内容引用失败 {document.content_hash}: {e}")
-        else:
-            # 旧口径: 直接删除本地物理文件(容忍文件已不存在的情形)
-            file_path = DIR_UPLOAD / document.physical_path
-            try:
-                if file_path.exists():
-                    file_path.unlink()
-            except Exception as e:
-                logger.warning(f"删除物理文件失败 {file_path}: {e}")
 
         # 删除数据库记录
         await self.document_dao.delete(document_id)
@@ -558,30 +544,26 @@ class ProjectDocumentService:
                 "请先在模型管理中绑定或由管理员配置默认公共模型"
             )
 
-        # 三口径定位本地可读文件: 条目级/内容级从统一存储流式落临时文件, 旧口径读 DIR_UPLOAD
+        # 统一存储口径定位输入文件: 从内容记录流式落临时目录(存储类型无关)
         content_hash = document.content_hash
         if not content_hash and document.entry_id:
             # 条目级兜底: 从虚拟目录条目解析内容哈希(登记时已冗余, 此处防御缺失)
             entry = await self.file_service.get_file_entry(document.entry_id)
             content_hash = entry.content_hash if entry and entry.is_active else None
-        temp_input_dir: Path | None = None
-        if content_hash:
-            content = await self.file_service.get_content(content_hash)
-            if not content or not content.physical_storage:
-                logger.error(f"物理内容记录不存在: {content_hash}")
-                raise NotFoundError(f"物理内容记录不存在: {content_hash}")
-            temp_input_dir = Path(tempfile.mkdtemp(prefix="rag_parse_src_"))
-            file_path = temp_input_dir / f"source.{document.file_extension or 'bin'}"
-            async with aiofiles.open(file_path, "wb") as f:
-                async for chunk in self.file_service.stream_file_content(
-                    content.physical_storage, _CHUNK_SIZE
-                ):
-                    await f.write(chunk)
-        else:
-            file_path = DIR_UPLOAD / document.physical_path
-            if not file_path.exists():
-                logger.error(f"物理文件 {file_path} 不存在")
-                raise NotFoundError(f"物理文件 {file_path} 不存在")
+        if not content_hash:
+            logger.error(f"文档 {document_id} 缺少条目与内容关联(无效记录)")
+            raise NotFoundError(f"文档 {document_id} 缺少条目与内容关联(无效记录)")
+        content = await self.file_service.get_content(content_hash)
+        if not content or not content.physical_storage:
+            logger.error(f"物理内容记录不存在: {content_hash}")
+            raise NotFoundError(f"物理内容记录不存在: {content_hash}")
+        temp_input_dir = Path(tempfile.mkdtemp(prefix="rag_parse_src_"))
+        file_path = temp_input_dir / f"source.{document.file_extension or 'bin'}"
+        async with aiofiles.open(file_path, "wb") as f:
+            async for chunk in self.file_service.stream_file_content(
+                content.physical_storage, _CHUNK_SIZE
+            ):
+                await f.write(chunk)
 
         # 获取当前用户绑定的模型实例(OCR 暂与对话模型共用, 待拆分专用 OCR 模型配置)
         chat_llm: BaseChatModel | None = await self.user_model_service.get_llm_by_user_id(user_id,False)
@@ -665,6 +647,9 @@ class ProjectDocumentService:
             from module_ai.utils.llm.embed import embed_documents_concurrent
 
             embeddings = await embed_documents_concurrent(embedding_llm, texts)
+
+            # 写入前维度防护(模型切换后空表自动重建; 有数据则明确提示走全库重向量化)
+            await self.project_document_chunk_service._ensure_table_dim(len(embeddings[0]))
 
             # 在插入新数据前，删除该文档的旧向量
             await self.project_document_chunk_service.vector_delete_by_document_id(document_id)

@@ -59,8 +59,11 @@ class TemplateCreate(TemplateBase):
 
 class TemplateUpdate(TemplateBase):
     """
-    更新模板的请求模型
+    更新模板的请求模型(所有字段可选, 支持部分更新)
     """
+
+    # 覆写为可选: dao 层按 exclude_unset 部分更新, name 未显式传入时不应阻塞请求
+    name: str | None = Field(default=None, max_length=100)
 
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),

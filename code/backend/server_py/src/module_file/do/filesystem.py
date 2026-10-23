@@ -1,5 +1,7 @@
 """文件模块 filesystem 表模型与请求/响应体定义"""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from sqlmodel import Column, DateTime, Field, SQLModel
 from sqlalchemy import JSON
@@ -350,3 +352,15 @@ class MigrateRequest(BaseModel):
 
     from_type: StorageType = Field(..., description="源存储类型(旧数据所在存储)")
     to_type: StorageType = Field(..., description="目标存储类型(迁移目的地)")
+
+
+class SyncRequest(BaseModel):
+    """
+    存储同步请求(把缺失的物理内容在两存储间互相镜像补齐,不改变主存储与条目归属)
+    """
+
+    direction: Literal["to_local", "to_s3", "both"] = Field(
+        "both",
+        description="同步方向: to_s3=本地镜像到S3 / to_local=S3镜像到本地 / both=双向补齐",
+    )
+    dry_run: bool = Field(False, description="只统计待同步数量,不实际复制")

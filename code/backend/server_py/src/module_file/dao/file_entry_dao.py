@@ -508,3 +508,32 @@ class FileEntryDao:
         )
         result = await session.execute(stmt)
         return [row[0] for row in result.fetchall()]
+
+    @DaoRel
+    async def get_by_ids(self, ids: list[str], session: AsyncSession) -> list[FileEntry]:
+        """按 ID 列表批量查询条目(单次 IN 查询, 批量场景避免逐条 get 的 N+1)"""
+        if not ids:
+            return []
+        stmt = select(FileEntry).where(FileEntry.id.in_(ids))
+        return list((await session.exec(stmt)).all())
+
+    @DaoRel
+    async def get_content_hash_counts_by_ids(
+        self, ids: list[str], session: AsyncSession
+    ) -> dict[str, int]:
+        """按 ID 列表统计各内容哈希的条目数(GROUP BY 单次查询)
+
+        目录/批量删除释放引用用: 同哈希多文件应按条目数扣减引用计数
+        (DISTINCT 去重会少减, 造成物理文件永不释放)
+        """
+        stmt = (
+            select(FileEntry.content_hash, func.count())
+            .where(
+                FileEntry.id.in_(ids),
+                FileEntry.is_directory == False,  # noqa: E712
+                FileEntry.content_hash.isnot(None),
+            )
+            .group_by(FileEntry.content_hash)
+        )
+        result = await session.execute(stmt)
+        return {row[0]: row[1] for row in result.fetchall()}

@@ -47,11 +47,17 @@ export function useTableQuery<T>(fetcher: TableFetcher<T>, options: UseTableQuer
   const total = ref(0)
   const loading = ref(false)
 
+  // 请求序号守卫: 快速翻页/连续搜索时旧请求未取消, 慢的旧响应可能后到
+  // 覆盖新结果(表格显示过期页), 仅最新请求可写回数据/复位 loading
+  let fetchSeq = 0
+
   /** 拉取列表(内置末页空页回退: page>1 且结果为空时回退一页重拉) */
   const fetchData = async () => {
+    const seq = ++fetchSeq
     try {
       loading.value = true
       const response = await fetcher({ ...pagination.value, ...queryParams.value })
+      if (seq !== fetchSeq) return // 已有更新的请求在途, 丢弃本次过期结果
       tableData.value = response.items
       total.value = response.total
       if (response.items.length === 0 && pagination.value.page > 1) {
@@ -61,10 +67,12 @@ export function useTableQuery<T>(fetcher: TableFetcher<T>, options: UseTableQuer
       }
       await afterFetch?.(response.items)
     } catch (error) {
+      if (seq !== fetchSeq) return
       console.error('获取列表失败:', error)
       ElMessage.error(errorMsg)
     } finally {
-      loading.value = false
+      // 仅最新请求复位 loading(过期请求不得提前解锁新请求的加载态)
+      if (seq === fetchSeq) loading.value = false
     }
   }
 

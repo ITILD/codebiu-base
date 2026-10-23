@@ -7,7 +7,7 @@ import logging
 from sqlalchemy import inspect, text
 
 from common.config.db import db_manager
-from common.config.lifespan import register_init_hook
+from common.config.lifespan import register_init_hook, register_runtime_hook
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +18,25 @@ app.mount("/file", module_app)
 logger.debug("ok...server module_file服务配置")
 
 
-@register_init_hook
+@register_runtime_hook
 async def ensure_storage_ready():
-    """启动时确保物理存储就绪: S3协议存储(minio/s3)桶不存在时自动创建"""
-    from module_file.config.filesystem import init_storage_config, storage
+    """启动时确保物理存储就绪: S3协议存储(rustfs/minio/s3)桶不存在时按配置自动创建
+
+    挂 runtime 级钩子: 只依赖动态配置(sys_config, init_runtime 已装配),
+    不依赖建表流程, check_db=false 时也照常执行
+    """
+    from module_file.config.filesystem import init_storage_config
+    import module_file.config.filesystem as fs_conf
     from module_file.utils.multi_storage.session.impl.storage_s3 import (
         S3StorageInterface,
     )
 
     # 幂等装配(不依赖钩子注册顺序; 已装配时直接返回)
     await init_storage_config()
+
+    # 装配完成后再经模块属性访问取惰性单例:
+    # 不可 `from ... import storage` 提前绑定(装配前解析得到 None, 会导致建桶被静默跳过)
+    storage = fs_conf.storage
 
     if isinstance(storage, S3StorageInterface):
         try:

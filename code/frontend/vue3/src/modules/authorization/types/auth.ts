@@ -14,6 +14,8 @@ export interface AuthResponse {
 export interface AuthLoginRequest {
   username: string;
   password: string;
+  /** 登录二次验证码(后端开启 login_security.mfa_enabled 时必填) */
+  code?: string;
 }
 
 export interface AuthRegisterRequest {
@@ -30,6 +32,11 @@ export interface AuthRegisterRequest {
 export interface RegisterConfig {
   /** 注册是否需要邮箱验证码 */
   email_verify: boolean;
+}
+
+export interface LoginPolicy {
+  /** 登录是否需要二次验证码 */
+  mfa_enabled: boolean;
 }
 
 export interface AuthLogoutRequest {

@@ -2,7 +2,6 @@ import {
   defineConfig,
   presetAttributify,     // 属性化模式预设：支持用 HTML 属性风格写样式，如 text="red lg"
   presetIcons,           // 图标预设：支持使用类名引入图标，如 i-mdi-home
-  presetTypography,      // 排版预设：提供文章友好的默认文本样式（如 .prose）
   presetWind3,           // Tailwind 风格预设：模拟 Tailwind CSS v3 的原子类名系统
   transformerDirectives, // 转换器：支持在 CSS 中使用 /* @apply */ 指令
   transformerVariantGroup, // 转换器：支持在模板中写 hover:(bg-blue text-white) 分组变体
@@ -16,6 +15,20 @@ const require = createRequire(import.meta.url)
 
 // 导出 UnoCSS 配置
 export default defineConfig({
+  // 内容抽取管道: 只扫描 src 业务代码。
+  // 默认会扫描项目根下所有匹配文件 —— public/ 中 MB 级 worker 压缩 js、
+  // doc/*.md 中的示例片段都会把普通单词(如 flex/hidden)误判为 utility,
+  // 生成实际未使用的死代码 CSS, 同时拖慢构建, 故显式排除非源码目录。
+  content: {
+    pipeline: {
+      exclude: [
+        /node_modules/,
+        /\.git/,
+        /(^|[\\/])(dist|public|doc|e2e|tools|test-results|playwright-report)[\\/]/,
+        /\.mdx?$/,
+      ],
+    },
+  },
   // 配置使用的预设（Presets），决定支持哪些类名语法和功能
   presets: [
     presetWind3(),           // 使用类 Tailwind 的实用类，如 flex, p-4, text-lg
@@ -29,7 +42,9 @@ export default defineConfig({
         'vscode-icons': () => require('@iconify-json/vscode-icons/icons.json'),
       },
     }),           // 启用图标支持，自动将 i-xxx-xxx 转换为 SVG 或 background 图标
-    presetTypography(),      // 启用排版样式，为 <article> 等内容区域提供美观的默认样式
+    // presetTypography 已移除: .prose 排版样式仅 garden 演练场 3 个懒加载组件使用,
+    // 原先全量打进首屏 CSS(约 11.6KB); 现改为静态 prose.css 随演练场路由分包
+    // (见 src/modules/template/components/playground/garden/prose.css)
   ],
 
   // 配置转换器（Transformers），用于增强类名的书写方式

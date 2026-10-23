@@ -85,6 +85,15 @@ TASK_TYPES: dict[str, TaskTypeDef] = {
         local_runner="module_rag.tasks.project_document_chunk:run_revectorize_local",
         default_payload={"model_id": None},
     ),
+    "sys_audit_purge": TaskTypeDef(
+        type="sys_audit_purge",
+        name="系统: 审计日志清理",
+        description="按动态配置 audit.retention_days 周期清理过期操作审计记录"
+                    "(REQ-012 内置示例, 建议每日凌晨执行; 保留期在 系统配置→操作审计 修改)",
+        celery_task="module_task.tasks.maintenance.purge_audit_task",
+        local_runner="module_task.tasks.maintenance:run_purge_audit_local",
+        default_payload={},
+    ),
 }
 
 
@@ -216,42 +225,97 @@ async def update_task_fields(
 ) -> None:
     """
     worker 侧更新任务字段(独立短事务, 进度可频繁回写)
+
+    终态保护采用条件 UPDATE(仅活跃态可写, 数据库端原子判定):
+    修复"先读后写"竞态 —— 取消/cancel 与 runner 首次 RUNNING 回写并发时,
+    后提交的事务不再覆盖已写入的终态(取消不会被回写复活)。
     :param task_id: 任务ID
     :param status: 目标状态(None 表示不更新)
     :param progress: 完成百分比 0~100
     :param message: 当前阶段描述
     :param result: 执行结果 JSON
     :param error: 失败原因
-    :param set_started: 置 started_at 为当前时间(任务开始时)
+    :param set_started: 置 started_at 为当前时间(仅原值为空时, CASE 保持首次语义)
     :param set_finished: 置 finished_at 为当前时间(任务结束时)
     """
     from datetime import datetime, timezone
 
+    from sqlalchemy import case, update
+
     from module_task.do.task import QueueTaskStatus, TaskQueue
+
+    values: dict = {}
+    if status is not None:
+        values["status"] = status
+    if progress is not None:
+        values["progress"] = max(0.0, min(100.0, float(progress)))
+    if message is not None:
+        values["message"] = message
+    if result is not None:
+        values["result"] = result
+    if error is not None:
+        values["error"] = error
+    now = datetime.now(timezone.utc)
+    if set_started:
+        values["started_at"] = case(
+            (TaskQueue.started_at.is_(None), now), else_=TaskQueue.started_at
+        )
+    if set_finished:
+        values["finished_at"] = now
+    if not values:
+        return
 
     async with db_manager.db_rel.session_factory() as session:
         async with session.begin():
+            stmt = (
+                update(TaskQueue)
+                .where(
+                    TaskQueue.id == task_id,
+                    # 终态原子保护: 仅活跃态可写(取消/终态不被并发回写覆盖)
+                    TaskQueue.status.in_((QueueTaskStatus.PENDING, QueueTaskStatus.RUNNING)),
+                )
+                .values(**values)
+            )
+            result = await session.execute(stmt)
+    # REQ-011 终态埋点: 本次真实写入成功/失败终态(而非被终态保护跳过)时,
+    # 后台通知任务创建者(取消/撤销不通知); 通知失败仅日志, 不影响任务回写
+    if (
+        result.rowcount
+        and set_finished
+        and status in (QueueTaskStatus.SUCCESS, QueueTaskStatus.FAILED)
+    ):
+        bg = asyncio.create_task(
+            _notify_task_finished(task_id, status, error), name=f"notify:{task_id}"
+        )
+        _notify_tasks.add(bg)
+        bg.add_done_callback(_notify_tasks.discard)
+
+
+# 终态通知后台任务引用集(防 GC; 测试可等待其清空后再断言站内信落库)
+_notify_tasks: set[asyncio.Task] = set()
+
+
+async def _notify_task_finished(task_id: str, status: str, error: str | None) -> None:
+    """任务终态通知(REQ-011 首个埋点接入): 读任务名与创建者 → 通知中心"""
+    try:
+        from module_task.do.task import TaskQueue
+
+        async with db_manager.db_rel.session_factory() as session:
             task = await session.get(TaskQueue, task_id)
-            if task is None:
+            if task is None or not task.user_id:
                 return
-            # 终态保护: 取消/撤销后 worker 的后续回写不再生效(防止取消被进度/收尾回写复活),
-            # 成功/失败终态同样不回退(避免旧 worker 晚到覆盖新状态)
-            if task.status not in (QueueTaskStatus.PENDING, QueueTaskStatus.RUNNING):
-                return
-            if status is not None:
-                task.status = status
-            if progress is not None:
-                task.progress = max(0.0, min(100.0, float(progress)))
-            if message is not None:
-                task.message = message
-            if result is not None:
-                task.result = result
-            if error is not None:
-                task.error = error
-            if set_started and task.started_at is None:
-                task.started_at = datetime.now(timezone.utc)
-            if set_finished:
-                task.finished_at = datetime.now(timezone.utc)
+            name, user_id = task.name, task.user_id
+        from module_contact.service.notification import get_notification_service
+
+        if status == QueueTaskStatus.SUCCESS:
+            title = f"任务成功: {name}"
+            content = f"后台任务「{name}」已成功完成。"
+        else:
+            title = f"任务失败: {name}"
+            content = f"后台任务「{name}」执行失败: {(error or '未知原因')[:500]}"
+        await get_notification_service().notify(user_id, "task_done", title, content)
+    except Exception as exc:  # noqa: BLE001  # 通知属尽力而为, 失败不反噬任务链路
+        logger.debug(f"任务终态通知失败(忽略): {exc}")
 
 
 # ################ worker 启动自愈 ################

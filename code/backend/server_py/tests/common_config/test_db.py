@@ -77,21 +77,21 @@ async def test_db_cache_connection():
 async def test_db_vector_connection():
     """向量库连接与读写冒烟"""
     logger.info("test db_vector connection start")
+
+    class TestVectorBase(BaseModel):
+        id: str = Field(
+            default_factory=lambda: uuid4().hex,
+            primary_key=True,  # 主键
+            index=True,  # 索引
+            description="唯一标识符",
+        )
+        vector: list[float] | None = Field(
+            default_factory=lambda: [0.1] * 1024, description="向量字段"
+        )
+
     try:
         await db_vector.connect()
         logger.info("db_vector connection success")
-
-        class TestVectorBase(BaseModel):
-            id: str = Field(
-                default_factory=lambda: uuid4().hex,
-                primary_key=True,  # 主键
-                index=True,  # 索引
-                description="唯一标识符",
-            )
-            vector: list[float] | None = Field(
-                default_factory=lambda: [0.1] * 1024, description="向量字段"
-            )
-
         await db_vector.create_table(TestVectorBase, {"vector": 1024})
         logger.info("db_vector create table success")
         await db_vector.add([TestVectorBase(id="test", vector=[0.1] * 1024)])
@@ -106,10 +106,15 @@ async def test_db_vector_connection():
         assert result, "向量检索应至少返回一条结果(可见性重试后)"
         assert result[0].id == "test", f"expect 'test', but got '{result[0].id}'"
         logger.info(f"db_vector query operation success: {result[0].id}")
-
     except Exception as e:
         logger.error(f"db_vector connection fail: {e}")
         pytest.fail(f"db_vector connection fail: {e}")
+    finally:
+        # 清理临时集合, 避免远程向量库残留测试垃圾
+        try:
+            await db_vector.drop_table("testvectorbase")
+        except Exception as e:  # 清理失败不影响测试结论
+            logger.warning(f"清理临时向量集合失败(不影响测试): {e}")
 
 
 @pytest.mark.asyncio
