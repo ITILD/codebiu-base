@@ -128,7 +128,8 @@
   <el-dialog v-model="dialogVisible" title="添加成员" width="90%" class="max-w-[480px]">
     <el-form :model="form" :rules="rules" ref="formRef" label-width="80px">
       <el-form-item label="用户" prop="user_id">
-        <el-select v-model="form.user_id" filterable placeholder="搜索并选择用户" w-full :loading="userLoading">
+        <el-select v-model="form.user_id" filterable remote :remote-method="searchUsers"
+          placeholder="输入用户名/昵称搜索" w-full :loading="userLoading">
           <el-option v-for="u in userOptions" :key="u.id" :label="`${u.nickname || u.username} (${u.username})`"
             :value="u.id">
             <div flex items-center justify-between>
@@ -214,7 +215,9 @@ const searchFields: SearchField[] = [
 // 用户缓存(用于成员列表显示用户名)
 const userMap = ref<Map<string, User>>(new Map())
 const userOptions = ref<User[]>([])
-const userLoading = false
+// 远程搜索初始选项(打开对话框未输入时的候选, 同时为成员列表姓名映射兜底)
+let initialUserOptions: User[] = []
+const userLoading = ref(false)
 
 // 添加成员对话框(统一使用 useCrudDialog)
 const {
@@ -248,14 +251,45 @@ const userLabel = (userId: string) => {
 
 // 日期格式化: 统一使用 @/common/utils/datetime (formatDate)
 
-// 加载用户列表(用于显示与选择)
+// 加载用户列表(初始只取一页作候选与姓名映射; 完整匹配靠远程搜索,
+// 避免一次拉 500 条仅用于下拉选项, 用户量大时既慢又会静默截断)
 const loadUsers = async () => {
   try {
-    const res = await listUsers({ page: 1, size: 500 })
+    const res = await listUsers({ page: 1, size: 50 })
+    initialUserOptions = res.items
     userOptions.value = res.items
     userMap.value = new Map(res.items.map((u) => [u.id, u]))
   } catch (error) {
     console.error('获取用户列表失败:', error)
+  }
+}
+
+// 远程搜索用户(用户名/昵称两路模糊匹配合并去重, 结果同时补进姓名映射)
+const searchUsers = async (query: string) => {
+  const keyword = query.trim()
+  if (!keyword) {
+    userOptions.value = initialUserOptions
+    return
+  }
+  userLoading.value = true
+  try {
+    const [byName, byNick] = await Promise.all([
+      listUsers({ page: 1, size: 20, username: keyword }),
+      listUsers({ page: 1, size: 20, nickname: keyword }),
+    ])
+    const merged: User[] = []
+    const seen = new Set<string>()
+    for (const u of [...byName.items, ...byNick.items]) {
+      if (seen.has(u.id)) continue
+      seen.add(u.id)
+      merged.push(u)
+      userMap.value.set(u.id, u)
+    }
+    userOptions.value = merged
+  } catch (error) {
+    console.error('搜索用户失败:', error)
+  } finally {
+    userLoading.value = false
   }
 }
 

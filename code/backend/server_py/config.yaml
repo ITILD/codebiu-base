@@ -99,10 +99,20 @@ db_vector:
 tasks:
   engine: local
 
-# 文件存储: local=本地 upload 目录; 切 S3/MinIO 在环境层覆盖并填连接信息
+# 文件存储: local=本地 upload 目录(仿 S3 接口); s3=S3 兼容对象存储(rustfs/MinIO/OSS)
+# 桶名等连接信息为动态配置(系统管理→通用配置页), 服务启动时桶不存在会自动创建;
+# 两种类型对前端完全透明: 上传走 upload-mode 探测(s3 默认预签名直传, local 走中转),
+# 下载走统一接口(s3 302 预签名直链, local 流式代理); 切换存储先 sync 同步双副本
 file_system:
-  storage_type: local
-  max_size: 10                # 上传大小限制(MB)
+  storage_type: s3              # 默认 s3; 无对象存储时改 local 即可(接口不变)
+  max_size: 10                  # 上传大小限制(MB)
+  # ---- s3 模式连接信息(rustfs 等 S3 兼容存储, 在配置页或环境层填) ----
+  # endpoint_url: http://127.0.0.1:9000
+  # access_key: ""
+  # secret_key: ""
+  # bucket: codebiu-base        # 桶名需符合 S3 规范(小写字母/数字/连字符/点, 无下划线)
+  # region: us-east-1
+  # secure: false
 
 # 令牌认证: 下方为开发默认密钥, 生产必须在环境层覆盖(修改后所有登录态失效)
 token:
@@ -119,14 +129,22 @@ default_models:
 
 
 ############################# 网页搜索种子 #############################
-# module_websearch 模块,支持 duckduckgo(默认,本地直连无需密钥)/tavily/firecrawl
+# module_websearch 模块,支持 anysearch(默认,免 Key 可用)/duckduckgo/tavily/firecrawl
 websearch:
-  # 默认搜索引擎(tavily/firecrawl)
-  default_engine: tavily
+  # 默认搜索引擎(anysearch/duckduckgo/tavily/firecrawl)
+  default_engine: anysearch
   # 请求超时(秒)
   timeout: 15
   # 默认返回条数上限(接口可覆盖,最大30)
   max_results: 10
+  # AnySearch 搜索(POST {api_base}/v1/search, 免 Key 可用免费额度)
+  anysearch:
+    # API Key(为空直接用免费额度; 申请后填写获更高额度)
+    api_key: ''
+    # API 地址
+    api_base: https://api.anysearch.com
+    # 默认 tag(搜索场景标签, 如 code.doc; 为空不传)
+    default_tag: ''
   # Tavily 搜索(https://app.tavily.com 免费注册获取 API Key)
   tavily:
     # API Key(为空则该引擎不可用)

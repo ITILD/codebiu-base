@@ -76,10 +76,10 @@ def _patch_httpx(monkeypatch, responses: list[_FakeResponse]) -> None:
 
 # ==================== 类型映射与引擎注册 ====================
 def test_server_types_for_remote_engines():
-    """asr/tts 仅 online 单方案; ocr 仅 dashscope; vad/denoise 已下线返回空列表"""
+    """asr/tts 仅 online 单方案; ocr 为 dashscope+online 双方案; vad/denoise 已下线返回空列表"""
     assert server_types_for(ModelType.ASR) == [ModelServerType.ONLINE]
     assert server_types_for("tts") == [ModelServerType.ONLINE]
-    assert server_types_for("ocr") == [ModelServerType.DASHSCOPE]
+    assert server_types_for("ocr") == [ModelServerType.DASHSCOPE, ModelServerType.ONLINE]
     assert server_types_for("vad") == []
     assert server_types_for("denoise") == []
 
@@ -99,11 +99,16 @@ def test_voice_engine_legacy_normalize():
 
 
 def test_model_entry_builders_registered():
-    """统一模型入口注册表: asr/tts/ocr 应构建在线引擎实例, extra 展平进引擎配置"""
+    """统一模型入口注册表: asr/tts/ocr 应构建在线引擎实例, extra 展平进引擎配置
 
-    def _build(model_type: str):
+    OCR 按方案分派: server_type=dashscope → DashscopeOCR, 其余(默认 online)
+    → PaddleOCROnline(见 ModelEntryService._build_ocr_engine)
+    """
+    from module_ai.utils.ocr.paddle_online import PaddleOCROnline
+
+    def _build(model_type: str, server_type: str | None = None):
         config = SimpleNamespace(
-            model_type=model_type, model="m-1",
+            model_type=model_type, model="m-1", server_type=server_type,
             extra={"protocol": "openai", "api_key": "sk-test"},
             api_key="", url=None, timeout=60,
         )
@@ -111,13 +116,15 @@ def test_model_entry_builders_registered():
 
     asr = _build("asr")
     tts = _build("tts")
-    ocr = _build("ocr")
+    ocr_default = _build("ocr")
+    ocr_dashscope = _build("ocr", server_type=ModelServerType.DASHSCOPE)
     assert isinstance(asr, OnlineASR)
     assert isinstance(tts, OnlineTTS)
-    assert isinstance(ocr, DashscopeOCR)
+    assert isinstance(ocr_default, PaddleOCROnline), "OCR 未指定方案时默认 online(PaddleOCR 云 API)"
+    assert isinstance(ocr_dashscope, DashscopeOCR), "OCR 指定 dashscope 方案应构建百炼引擎"
     # extra 展平: 协议/模型键进入引擎配置(顶层字段回填, extra 同名键优先)
     assert asr._conf["protocol"] == "openai"
-    assert ocr._conf["model"] == "m-1"
+    assert ocr_default._conf["model"] == "m-1"
 
 
 # ==================== DashscopeASR ====================

@@ -61,6 +61,15 @@ class EmailService:
             body=f"您的验证码为 {code},{ttl_minutes} 分钟内有效。若非本人操作请忽略本邮件。",
         )
 
+    async def send_notification(self, to_email: str, title: str, content: str) -> bool:
+        """发送通知邮件(REQ-011 通知中心外部通道, 复用 _send 配置与连接逻辑)
+        :param to_email: 收件邮箱
+        :param title: 通知标题(邮件主题)
+        :param content: 通知正文(纯文本)
+        :return: 是否发送成功
+        """
+        return await self._send(to_email, subject=title, body=content)
+
 
 # 全局单例(无状态, 复用避免重复构造)
 _email_service = EmailService()

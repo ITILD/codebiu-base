@@ -52,6 +52,10 @@ class RagHelpInfo(BaseModel):
     intent: str = Field(default="", description="用户意图")
     vector_search: str = Field(default="", description="对向量搜索有帮助的语句")
     full_text_search: str = Field(default="", description="用于全文检索语句")
+    web_search: str = Field(
+        default="",
+        description="用于联网搜索引擎的检索语句(面向搜索引擎的关键词组合, 简洁精准)",
+    )
     is_need_external_info: bool = Field(
         default=True, description="是否需要外部信息回答最新问题"
     )

@@ -9,6 +9,7 @@ from module_ai.utils.llm.types import ModelType
 from common.utils.fastapi_ex.exceptions import NotFoundError
 from module_rag.service.user_model import UserModelService
 from module_ai.service.llm import LLMService
+import asyncio
 import logging
 logger = logging.getLogger(__name__)
 
@@ -51,17 +52,37 @@ class ProjectDocumentChunkService:
         # "vector dimension mismatch" 原始异常), 检索前先校验并自动修复/明确提示
         await self._ensure_table_dim(len(query_vector))
 
-        # 4. 调用 DAO 层执行向量检索
-        results: list[ProjectDocumentChunkSearchResponse] = (
-            await self.project_document_chunk_dao.search(
-                query_vector=query_vector,
-                project_ids=request.project_ids,
-                limit=request.limit,
-            )
+        # 多路并行召回: 向量路(语义) + 关键词路(标量包含匹配, keyword_query 非空时)
+        keyword_query = (request.keyword_query or "").strip()
+        vector_task = self.project_document_chunk_dao.search(
+            query_vector=query_vector,
+            project_ids=request.project_ids,
+            limit=request.limit,
         )
+        keyword_task = (
+            self.project_document_chunk_dao.search_by_keyword(
+                request.project_ids, keyword_query, limit=request.limit
+            )
+            if keyword_query
+            else None
+        )
+        if keyword_task:
+            vector_hits, keyword_hits = await asyncio.gather(
+                vector_task, keyword_task
+            )
+        else:
+            vector_hits, keyword_hits = await vector_task, []
+
+        # 两路合并去重(同块以向量路优先, 其相似度分数可比), 关键词路补召回向量未覆盖块
+        merged: dict[str, ProjectDocumentChunkSearchResponse] = {}
+        for hit in vector_hits + keyword_hits:
+            if hit.id not in merged:
+                merged[hit.id] = hit
+        results = sorted(merged.values(), key=lambda r: r.score, reverse=True)
         logger.info(
-            f"[Search] 向量粗排完成 | query='{request.query_content[:50]}' | "
-            f"召回={len(results)} enable_rerank={request.enable_rerank} score_threshold={request.score_threshold}"
+            f"[Search] 多路召回完成 | 向量={len(vector_hits)} 关键词={len(keyword_hits)} "
+            f"去重合并={len(results)} enable_rerank={request.enable_rerank} "
+            f"score_threshold={request.score_threshold}"
         )
 
         # rerank: 仅当显式开启(深度思考)时执行精排,并按 score_threshold 过滤低分结果
@@ -87,13 +108,12 @@ class ProjectDocumentChunkService:
         return results
 
     async def _ensure_table_dim(self, current_dim: int) -> None:
-        """向量表维度与当前向量化模型一致性校验(检索前防护)
+        """向量表维度与当前向量化模型一致性校验(检索前/写入前防护)
 
         - 一致: 直接返回(常态路径, 仅一次 describe 开销)
-        - 不一致且知识库无文档: 历史残留表, 自动重建为当前维度(自愈)
-        - 不一致且有文档: 抛出可读错误, 提示执行"重新向量化"(勿静默重建丢数据)
+        - 不一致且向量表有数据: 抛出可读错误, 提示执行"重新向量化"(勿静默重建丢数据)
+        - 不一致且向量表为空: 直接重建为当前维度(自愈; 失败文档可重新解析恢复)
         """
-        from module_rag.dao.project_document import ProjectDocumentDao
         from module_rag.do.project_document_chunk import ProjectDocumentChunk
         from common.config.db import db_vector
 
@@ -102,15 +122,18 @@ class ProjectDocumentChunkService:
         if old_dim is None or old_dim == current_dim:
             return
 
-        document_ids = await ProjectDocumentDao().list_all_ids()
-        if document_ids:
+        # 仅当向量表已有数据才需要保护(迁移走重向量化), 空表重建零风险
+        probe = await db_vector.query_by_filter(
+            table_name, "sort >= 0", output_fields=["id"], limit=1
+        )
+        if probe:
             raise ValueError(
                 f"向量表维度({old_dim})与当前向量化模型维度({current_dim})不一致, "
-                f"请先执行全库重新向量化后再检索"
+                f"请先执行全库重新向量化"
             )
 
-        # 无文档: 重建空表自愈, 后续上传按当前维度写入
-        logger.warning(f"向量表维度漂移 {old_dim} -> {current_dim} 且无文档, 自动重建向量表")
+        # 空表: 重建自愈, 后续按当前维度写入
+        logger.warning(f"向量表维度漂移 {old_dim} -> {current_dim} 且向量表为空, 自动重建向量表")
         await db_vector.drop_table(table_name)
         await db_vector.create_table(ProjectDocumentChunk, {"embedding": current_dim})
 
@@ -244,18 +267,32 @@ class ProjectDocumentChunkService:
         meta_fields = [
             f for f in ProjectDocumentChunk.model_fields.keys() if f != "embedding"
         ]
-        for idx, doc_id in enumerate(document_ids):
-            rows = await db_vector.query_by_filter(
-                table_name, f'document_id == "{doc_id}"', output_fields=meta_fields
+        # 逐文档串行查询在文档数大时往返显著, 按批并发拉取(每批内 gather 重叠网络 IO)
+        fetch_batch = 50
+        for start in range(0, total_documents, fetch_batch):
+            batch_ids = document_ids[start : start + fetch_batch]
+            results = await asyncio.gather(
+                *(
+                    db_vector.query_by_filter(
+                        table_name, f'document_id == "{doc_id}"', output_fields=meta_fields
+                    )
+                    for doc_id in batch_ids
+                )
             )
-            if rows:
-                pending_rows.extend(rows)
-                processed_chunks += len(rows)
+            for rows in results:
+                if rows:
+                    pending_rows.extend(rows)
+                    processed_chunks += len(rows)
             # 进度回调(任务侧双写 task_queue 表与结果后端; 直跑为 None)
             if progress_cb is not None:
                 try:
-                    await progress_cb(idx + 1, total_documents, processed_chunks,
-                                      model_label, dim_changed)
+                    await progress_cb(
+                        min(start + fetch_batch, total_documents),
+                        total_documents,
+                        processed_chunks,
+                        model_label,
+                        dim_changed,
+                    )
                 except Exception as e:
                     logger.debug(f"重向量化进度回调失败(忽略): {e}")
 

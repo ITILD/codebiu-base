@@ -20,7 +20,7 @@ WEBSEARCH_DEFINE = ModulePermissionDefine(
     name="网页搜索",
     icon="Search",
     order_num=40,
-    description="duckduckgo/tavily/firecrawl 网页搜索与 RAG 联网检索",
+    description="anysearch/duckduckgo/tavily/firecrawl 网页搜索与 RAG 联网检索",
     nodes=[
         PermNode(
             name="网页搜索",

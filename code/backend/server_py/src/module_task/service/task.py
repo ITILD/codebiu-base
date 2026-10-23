@@ -75,13 +75,15 @@ def _read_celery_state(task: TaskQueue) -> TaskQueueResponse:
         from common.config.tasks import app as celery_app
 
         async_result = celery_app.AsyncResult(task.celery_task_id)
-        resp.celery_state = async_result.state
-        info = async_result.info
+        # state/info/result 每次访问都是一次结果后端(Redis)往返,
+        # 只取一次 state, 其余按需读取(列表页每行都会走本函数)
+        state = async_result.state
+        resp.celery_state = state
         # PROGRESS 状态下 info 为 worker update_state 写入的 meta
-        if async_result.state == "PROGRESS" and isinstance(info, dict):
-            resp.celery_meta = dict(info)
-            resp.celery_progress = info.get("progress")
-        elif async_result.state == "FAILURE":
+        if state == "PROGRESS" and isinstance(async_result.info, dict):
+            resp.celery_meta = dict(async_result.info)
+            resp.celery_progress = async_result.info.get("progress")
+        elif state == "FAILURE":
             resp.error = resp.error or str(async_result.result)
     except Exception:
         pass

@@ -5,10 +5,28 @@ import type {
   AuthLogoutRequest,
   AuthRegisterRequest,
   AuthResponse,
+  LoginPolicy,
   RefreshTokenRequest,
   RegisterConfig,
   UserPermissionInfo
 } from '../types/auth';
+
+/**
+ * 获取登录流程配置(是否开启二次验证码)
+ * @returns 登录配置，前端据此决定登录弹窗是否展示验证码输入
+ */
+export const getLoginPolicy = () => {
+  return http_base_server.get<LoginPolicy>('/authorization/auth/login-policy');
+};
+
+/**
+ * 发送登录二次验证邮箱验证码(仅后端开启 login_security.mfa_enabled 时可用，
+ * 发送至登录用户名绑定邮箱，同一邮箱60秒内限发一次)
+ * @param username 登录用户名
+ */
+export const sendLoginCode = (username: string) => {
+  return http_base_server.post<boolean>('/authorization/auth/login/code', { username });
+};
 
 /**
  * 获取注册流程配置(是否开启邮箱验证码)
@@ -37,7 +55,7 @@ export const registerUser = (user: AuthRegisterRequest) => {
 
 /**
  * 用户登录
- * @param credentials 登录凭证
+ * @param credentials 登录凭证(开启二次验证时需携带 code)
  * @returns 认证响应，包含令牌和用户信息
  */
 export const loginUser = (credentials: AuthLoginRequest) => {
@@ -45,6 +63,9 @@ export const loginUser = (credentials: AuthLoginRequest) => {
   const formData = new FormData();
   formData.append('username', credentials.username);
   formData.append('password', credentials.password);
+  if (credentials.code) {
+    formData.append('code', credentials.code);
+  }
 
   return http_base_server.post<AuthResponse>('/authorization/auth/login', formData);
 };

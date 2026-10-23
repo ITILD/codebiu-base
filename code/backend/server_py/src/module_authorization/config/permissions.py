@@ -50,6 +50,16 @@ SYS_DEFINE = ModulePermissionDefine(
         _crud_nodes("dept", "部门管理", path="/authorization/dept", icon="OfficeBuilding", order=3),
         _crud_nodes("permission", "权限配置", path="/authorization/permission", icon="Key", order=4),
         _crud_nodes("casbin", "策略规则", path="/authorization/casbin", icon="List", order=5),
+        PermNode(
+            # 操作审计日志查询(REQ-009): 页面挂"数据与配置"分组, 权限归 sys 域(默认仅 admin)
+            name="操作审计",
+            code="sys:audit",
+            menu_type="C",
+            path="/main/audit",
+            icon="Memo",
+            order_num=6,
+            children=[PermNode(name="查询", code="sys:audit:read", menu_type="F")],
+        ),
     ],
     # 新用户不自动获得系统管理权限,需管理员分配
     default_policies=[],
@@ -101,7 +111,7 @@ MAIN_DEFINE = ModulePermissionDefine(
                 PermNode(name="上传/新建", code="main:file:create", menu_type="F"),
                 PermNode(name="重命名/移动", code="main:file:update", menu_type="F"),
                 PermNode(name="删除", code="main:file:delete", menu_type="F"),
-                PermNode(name="存储迁移", code="main:file:migrate", menu_type="F"),
+                PermNode(name="存储迁移/同步", code="main:file:migrate", menu_type="F"),
             ],
         ),
         PermNode(

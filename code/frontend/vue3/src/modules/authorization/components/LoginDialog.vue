@@ -26,6 +26,17 @@
             show-password />
         </el-form-item>
 
+        <!-- 二次验证码(后端开启 login_security.mfa_enabled 时展示, 打开弹窗时拉取策略) -->
+        <el-form-item v-if="mfaEnabled" :label="$t('label_email_code')" prop="code">
+          <div flex gap-8px w-full>
+            <el-input v-model="loginForm.code" :placeholder="$t('placeholder_email_code')"
+              autocomplete="one-time-code" :spellcheck="false" />
+            <el-button :disabled="countdown > 0" :loading="codeSending" @click="handleSendCode">
+              {{ countdown > 0 ? $t('resend_in', { n: countdown }) : $t('send_code') }}
+            </el-button>
+          </div>
+        </el-form-item>
+
         <el-form-item>
           <el-checkbox v-model="loginForm.remember">{{ $t('remember_me') }}</el-checkbox>
         </el-form-item>
@@ -51,7 +62,7 @@
 import '../styles/auth-dialog.css'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
-import { loginUser } from '../api/auth'
+import { getLoginPolicy, loginUser, sendLoginCode } from '../api/auth'
 import type {
   AuthLoginRequest,
   AuthResponse,
@@ -85,10 +96,19 @@ const loginFormRef = ref<FormInstance>()
 // 加载状态
 const loading = ref(false)
 
+// 登录是否需要二次验证码(由后端 login_security.mfa_enabled 决定)
+const mfaEnabled = ref(false)
+// 验证码发送中
+const codeSending = ref(false)
+// 验证码重发倒计时(秒)
+const countdown = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | undefined
+
 // 登录表单数据
 const loginForm = reactive({
   username: '',
   password: '',
+  code: '',
   remember: false
 })
 
@@ -100,13 +120,66 @@ const loginRules = computed(() => ({
   password: [
     { required: true, message: t('rule_password_required'), trigger: 'blur' },
     { min: 6, message: t('rule_password_min'), trigger: 'blur' }
+  ],
+  // 未开启二次验证时该表单项不渲染, 规则不会生效
+  code: [
+    { required: true, message: t('rule_code_required'), trigger: 'blur' }
   ]
 }))
+
+// 获取登录策略(是否需要二次验证码)
+const loadLoginPolicy = async () => {
+  try {
+    const policy = await getLoginPolicy()
+    mfaEnabled.value = policy.mfa_enabled
+  } catch (error) {
+    // 策略获取失败时按无需验证码处理, 避免阻塞登录
+    console.error('获取登录策略失败:', error)
+    mfaEnabled.value = false
+  }
+}
+
+// 打开弹窗时同步登录策略
+watch(visible, (val) => {
+  if (val) loadLoginPolicy()
+})
+
+// 启动验证码重发倒计时
+const startCountdown = () => {
+  countdown.value = 60
+  countdownTimer = setInterval(() => {
+    countdown.value -= 1
+    if (countdown.value <= 0) clearInterval(countdownTimer)
+  }, 1000)
+}
+
+// 发送登录二次验证码(发送至用户名绑定邮箱)
+const handleSendCode = async () => {
+  if (!loginFormRef.value) return
+  // 先校验用户名必填, 校验不通过不发送
+  try {
+    await loginFormRef.value.validateField('username')
+  } catch {
+    return
+  }
+  codeSending.value = true
+  try {
+    await sendLoginCode(loginForm.username)
+    ElMessage.success(t('msg_code_sent'))
+    startCountdown()
+  } catch (error) {
+    ElMessage.error((error as { message?: string }).message || t('msg_code_send_failed'))
+  } finally {
+    codeSending.value = false
+  }
+}
 
 // 关闭弹窗
 const handleClose = () => {
   visible.value = false
-  // 重置表单
+  // 停止倒计时并重置表单
+  clearInterval(countdownTimer)
+  countdown.value = 0
   loginFormRef.value?.resetFields()
 }
 
@@ -117,10 +190,11 @@ const handleLogin = async () => {
     if (valid) {
       loading.value = true
       try {
-        // 准备登录数据
+        // 准备登录数据(开启二次验证时携带验证码)
         const loginData: AuthLoginRequest = {
           username: loginForm.username,
-          password: loginForm.password
+          password: loginForm.password,
+          ...(mfaEnabled.value ? { code: loginForm.code } : {})
         }
         // 调用登录API
         const authResponse: AuthResponse = await loginUser(loginData)
@@ -129,7 +203,7 @@ const handleLogin = async () => {
         handleClose()
       } catch (error: unknown) {
         console.error('登录失败:', error)
-        // 添加错误提示
+        // 添加错误提示(后端锁定/验证码等校验消息直接透出)
         ElMessage.error((error as { message?: string }).message || t('login_failed'))
       } finally {
         loading.value = false
@@ -143,6 +217,9 @@ const handleSignUp = () => {
   handleClose()
   emit('register')
 }
+
+// 组件卸载时清理倒计时
+onBeforeUnmount(() => clearInterval(countdownTimer))
 
 
 </script>

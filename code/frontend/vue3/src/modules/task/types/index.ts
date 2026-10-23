@@ -79,6 +79,54 @@ interface TaskStats {
   cancelled: number
 }
 
+// ################ 周期调度(REQ-012 定时任务) ################
+
+/** 调度定义(后端 task_schedule 表; 触发方式 cron/interval 二选一) */
+interface TaskSchedule {
+  id: number
+  name: string
+  task_type: string
+  payload: Record<string, unknown>
+  /** 5 字段 cron 表达式(分 时 日 月 周) */
+  cron: string | null
+  /** 固定触发间隔(秒, ≥60) */
+  interval_seconds: number | null
+  enabled: boolean
+  /** 下次触发时刻(UTC, 停用时为 null) */
+  next_fire_at: string | null
+  last_fired_at: string | null
+  /** 最近触发生成的任务ID(跳转任务详情) */
+  last_task_id: string | null
+  last_status: string | null
+  remark: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+/** 创建/修改调度请求体(修改为全量字段) */
+interface TaskScheduleSave {
+  name: string
+  task_type: string
+  payload: Record<string, unknown>
+  cron: string | null
+  interval_seconds: number | null
+  enabled: boolean
+  remark: string | null
+}
+
+/** cron 快捷表达式预置(后端 /task/schedules/presets) */
+interface CronPreset {
+  key: string
+  expr: string
+}
+
+/** 手动立即触发结果 */
+interface TaskScheduleTriggerResult {
+  task_id: string
+  schedule_id: number
+}
+
 export {
   statusLabels,
   statusTagTypes,
@@ -89,4 +137,8 @@ export {
   type QueueTask,
   type QueueTaskCreate,
   type TaskStats,
+  type TaskSchedule,
+  type TaskScheduleSave,
+  type CronPreset,
+  type TaskScheduleTriggerResult,
 }

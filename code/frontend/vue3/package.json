@@ -24,6 +24,9 @@
   "dependencies": {
     "@ag-ui/core": "^1.0.2",
     "@element-plus/icons-vue": "^2.3.2",
+    "@file-viewer/preset-lite": "3.2.2",
+    "@file-viewer/preset-office": "3.2.2",
+    "@file-viewer/vue3": "3.2.2",
     "@microsoft/fetch-event-source": "^2.0.1",
     "@unocss/reset": "^66.5.4",
     "@vueuse/core": "^13.9.0",
@@ -48,6 +51,7 @@
     "vue-router": "5.0.4"
   },
   "devDependencies": {
+    "@file-viewer/vite-plugin": "3.2.2",
     "@iconify-json/ep": "^1.2.3",
     "@iconify-json/vscode-icons": "^1.2.32",
     "@playwright/test": "^1.56.0",
@@ -82,5 +86,6 @@
     "vite-plugin-vue-devtools": "^8.0.2",
     "vitest": "^3.2.4",
     "vue-tsc": "^3.1.1"
-  }
+  },
+  "packageManager": "pnpm@10.34.7+sha512.ba98abc585539933375b5971f4bc6d6c73a1b4b7edc4a879e7d102fe5423d1e02309d67c60a11f04955093a96e521ad9c3b138cdd654ca5be563f378b3ae48bd"
 }

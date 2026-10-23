@@ -3,6 +3,8 @@ import { RouterView } from 'vue-router'
 import { useAuthStore } from '@/common/stores/auth'
 import { useRecentPages } from '@/app/composables/useRecentPages'
 import { findMenuTrail } from '@/app/config/menu'
+// 侧边栏仅后台路由渲染: 异步组件将其从首屏入口分包剥离, 进入后台管理时才加载
+const SysSidebar = defineAsyncComponent(() => import('@/app/components/layout/SysSidebar.vue'))
 // 语言切换: EP 组件内建文案(pagination/date-picker 等)随界面语言同步
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import jaJp from 'element-plus/es/locale/lang/ja'
@@ -64,9 +66,16 @@ onMounted(() => {
            注意: 此处不要用 Transition 包裹路由组件(路由切换过渡已移除) ——
            与路由懒加载组件组合存在组件更新时 parentNode(null) 导致
            整页空白的 bug(out-in 与交叉淡入两种模式均已踩坑),
-           故直接渲染 RouterView 保证稳定 -->
+           故直接渲染 RouterView 保证稳定;
+           keep-alive 仅缓存重状态对话页(RagConversation/AiChat, 按 include
+           组件名匹配, 页面内 defineOptions 声明): 切回免整页重建与数据重拉,
+           流式输出切走不中断; 其余页面不缓存避免数据陈旧 -->
       <main flex-1 min-w-0 w-full>
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <keep-alive :include="['RagConversation', 'AiChat']">
+            <component :is="Component" />
+          </keep-alive>
+        </RouterView>
       </main>
     </div>
 

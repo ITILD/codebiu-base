@@ -15,4 +15,15 @@ async def bootstrap_default_dicts():
     logger.info("Default dicts bootstrap successfully.")
 
 
+@register_init_hook
+async def bootstrap_audit_log():
+    """操作审计(REQ-009): 注册中间件落库 sink, 并按保留期清理过期记录"""
+    from common.middleware.audit import audit_recorder
+    from module_main.service.audit_log import audit_sink, purge_expired
+
+    audit_recorder.set_sink(audit_sink)
+    await purge_expired()
+    logger.info("Audit log bootstrap successfully.")
+
+
 logger.debug("ok...server module_main服务配置")

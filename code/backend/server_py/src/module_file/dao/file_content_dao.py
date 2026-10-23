@@ -1,7 +1,8 @@
 """文件模块 file_content_dao 数据访问层"""
 
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, exists, update, func
+from sqlmodel import select, exists, update, delete, func
+from sqlalchemy import case
 from common.config.db import DaoRel
 from common.utils.fastapi_ex.exceptions import NotFoundError
 from module_file.do.filesystem import FileContent, FileContentCreate, FileContentUpdate
@@ -130,6 +131,59 @@ class FileContentDao:
 
         if result.rowcount == 0:
             raise NotFoundError(f"未找到可引用的文件: {content_hash}")
+
+    @DaoRel
+    async def ref_count_bulk_change(
+        self, deltas: dict[str, int], session: AsyncSession | None = None
+    ) -> None:
+        """
+        批量原子变更引用计数(目录/批量删除场景, 单条 CASE-WHEN SQL 完成全部扣减,
+        替代逐哈希 UPDATE+SELECT+DELETE 的 N+1 往返)
+        :param deltas: {content_hash: 变更量(负数为释放)}; 增加引用时同步置 SUCCESS
+        """
+        if not deltas:
+            return
+        if session is None:
+            raise ValueError("session must be provided")
+        ref_col = FileContent.ref_count
+        stmt = (
+            update(FileContent)
+            .where(FileContent.content_hash.in_(deltas))
+            .values(
+                ref_count=ref_col
+                + case(*[(FileContent.content_hash == h, d) for h, d in deltas.items()])
+            )
+        )
+        # 任一正增量(引用增加)时同步提升状态, 与 ref_count_change 语义一致
+        if any(d > 0 for d in deltas.values()):
+            stmt = stmt.values(content_status=TaskStatus.SUCCESS)
+        await session.exec(stmt)
+
+    @DaoRel
+    async def list_ref_leq_zero(
+        self, content_hashes: list[str], session: AsyncSession | None = None
+    ) -> list[FileContent]:
+        """
+        查询给定哈希中引用计数已归零的内容记录(批量释放后定位待清理物理文件)
+        :return: 归零的内容记录列表(含 physical_storage)
+        """
+        if not content_hashes:
+            return []
+        stmt = select(FileContent).where(
+            FileContent.content_hash.in_(content_hashes),
+            FileContent.ref_count <= 0,
+        )
+        return list((await session.exec(stmt)).all())
+
+    @DaoRel
+    async def batch_delete_by_hashes(
+        self, content_hashes: list[str], session: AsyncSession | None = None
+    ) -> None:
+        """按哈希列表批量删除内容记录(引用归零后清理, 单条 DELETE IN)"""
+        if not content_hashes:
+            return
+        stmt = delete(FileContent).where(FileContent.content_hash.in_(content_hashes))
+        await session.exec(stmt)
 
     @DaoRel
     async def replace_content_hash(

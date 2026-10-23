@@ -19,6 +19,7 @@ from module_file.do.filesystem import (
     UploadModeResponse,
     StorageStats,
     MigrateRequest,
+    SyncRequest,
     BatchDeleteRequest,
     BatchDeleteResult,
     BatchDeleteItemError,
@@ -99,10 +100,12 @@ class FileService:
         """
         self.file_entry_dao = file_entry_dao or FileEntryDao()
         self.file_content_dao = file_content_dao or FileContentDao()
-        # storage 惰性单例: 延迟到构造服务实例时导入(避免 import 期加载 aioboto3 等 S3 SDK)
-        from module_file.config.filesystem import storage
+        # storage 惰性单例: 延迟到构造服务实例时经模块属性访问取
+        # (避免 import 期加载 aioboto3 等 S3 SDK; 经模块属性而非 from-import,
+        #  防止装配前提前绑定成 None)
+        import module_file.config.filesystem as fs_conf
 
-        self.storage = storage_interface or storage
+        self.storage = storage_interface or fs_conf.storage
         self.strict_business_guard = strict_business_guard
 
     def _ensure_module_writable(self, entry: FileEntry | None) -> None:
@@ -137,6 +140,42 @@ class FileService:
             except Exception as e:
                 logger.warning(f"清理物理文件失败(可由后台任务重试): {e}")
             await self.file_content_dao.delete(content_hash, session)
+
+    async def _release_contents(
+        self, hash_counts: dict[str, int], session: AsyncSession
+    ) -> None:
+        """
+        批量释放文件内容引用(目录/批量删除场景)
+
+        与逐哈希 _release_content 等价但往返次数与哈希数解耦:
+        1. 单条 CASE-WHEN SQL 批量扣减引用计数(每哈希按条目数扣减, 同内容多文件不漏减)
+        2. 一次 IN 查询定位归零哈希
+        3. 归零物理文件并发清理 + 单条 DELETE IN 删内容记录
+
+        :param hash_counts: {content_hash: 释放的引用数}
+        :param session: 数据库会话
+        """
+        if not hash_counts:
+            return
+        await self.file_content_dao.ref_count_bulk_change(
+            {h: -n for h, n in hash_counts.items()}, session
+        )
+        zero_refs = await self.file_content_dao.list_ref_leq_zero(
+            list(hash_counts), session
+        )
+        if not zero_refs:
+            return
+        # 并发清理物理文件(失败仅告警,可由后台任务兜底)
+        async def _safe_delete(content):
+            try:
+                await self.storage.delete(content.physical_storage)
+            except Exception as e:
+                logger.warning(f"清理物理文件失败(可由后台任务重试): {e}")
+
+        await asyncio.gather(*(_safe_delete(c) for c in zero_refs))
+        await self.file_content_dao.batch_delete_by_hashes(
+            [c.content_hash for c in zero_refs], session
+        )
 
     @DaoRel
     async def delete_file(
@@ -174,12 +213,12 @@ class FileService:
                 raise NotFoundError(f"未找到ID为 {folder_id} 的目录")
             # 批量逻辑删除
             await self.file_entry_dao.batch_soft_delete(subtree_ids, session)
-            # 对子树中的文件统一释放内容引用(哈希已去重)
-            content_hashes = await self.file_entry_dao.get_content_hashes_by_ids(
+            # 对子树中的文件统一释放内容引用(按条目数 GROUP BY 计数,
+            # 同哈希多文件按实际条目数扣减; 批量路径避免逐哈希 N+1 往返)
+            hash_counts = await self.file_entry_dao.get_content_hash_counts_by_ids(
                 subtree_ids, session
             )
-            for content_hash in content_hashes:
-                await self._release_content(content_hash, session)
+            await self._release_contents(hash_counts, session)
         except Exception as e:
             logger.error(f"删除目录时发生错误: {e}")
             raise
@@ -195,6 +234,8 @@ class FileService:
         :return: 批量删除结果(成功数+失败明细)
         """
         deleted, failed = 0, []
+        # 各条目待释放的内容引用计数(循环外统一批量释放, 避免逐哈希 N+1 往返)
+        pending_counts: dict[str, int] = {}
         for entry_id in entry_ids:
             try:
                 entry = await self.file_entry_dao.get(entry_id, session)
@@ -205,28 +246,30 @@ class FileService:
                     continue
                 self._ensure_module_writable(entry)
                 if entry.is_directory:
-                    # 目录: 递归 CTE 取子树,批量逻辑删除后统一释放内容引用
+                    # 目录: 递归 CTE 取子树,批量逻辑删除后按条目数统计释放引用
                     subtree_ids = await self.file_entry_dao.get_subtree_ids(
                         entry_id, session
                     )
                     await self.file_entry_dao.batch_soft_delete(subtree_ids, session)
-                    content_hashes = (
-                        await self.file_entry_dao.get_content_hashes_by_ids(
-                            subtree_ids, session
-                        )
+                    counts = await self.file_entry_dao.get_content_hash_counts_by_ids(
+                        subtree_ids, session
                     )
                 else:
                     # 文件: 单条逻辑删除
                     await self.file_entry_dao.soft_delete(entry_id, session)
-                    content_hashes = (
-                        [entry.content_hash] if entry.content_hash else []
-                    )
-                for content_hash in content_hashes:
-                    await self._release_content(content_hash, session)
+                    counts = {entry.content_hash: 1} if entry.content_hash else {}
+                for h, n in counts.items():
+                    pending_counts[h] = pending_counts.get(h, 0) + n
                 deleted += 1
             except Exception as e:
                 logger.warning(f"批量删除条目失败 {entry_id}: {e}")
                 failed.append(BatchDeleteItemError(id=entry_id, error=str(e)))
+        # 成功删除的条目统一批量释放内容引用(计数已按条目数累计)
+        try:
+            await self._release_contents(pending_counts, session)
+        except Exception as e:
+            logger.error(f"批量删除后释放内容引用失败: {e}")
+            raise
         return BatchDeleteResult(deleted=deleted, failed=failed)
 
     @DaoRel
@@ -1450,8 +1493,10 @@ class FileService:
                 skipped += 1
                 continue
             try:
-                data = await src.load(c.physical_storage)
-                await dst.save(c.physical_storage, data)
+                # 流式搬运(与 sync_storage 同口径, 不整文件读入内存防大文件 OOM)
+                await dst.save(
+                    c.physical_storage, src.iter_chunks(c.physical_storage, 1024 * 1024)
+                )
                 # 更新内容记录的存储类型(物理键不变)
                 await self.file_content_dao.update(
                     c.content_hash,
@@ -1471,4 +1516,83 @@ class FileService:
             "migrated": migrated,
             "skipped": skipped,
             "failed": failed,
+        }
+
+    @DaoRel
+    async def sync_storage(
+        self, req: SyncRequest, session: AsyncSession | None = None
+    ) -> dict:
+        """
+        存储同步: 把缺失的物理内容在 local/s3 间互相镜像补齐(不改变主存储与记录归属)
+        与 migrate 的区别: migrate 搬运并把记录切换到目标存储(弃用旧存储);
+        sync 双向补齐使两存储各持完整副本, 之后改配置切 storage_type 即秒切
+        (如主存储 s3 想下线: 先 sync to_local 补齐本地副本, 再改配置重启)
+        :param req: 同步请求(direction/to_local|to_s3|both, dry_run)
+        :return: 同步结果 {direction, dry_run, total, details: {"local->s3"/"s3->local": {copied, skipped, failed}}}
+        """
+        if req.direction == "to_s3":
+            pairs = [(StorageType.LOCAL, StorageType.S3)]
+        elif req.direction == "to_local":
+            pairs = [(StorageType.S3, StorageType.LOCAL)]
+        else:
+            pairs = [
+                (StorageType.LOCAL, StorageType.S3),
+                (StorageType.S3, StorageType.LOCAL),
+            ]
+
+        # 按当前动态配置构建双存储实例(与全局单例互不影响)
+        storages = {
+            t: await build_storage(t) for t in (StorageType.LOCAL, StorageType.S3)
+        }
+        contents = [
+            c for c in await self.file_content_dao.list_all(session)
+            if c.physical_storage
+        ]
+        details = {}
+        for src_type, dst_type in pairs:
+            src, dst = storages[src_type], storages[dst_type]
+            copied, skipped, failed = 0, 0, []
+            for c in contents:
+                key = c.physical_storage
+                try:
+                    # 目标已存在跳过(幂等,支持中断续同)
+                    if await dst.exists(key):
+                        skipped += 1
+                        continue
+                    if not await src.exists(key):
+                        failed.append(
+                            {"physical_storage": key,
+                             "error": f"源存储 {src_type} 中不存在"}
+                        )
+                        continue
+                    if req.dry_run:
+                        copied += 1
+                        continue
+                    # 流式搬运(不整载内存; 物理键不变,两存储键一致)
+                    await dst.save(key, src.iter_chunks(key, 1024 * 1024))
+                    # 大小对账(记录有大小且目标可查时校验,防半截文件入库)
+                    if c.file_size_bytes:
+                        dst_size = await dst.size(key)
+                        if dst_size != c.file_size_bytes:
+                            raise IOError(
+                                f"同步后大小不一致: {dst_size} != {c.file_size_bytes}"
+                            )
+                    copied += 1
+                except Exception as e:
+                    logger.error(f"同步失败 {key}: {e}")
+                    failed.append({"physical_storage": key, "error": str(e)})
+            logger.info(
+                f"存储同步完成: {src_type}->{dst_type} "
+                f"copied={copied} skipped={skipped} failed={len(failed)}"
+            )
+            details[f"{src_type}->{dst_type}"] = {
+                "copied": copied,  # dry_run 时为待同步数
+                "skipped": skipped,
+                "failed": failed,
+            }
+        return {
+            "direction": req.direction,
+            "dry_run": req.dry_run,
+            "total": len(contents),
+            "details": details,
         }

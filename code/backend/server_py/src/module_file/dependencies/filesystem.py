@@ -52,7 +52,9 @@ async def get_managed_file_service(
     )
 
 
-async def can_download_entry(user_id: str | None, entry: FileEntry) -> bool:
+async def can_download_entry(
+    user_id: str | None, entry: FileEntry, *, download_perm: bool | None = None
+) -> bool:
     """判断用户对条目是否有下载权限(不抛异常, 下载鉴权与批量探测共用)
 
     判定顺序:
@@ -64,6 +66,8 @@ async def can_download_entry(user_id: str | None, entry: FileEntry) -> bool:
        (rag: 项目 editor 及以上档位放行, 见 module_rag 注册处)。
     :param user_id: 当前用户ID(匿名为 None)
     :param entry: 文件条目
+    :param download_perm: 调用方批量场景预先判定的全局下载权限结果,
+        传入后免于逐条重复 enforce(同一用户该判定结果恒定); None 表示内部自查
     :return: 是否放行下载
     """
     if entry.is_directory:
@@ -72,7 +76,9 @@ async def can_download_entry(user_id: str | None, entry: FileEntry) -> bool:
         return True
     if user_id is None:
         return False
-    if await check_permission(user_id, "main", "file", "download"):
+    if download_perm is None:
+        download_perm = await check_permission(user_id, "main", "file", "download")
+    if download_perm:
         return True
     if entry.source_module and entry.source_module != "file":
         grant = get_download_grant(entry.source_module)

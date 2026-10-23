@@ -7,7 +7,7 @@ from common.config.server import app
 
 # 主模块
 from module_main.controller import static as main_static, status, table, dict_type, dict_item
-from module_main.controller import sys_config as main_sys_config
+from module_main.controller import sys_config as main_sys_config, audit_log as main_audit_log
 # # 系统管理域权限声明(通用动态配置页, main 域内节点在 module_authorization 声明)
 # # 文件模块(网络文件系统: 虚拟文件树 + local/s3 存储无缝切换)
 from module_file.controller import filesystem
@@ -29,11 +29,15 @@ from module_rag.controller import (
 )
 # # 知识库模块: 权限声明注册保持权限表与声明一致
 from module_rag.config import permissions as rag_permissions  # noqa: F401
-# # 网页搜索模块(duckduckgo/tavily/firecrawl 引擎搜索 + RAG 联网检索)
+# # 网页搜索模块(anysearch/duckduckgo/tavily/firecrawl 引擎搜索 + RAG 联网检索)
 from module_websearch.controller import websearch
 # # 任务队列模块(本地+Celery 双引擎, RAG 文档解析任务依赖)
-from module_task.controller import task
+from module_task.controller import task, schedule
 from module_task.config import permissions as task_permissions  # noqa: F401
+# # 联系触达模块(验证码收发服务 + 通知中心站内信/订阅, REQ-011)
+from module_contact.controller import notification
+# # 智能体模块(AI 助手: Skill 注册表 + tool-calling 执行循环 + 自建助手, REQ-013)
+from module_agent.controller import agent as agent_controller  # noqa: F401
 
 
 if __name__ == "__main__":

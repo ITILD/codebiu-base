@@ -44,7 +44,13 @@ def _build_celery_app():
         broker=BROKER_URL,
         backend=RESULT_BACKEND,
         # 导入各模块注册的任务(按需追加)
-        include=["module_task.tasks.demo", "module_rag.tasks.project_document", "module_rag.tasks.project_document_chunk"],
+        include=[
+            "module_task.tasks.demo",
+            "module_task.tasks.maintenance",
+            "module_task.tasks.schedule_beat",
+            "module_rag.tasks.project_document",
+            "module_rag.tasks.project_document_chunk",
+        ],
     )
 
     # 序列化与结果过期配置
@@ -64,6 +70,14 @@ def _build_celery_app():
             "queue_order_strategy": "priority",
         },
         task_inherit_parent_priority=True,
+        # 周期调度 beat(REQ-012): 每分钟 tick 一次, 调度定义落库热更
+        # (无需随调度增改重启 beat); 仅启动 beat 进程时生效, 与 local 循环共用扫描主体
+        beat_schedule={
+            "task-scheduler-tick": {
+                "task": "module_task.tasks.schedule_beat.tick_scheduled_tasks",
+                "schedule": 60.0,
+            }
+        },
     )
 
     logger.debug(f"ok...tasks celery配置加载完成 broker={BROKER_URL}")

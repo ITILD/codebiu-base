@@ -172,8 +172,8 @@ const toggle = () => { collapsed.value = !collapsed.value }
           <div class="flex-1 min-w-0 flex flex-col gap-px">
             <div class="opacity-70">{{ getCitations(block.id).overview }}</div>
             <div
-              v-for="(c, i) in getCitations(block.id).citations"
-              :key="i"
+              v-for="c in getCitations(block.id).citations"
+              :key="`${c.source}-${c.score}`"
               class="flex items-baseline gap-1.5 min-w-0 overflow-hidden whitespace-nowrap"
               :title="`${c.source}（相关度 ${c.score}）${c.summary}`"
             >
@@ -183,8 +183,8 @@ const toggle = () => { collapsed.value = !collapsed.value }
             </div>
             <!-- 联网搜索引用: 标题(外链) + 来源域名 + 相关度 -->
             <div
-              v-for="(w, i) in getCitations(block.id).web ?? []"
-              :key="`web-${i}`"
+              v-for="w in getCitations(block.id).web ?? []"
+              :key="`web-${w.url}`"
               class="flex items-baseline gap-1.5 min-w-0 overflow-hidden whitespace-nowrap"
               :title="`${w.source}（相关度 ${typeof w.score === 'number' ? w.score.toFixed(3) : '-'}）${w.summary ?? ''}`"
             >

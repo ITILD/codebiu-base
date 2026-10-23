@@ -81,6 +81,9 @@
 
 <script setup lang="ts">
 import { ChatDotRound, EditPen, DataAnalysis, Cpu, List } from '@element-plus/icons-vue'
+// keep-alive 缓存名单(App.vue include 按组件名匹配):
+// 对话页为重状态页(消息列表/流式输出/滚动位置), 缓存后切回免整页重建与重拉
+defineOptions({ name: 'AiChat' })
 import type { PaginationParams, PaginationResponse } from '@/common/types/common'
 import type { ModelConfig } from '../types/model_config'
 import type { ChatMessageWithBlocks } from '@/common/types/chat'

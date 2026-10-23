@@ -14,7 +14,13 @@ class ProjectDocumentChunkBase(VectorModel):
     project_id: str = Field(description="所属项目ID")
     content: str = Field(
         description="文本内容",
-        json_schema_extra={"max_length": 8192},
+        # Milvus 全文检索: 中文分词器 + TEXT_MATCH 谓词(关键词召回路走全文索引而非标量 like)
+        json_schema_extra={
+            "max_length": 8192,
+            "milvus_enable_analyzer": True,
+            "milvus_analyzer_params": {"type": "chinese"},
+            "milvus_enable_match": True,
+        },
     )
     source: str = Field(default="", description="来源")
     content_types: list[str] = Field([ContentType.TEXT], description="包含的内容类型")
@@ -43,6 +49,9 @@ class SearchRequest(BaseModel):
     project_ids: list[str] = Field(description="项目ID列表")
     limit: int = Field(default=2, description="返回的最大结果数,默认2")
     query_content: str = Field(default="", description="用于向量/语义搜索的查询内容")
+    keyword_query: str = Field(
+        default="", description="关键词检索语句(空格分词, 最多取3个关键词做包含匹配); 为空仅走向量一路"
+    )
     score_threshold: float = Field(default=0.5, description="Rerank分数阈值(归一化后0~1),低于此值的结果将被过滤")
     enable_rerank: bool = Field(default=False, description="是否启用Rerank精排(深度思考)")
     rerank_limit: int = Field(default=10, description="Rerank精排返回的最大结果数,默认20")

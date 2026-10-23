@@ -32,7 +32,6 @@ from module_rag.dependencies.permission import (
 from module_rag.config.server import module_app
 # 确保导入你修改后的 DocType
 from module_rag.do.project_document import DocType
-from module_file.utils.base.file_utils import FileUtils
 from module_file.do.filesystem import (
     EntryCreateRequest,
     FileEntry,
@@ -530,8 +529,7 @@ async def download_project_document(
     file_service: FileService = Depends(get_file_service),
 ):
     """
-    下载文档(双口径): 统一存储口径按存储类型分流(S3 302直链/local 流式代理),
-    旧口径本地文件直接流式返回
+    下载文档(统一存储口径): S3 签发预签名直链 302(服务端零流量); local 流式代理
     :param document_id: 文档ID
     :param current_user_id: 当前登录用户ID(由 token 自动解析)
     :param service: 文档服务依赖注入
@@ -545,9 +543,7 @@ async def download_project_document(
     await enforce_project_permission(
         current_user_id, document.project_id, "doc", "download"
     )
-    file_name, mime_type, source, storage_backed = (
-        await service.get_file_for_download(document_id)
-    )
+    file_name, mime_type, source = await service.get_file_for_download(document_id)
     # Content-Disposition: ASCII 回退 + RFC 5987 filename*(支持中文等非 ASCII 文件名)
     from urllib.parse import quote
 
@@ -558,19 +554,12 @@ async def download_project_document(
             f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded_name}"
         )
     }
-    if storage_backed:
-        # 统一存储口径: S3 签发预签名直链 302 重定向(服务端零流量); local 流式代理
-        url = await file_service.presign_download_url(str(source), file_name)
-        if url:
-            return RedirectResponse(url, status_code=status.HTTP_302_FOUND)
-        return StreamingResponse(
-            file_service.stream_file_content(str(source)),
-            media_type=mime_type or "application/octet-stream",
-            headers=headers,
-        )
-    # 旧口径: DIR_UPLOAD 本地文件流式返回
+    # S3 签发预签名直链 302 重定向(服务端零流量); local 流式代理
+    url = await file_service.presign_download_url(str(source), file_name)
+    if url:
+        return RedirectResponse(url, status_code=status.HTTP_302_FOUND)
     return StreamingResponse(
-        FileUtils.read_file_stream(source),
+        file_service.stream_file_content(str(source)),
         media_type=mime_type or "application/octet-stream",
         headers=headers,
     )

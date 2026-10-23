@@ -56,6 +56,30 @@ def _to_milvus_expr(where: str) -> str:
     return _SQL_IN_RE.sub(lambda m: f"in [{m.group(1)}]", where)
 
 
+def _infer_vector_field(schema_cls: type[BaseModel]) -> str:
+    """从模型声明推断向量字段名(检索 anns_field 用)
+
+    推断顺序:
+    1. json_schema_extra 声明 vector_dim 的首个字段(VectorModel 标准声明方式)
+    2. 注解为 list[float](含 Optional 剥离)的首个字段(未声明 dim 的朴素模型)
+    3. 回退 "embedding"(历史默认字段名)
+    """
+    for name, field_info in schema_cls.model_fields.items():
+        extra = getattr(field_info, "json_schema_extra", None)
+        if isinstance(extra, dict) and isinstance(extra.get("vector_dim"), int):
+            return name
+    for name, field_info in schema_cls.model_fields.items():
+        annotation = field_info.annotation
+        union_args = get_args(annotation)
+        if union_args and type(None) in union_args:
+            non_none = [a for a in union_args if a is not type(None)]
+            if len(non_none) == 1:
+                annotation = non_none[0]
+        if annotation == list[float]:
+            return name
+    return "embedding"
+
+
 def _hit_to_row(hit: Any, output_fields: list[str] | None) -> dict:
     """pymilvus 检索命中 → 行数据 dict(附 _distance)
 
@@ -285,14 +309,21 @@ class DBVectorMilvus(DBVectorInterface):
                     if isinstance(meta, MaxLen):
                         max_length = meta.max_length
                         break
-                fields.append(
-                    FieldSchema(
-                        name=field_name,
-                        dtype=DataType.VARCHAR,
-                        is_primary=is_primary,
-                        max_length=max_length,
-                    )
-                )
+                varchar_kwargs: dict[str, Any] = {
+                    "name": field_name,
+                    "dtype": DataType.VARCHAR,
+                    "is_primary": is_primary,
+                    "max_length": max_length,
+                }
+                # 全文检索能力(声明式开启): enable_analyzer 分词 + enable_match
+                # 使 TEXT_MATCH(field, kw) 谓词可用(analyzer_params 如 {"type": "chinese"})
+                if extra.get("milvus_enable_analyzer"):
+                    varchar_kwargs["enable_analyzer"] = True
+                    if isinstance(extra.get("milvus_analyzer_params"), dict):
+                        varchar_kwargs["analyzer_params"] = extra["milvus_analyzer_params"]
+                    if extra.get("milvus_enable_match"):
+                        varchar_kwargs["enable_match"] = True
+                fields.append(FieldSchema(**varchar_kwargs))
                 continue
 
             fields.append(FieldSchema(name=field_name, dtype=sql_type, is_primary=is_primary))
@@ -482,12 +513,18 @@ class DBVectorMilvus(DBVectorInterface):
         self,
         schema_cls: type[BaseModel],
         query_vector: list[float],
-        vector_dims_key: str = "embedding",
+        vector_dims_key: str | None = None,
         limit: int = 5,
     ) -> list[BaseModel]:
-        """向量相似检索, 返回模型实例列表"""
+        """向量相似检索, 返回模型实例列表
+
+        :param vector_dims_key: 向量字段名; 缺省时按模型声明自动推断
+            (vector_dim 声明 → list[float] 注解 → 回退 embedding), 不再硬编码字段名
+        """
         client = await self._ensure_client()
         collection_name = schema_cls.__name__.lower()
+        if vector_dims_key is None:
+            vector_dims_key = _infer_vector_field(schema_cls)
         results = await client.search(
             collection_name,
             [query_vector],  # Milvus 期望批次格式

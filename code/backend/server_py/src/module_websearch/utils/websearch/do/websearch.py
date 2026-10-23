@@ -9,6 +9,7 @@ class Engine(StrEnum):
     DUCKDUCKGO = "duckduckgo"
     TAVILY = "tavily"
     FIRECRAWL = "firecrawl"
+    ANYSEARCH = "anysearch"
 
 
 class DateRange(StrEnum):
@@ -54,7 +55,7 @@ class SearchRequest(BaseModel):
         description="查询信息(句子或关键词)",
     )
     # 引擎标识(为空使用配置的默认引擎)
-    engine: Engine | None = Field(default=None, description="引擎(duckduckgo/tavily/firecrawl,为空用默认)")
+    engine: Engine | None = Field(default=None, description="引擎(duckduckgo/tavily/firecrawl/anysearch,为空用默认)")
     # 返回条数上限(为空使用配置,上限30)
     limit: int | None = Field(
         default=None, ge=1, le=30, description="返回条数上限(为空用配置,上限30)"

@@ -115,18 +115,26 @@ def _build_mineru_zip(stem: str) -> bytes:
 
 
 def test_factory_engine_routing(monkeypatch):
-    """工厂路由: mineru 引擎按后缀选择解析器, 未注册后缀/未知引擎报错。
+    """工厂路由: 按后缀选择解析器, 未注册后缀/未知引擎报错。
 
+    - pdf/图片 → MinerUParser(版式文档与图片走 MinerU)
+    - docx/pptx 等 Office 格式 → OfficeParser(MinerU 远程 API 实测不支持
+      Office 格式, 由本地标准库解析兜底, 见 ParserFactory 注册表注释)
     打桩 build_client: 单元层不依赖真实 mineru 配置(token/网络)。
     """
+    from module_office.utils.file_parse.office import OfficeParser
+
     monkeypatch.setattr(
         "module_office.utils.file_parse.mineru.parser.build_client", lambda cfg: None
     )
-    # 版式文档格式均路由到 MinerUParser
+    # 版式文档与图片路由到 MinerUParser
     assert isinstance(
         ParserFactory.create(Path("a.pdf"), engine="mineru"), MinerUParser
     )
-    assert isinstance(ParserFactory.create(Path("a.pptx")), MinerUParser)
+    assert isinstance(ParserFactory.create(Path("a.png")), MinerUParser)
+    # Office 格式路由到本地 OfficeParser 兜底
+    assert isinstance(ParserFactory.create(Path("a.pptx")), OfficeParser)
+    assert isinstance(ParserFactory.create(Path("a.docx")), OfficeParser)
     # mineru 不支持的纯文本等格式直接拒绝(基线不回退轻量解析引擎)
     with pytest.raises(ValueError, match="不支持的文件类型"):
         ParserFactory.create(Path("a.md"), engine="mineru")

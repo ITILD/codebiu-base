@@ -76,6 +76,7 @@
         />
         <!-- 登录/用户 -->
         <template v-if="authState.user.id">
+          <NotificationBell />
           <UserControl />
         </template>
         <template v-else>
@@ -113,15 +114,17 @@
             {{ $t('sign_up') }}
           </button>
 
-          <!-- 登录弹窗 -->
+          <!-- 登录弹窗(异步组件: 门闩激活后挂载, 见 script 内注释) -->
           <LoginDialog
+            v-if="authDialogsActivated"
             v-model="showLoginDialog"
             @login="handleLogin"
             @register="showRegisterDialog = true; showLoginDialog = false"
           />
 
-          <!-- 注册弹窗 -->
+          <!-- 注册弹窗(异步组件) -->
           <RegisterDialog
+            v-if="authDialogsActivated"
             v-model="showRegisterDialog"
             @register-success="handleRegisterSuccess"
             @back-to-login="showRegisterDialog = false; showLoginDialog = true"
@@ -142,9 +145,14 @@ import { languageOptions, currentLanguage, changeLanguage } from '@/common/i18n/
 // 面包屑(应用壳布局组件)
 import SysBreadcrumb from './SysBreadcrumb.vue'
 // 登录/注册/用户控件属于 authorization 模块的登录认证功能(应用壳只做组装)
-import LoginDialog from '@/modules/authorization/components/LoginDialog.vue'
-import RegisterDialog from '@/modules/authorization/components/RegisterDialog.vue'
+// 弹窗改异步组件 + 激活门闩(authDialogsActivated): 首次打开才拉取对应分包,
+// 登录表单/验证码倒计时等逻辑不再随首屏入口下载; 打开过一次后保持挂载,
+// 关闭动画与再次打开不受影响
+const LoginDialog = defineAsyncComponent(() => import('@/modules/authorization/components/LoginDialog.vue'))
+const RegisterDialog = defineAsyncComponent(() => import('@/modules/authorization/components/RegisterDialog.vue'))
 import UserControl from '@/modules/authorization/components/UserControl.vue'
+// 通知铃铛属于 contact 模块的通知中心功能(REQ-011, 登录态显示)
+import NotificationBell from '@/modules/contact/components/NotificationBell.vue'
 import { useAuthStore } from '@/common/stores/auth'
 import type { AuthResponse } from '@/modules/authorization/types/auth'
 // Logo 按明暗主题切换: 亮色用浅底版, 暗色用深青底版(避免暗色下发白刺眼)
@@ -162,6 +170,11 @@ const currentLanguageLabel = computed(
 )
 const showLoginDialog = ref(false)
 const showRegisterDialog = ref(false)
+// 弹窗激活门闩: 任一弹窗首次打开时置真, 之后保持挂载(见顶部注释)
+const authDialogsActivated = ref(false)
+watch([showLoginDialog, showRegisterDialog], ([login, register]) => {
+  if (login || register) authDialogsActivated.value = true
+})
 const TITLE = ref(import.meta.env.VITE_GLOB_APP_TITLE)
 
 const route = useRoute()

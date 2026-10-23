@@ -63,6 +63,11 @@ class SmsSettings(SettingsGroup):
     access_key_secret: str = Field("", title="AccessKey Secret", description="阿里云访问密钥 Secret; 为空视为未配置")
     sign_name: str = Field("", title="短信签名", description="已在阿里云备案通过的签名名称")
     template_code: str = Field("", title="验证码模板 CODE", description="模板需含 ${code} 变量, 如 SMS_123456789")
+    notify_template_code: str = Field(
+        "",
+        title="通知模板 CODE",
+        description="通知中心短信模板(REQ-011, 模板需含 ${title} 变量); 为空时通知短信自动降级站内",
+    )
 
     _secret_fields = frozenset({"access_key_secret"})
 
@@ -71,7 +76,10 @@ class SmsSettings(SettingsGroup):
 class FileSystemSettings(SettingsGroup):
     _group = "file_system"
     _name = "文件存储"
-    _description = "上传限额即时生效; 存储类型与连接信息变更需重启(切换存储请先走文件迁移流程)"
+    _description = (
+        "上传限额即时生效; 存储类型与连接信息变更需重启"
+        "(切换存储前建议先调 POST /file/filesystem/sync 同步双副本, 可秒切)"
+    )
 
     storage_type: Literal["local", "s3"] = Field("s3", title="存储类型")
     max_size: float = Field(10, title="上传大小限制(MB)", gt=0)
@@ -84,10 +92,15 @@ class FileSystemSettings(SettingsGroup):
         ],
         title="允许的 MIME 类型",
     )
-    endpoint_url: str = Field("", title="S3 Endpoint", description="S3/MinIO 地址, 如 http://127.0.0.1:9000")
+    endpoint_url: str = Field(
+        "", title="S3 Endpoint", description="S3 兼容存储地址(rustfs/MinIO 等), 如 http://127.0.0.1:9000"
+    )
     access_key: str = Field("", title="Access Key")
     secret_key: str = Field("", title="Secret Key")
-    bucket: str = Field("", title="存储桶")
+    bucket: str = Field(
+        "", title="存储桶",
+        description="S3 存储桶名(动态配置; 服务启动时桶不存在会自动创建)",
+    )
     region: str = Field("us-east-1", title="Region")
     secure: bool = Field(False, title="启用 HTTPS")
 
@@ -140,6 +153,12 @@ class TasksSettings(SettingsGroup):
     engine: Literal["local", "celery"] = Field("local", title="执行引擎")
     broker_url: str = Field("memory://", title="Broker 地址", description="celery 引擎的 Redis broker(与缓存库同实例分库)")
     result_backend: str = Field("cache+memory://", title="结果后端", description="celery 引擎的结果回写地址")
+    scheduler_enabled: bool = Field(
+        True,
+        title="周期调度开关",
+        description="定时任务总开关: local 引擎启停进程内调度循环(即时生效); "
+                    "celery 引擎控制 beat tick 是否派发(beat 进程需重启读取)",
+    )
 
     _secret_fields = frozenset({"broker_url", "result_backend"})  # URL 内嵌密码, 一并打码
 
@@ -177,12 +196,27 @@ class FirecrawlSettings(SettingsGroup):
     api_base: str = Field("https://api.firecrawl.dev", title="API 地址", description="可替换为自部署实例地址")
 
 
+class AnySearchSettings(SettingsGroup):
+    """AnySearch 引擎子配置(免 Key 可用免费额度, 配置 Key 享更高额度)"""
+
+    api_key: str = Field(
+        "", title="API Key", description="为空直接使用免费额度; 申请 Key 后填写可获更高额度/更优配额"
+    )
+    api_base: str = Field("https://api.anysearch.com", title="API 地址", description="可替换为自部署实例地址")
+    default_tag: str = Field(
+        "", title="默认 tag", description="搜索场景标签(如 code.doc), 由 API 按标签路由检索策略; 为空不传"
+    )
+
+
 class WebSearchSettings(SettingsGroup):
     _group = "websearch"
     _name = "网页搜索"
-    _description = "module_websearch 全局参数(duckduckgo 直连无需密钥); RAG 联网检索默认开关与结果数也在此组"
+    _description = (
+        "module_websearch 全局参数(anysearch/duckduckgo 直连无需密钥); "
+        "RAG 联网检索默认开关与结果数也在此组"
+    )
 
-    default_engine: Literal["duckduckgo", "tavily", "firecrawl"] = Field("duckduckgo", title="默认搜索引擎")
+    default_engine: Literal["anysearch", "duckduckgo", "tavily", "firecrawl"] = Field("anysearch", title="默认搜索引擎")
     timeout: float = Field(15, title="请求超时(秒)", gt=0)
     max_results: int = Field(10, title="默认返回条数上限", ge=1, le=30)
     proxy: str | None = Field(None, title="出网代理", description="为空直连; 如 http://127.0.0.1:7890")
@@ -191,8 +225,49 @@ class WebSearchSettings(SettingsGroup):
 
     tavily: TavilySettings = Field(default_factory=TavilySettings, title="Tavily 配置")
     firecrawl: FirecrawlSettings = Field(default_factory=FirecrawlSettings, title="Firecrawl 配置")
+    anysearch: AnySearchSettings = Field(default_factory=AnySearchSettings, title="AnySearch 配置")
 
-    _secret_fields = frozenset({"tavily.api_key", "firecrawl.api_key"})
+    _secret_fields = frozenset({"tavily.api_key", "firecrawl.api_key", "anysearch.api_key"})
+
+
+class LoginSecuritySettings(SettingsGroup):
+    _group = "login_security"
+    _name = "登录安全"
+
+    _description = (
+        "REQ-014 登录安全加固: 登录失败锁定/密码强度策略/登录二次验证; "
+        "通用配置页修改后即时生效"
+    )
+
+    lock_enabled: bool = Field(
+        True, title="启用登录失败锁定", description="连续失败达到阈值后锁定账户, 到期自动恢复"
+    )
+    max_failed_attempts: int = Field(
+        5, title="最大失败次数", ge=1, le=100, description="连续失败达到该次数即触发锁定"
+    )
+    lock_minutes: int = Field(
+        15, title="锁定时长(分钟)", ge=1, le=1440, description="锁定期内即使密码正确也拒绝登录"
+    )
+    password_policy_enabled: bool = Field(
+        False, title="启用密码强度策略", description="注册与修改密码时校验最小长度与字符类别"
+    )
+    password_min_length: int = Field(8, title="密码最小长度", ge=6, le=64)
+    password_require_classes: int = Field(
+        2, title="最少字符类别数", ge=1, le=4, description="小写/大写/数字/特殊字符至少包含的类别数"
+    )
+    mfa_enabled: bool = Field(
+        False, title="启用登录二次验证", description="登录需额外提交邮箱验证码(用户须已配置邮箱)"
+    )
+
+
+class AuditSettings(SettingsGroup):
+    _group = "audit"
+    _name = "操作审计"
+
+    _description = "REQ-009 操作审计: 写操作与登录登出落库; 保留期到时启动清理(周期清理由定时任务接入)"
+
+    enabled: bool = Field(True, title="启用审计", description="关闭后写操作不再落库(历史记录保留)")
+    retention_days: int = Field(180, title="保留天数", ge=1, description="超过保留期的审计记录在启动时清理")
 
 
 # 注册表(UI 展示顺序即此顺序)
@@ -205,5 +280,7 @@ GROUPS: list[type[SettingsGroup]] = [
     DBVectorSettings,
     TasksSettings,
     WebSearchSettings,
+    LoginSecuritySettings,
+    AuditSettings,
     AdminSettings,
 ]

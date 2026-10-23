@@ -9,6 +9,7 @@ MinerU 结果 zip 内含 ``{文件名}/content_list.json``(结构化内容列表
 - equation      → TEXT(LaTeX 原文)
 - page_idx(0-based) → position.page(1-based)
 """
+import asyncio
 import json
 import logging
 import zipfile
@@ -225,8 +226,12 @@ class MinerUParser(BaseParser):
     async def _ocr_image(self, img_path: str) -> str:
         """用 ocr_llm(VLM) 提取图片内容, 失败返回空串。"""
         try:
-            with Image.open(img_path) as pil_img:
-                img_base64 = pil_to_base64(pil_img)
+            def _encode_image() -> str:
+                # 磁盘读 + 图像解码/编码为同步 CPU/IO, 放线程池避免阻塞事件循环
+                with Image.open(img_path) as pil_img:
+                    return pil_to_base64(pil_img)
+
+            img_base64 = await asyncio.to_thread(_encode_image)
             image_url = base64_to_url(img_base64)
             messages = [
                 SystemMessage(content=OCR_SYSTEM_PROMPT),

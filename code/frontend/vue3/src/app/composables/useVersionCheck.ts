@@ -59,17 +59,33 @@ export function useVersionCheck() {
     if (document.visibilityState === 'visible') check()
   }
 
-  // 轮询 + 标签页重新可见/窗口聚焦时检测; 组件卸载时清理定时器与监听
+  // 轮询 + 标签页重新可见/窗口聚焦时检测; 组件卸载时清理定时器与监听。
+  // 启动时机延后: 等浏览器空闲(requestIdleCallback, 兜底 setTimeout)再发起首次
+  // 检测与轮询, 避免与首屏关键请求(路由分包/接口)抢占网络带宽;
+  // chunk 加载失败监听仍即刻挂载(需兜住首次导航的错误)
   let timer: ReturnType<typeof setInterval> | null = null
-  onMounted(() => {
+  let idleUseRic = false
+  let idleHandle: number | null = null
+  const startPolling = () => {
     check()
-    setupChunkErrorReload()
     timer = setInterval(check, POLL_INTERVAL)
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', check)
+  }
+  onMounted(() => {
+    setupChunkErrorReload()
+    idleUseRic = 'requestIdleCallback' in window
+    idleHandle = idleUseRic
+      ? requestIdleCallback(startPolling, { timeout: 3000 })
+      : Number(setTimeout(startPolling, 1500))
   })
   onUnmounted(() => {
     if (timer) clearInterval(timer)
+    // 轮询尚未启动(空闲回调仍挂起)时取消之, 避免卸载后仍触发
+    else if (idleHandle !== null) {
+      if (idleUseRic) cancelIdleCallback(idleHandle)
+      else clearTimeout(idleHandle)
+    }
     document.removeEventListener('visibilitychange', onVisible)
     window.removeEventListener('focus', check)
   })

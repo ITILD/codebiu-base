@@ -24,15 +24,16 @@ async def test_list_forbidden_for_normal_user(user_client):
 
 
 async def test_list_groups(client):
-    """管理员可列出全部配置组, 组元数据齐全"""
+    """管理员可列出全部配置组, 组元数据齐全(db_graph 已随图数据库下线移除)"""
     resp = await client.get("/sys-configs")
     assert resp.status_code == 200
     groups = {g["group"]: g for g in resp.json()["groups"]}
     for name in (
         "token", "email", "websearch", "file_system",
-        "db_cache", "db_vector", "db_graph", "tasks", "admin",
+        "db_cache", "db_vector", "tasks", "admin",
     ):
         assert name in groups
+    assert "db_graph" not in groups, "图数据库已下线, 不应再出现 db_graph 配置组"
     assert groups["db_cache"]["restart_required"] is True
     assert groups["email"]["name"] == "邮箱服务"
 

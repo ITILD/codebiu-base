@@ -161,9 +161,13 @@ class CasbinRuleDao:
         added_count = 0
         try:
             await self.enforcer.remove_filtered_policy(0, role_key, dom)
-            for permission_code, method in permissions:
-                if await self.enforcer.add_policy(role_key, dom, permission_code, method):
-                    added_count += 1
+            # 批量写入(上方已清空该角色该域旧策略, 全部为新增), 避免逐条 add_policy 往返
+            rules = [
+                (role_key, dom, permission_code, method)
+                for permission_code, method in permissions
+            ]
+            if rules and await self.enforcer.add_policies(rules):
+                added_count = len(rules)
         except Exception as e:
             logger.error(f"批量添加角色权限失败: {e}")
         return added_count

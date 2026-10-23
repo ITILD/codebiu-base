@@ -35,22 +35,39 @@ config/filesystem.py: 按 conf.file_system.storage_type 启动时构建全局存
 
 ```yaml
 file_system:
-  storage_type: s3            # local | s3 二选一
+  storage_type: s3            # 默认 s3; local | s3 二选一(接口对前端完全透明)
   max_size: 10                # 直传单文件上限(MB),超过自动走分片上传
   allowed_extensions:         # MIME 白名单(支持 image/* 通配),空=不限制
     - "application/pdf"
     - "image/*"
-  # s3 / minio 共用以下 S3 协议配置
+  # s3 / rustfs / minio 共用以下 S3 协议配置
   endpoint_url: "http://127.0.0.1:20004"
   access_key: "minioadmin"
   secret_key: "minioadmin"
-  bucket: "bucket0"
+  bucket: "codebiu-base"      # 项目专用桶(启动时不存在自动创建; 桶名需符合 S3 规范, 无下划线)
   region: "us-east-1"
   secure: false
 ```
 
-- `local` 无需 S3 配置，默认落盘 `dir.base_child.upload` 目录（可用 `base_dir` 覆盖）。
-- 切换存储前先调用 `POST /file/filesystem/migrate` 迁移历史物理内容（支持断点续迁），再修改配置重启即可，前端完全无感。
+- `local` 无需 S3 配置，默认落盘 `dir.base_child.upload` 目录（可用 `base_dir` 覆盖），提供与 S3 一致的接口语义。
+- 生效配置以 系统管理→通用配置页 的 `file_system` 组为准（首启按 yaml 种子入库，之后改 yaml 不再生效）。
+- **前端对接与存储类型无关**：上传先探 `GET /upload-mode`（s3 → `direct` 预签名直传；local → `proxy` 中转），下载统一走 `GET /download/{entry_id}`（s3 → 302 预签名直链；local → 流式代理）。后端切换存储前端零改动。
+
+### 存储切换与同步（local <-> s3 无痛互切）
+
+| 能力 | 接口 | 语义 |
+|---|---|---|
+| 同步 sync | `POST /file/filesystem/sync` | 双向**镜像补齐**缺失内容，两存储各持完整副本，**不改变**条目归属与主存储（幂等、支持中断续同、`dry_run` 试运行） |
+| 迁移 migrate | `POST /file/filesystem/migrate` | 单向**搬运**全部内容并把记录切换到目标存储（弃用旧存储，断点续迁） |
+
+推荐用 **sync 保持双副本**，切换只是改配置+重启（秒级），任意方向可回退：
+
+1. `POST /file/filesystem/sync` `{"direction": "both", "dry_run": true}` — 先看有多少待同步；
+2. `{"direction": "both"}` 实际同步（如只补一侧用 `to_s3` / `to_local`）；
+3. 系统管理→通用配置页改 `storage_type`（如要下线 S3 则改为 `local`）→ 重启，新文件即全部落新存储；
+4. 回退同理：把 `storage_type` 改回去重启即可（两侧副本都在）。
+
+> `migrate` 适合确定弃用某存储的场景（搬运后记录归属目标存储，源副本不再维护）。
 
 ## 3. REST 接口（前后端协议，与存储类型无关）
 
@@ -81,7 +98,8 @@ file_system:
 | DELETE | `/files/{id}` | 删除文件（引用计数-1，归零清物理） |
 | DELETE | `/folders/{id}` | 递归删除目录 |
 | GET | `/stats` | 统计（条目/内容/占用/当前存储类型） |
-| POST | `/migrate` | 存储迁移（管理员） |
+| POST | `/migrate` | 存储迁移（管理员，单向搬运并切换记录归属） |
+| POST | `/sync` | 存储同步（管理员，local<->s3 双向镜像补齐，不切主存储；`direction`: to_s3/to_local/both，`dry_run` 试运行） |
 
 ### 分片上传协议（大文件 >10MB 前端自动分流）
 

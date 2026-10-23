@@ -62,6 +62,29 @@ class ProjectDao:
         await session.flush()
 
     @DaoRel
+    async def set_root_entry(
+        self,
+        project_id: str,
+        root_entry_id: str,
+        session: AsyncSession | None = None,
+    ):
+        """
+        回写项目根文件夹条目ID(内部字段, 不走 ProjectUpdate 用户模型)
+
+        ProjectUpdate 无 root_entry_id 字段, 经其传递会被 SQLModel 静默忽略导致
+        永不回写(项目删除随之跳过虚拟子树清理, 造成条目与物理文件泄漏)
+        :param project_id: 项目ID
+        :param root_entry_id: 项目根文件夹条目ID
+        """
+        stmt = update(Project).where(Project.id == project_id).values(
+            root_entry_id=root_entry_id
+        )
+        result = await session.exec(stmt)
+        if result.rowcount == 0:
+            raise NotFoundError(f"未找到ID为 {project_id} 的项目")
+        await session.flush()
+
+    @DaoRel
     async def get(self, id: str, session: AsyncSession | None = None) -> Project | None:
         """
         查询单个项目
