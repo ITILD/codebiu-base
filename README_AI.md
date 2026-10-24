@@ -78,7 +78,7 @@ frontend/vue3/src/
 2. **每个业务线模块必须有完整的 controller/service/dao/do/dependencies 五件套**；非业务算法放模块 `utils/`；业务逻辑只写 service，controller 只做参数校验与调度。
 3. 模块间禁止互引 controller/dao/do 等内部文件；**复杂业务依靠 service 之间调用实现**；通用能力下沉 `common/`（后端）或 `src/common/`（前端）。
 4. 权限点 `域:资源:动作`，前后端声明必须一致（`config/permissions.py` ↔ `menu.ts`）。
-5. 业务可热更配置进动态配置中心（`sys_config` + schema 即表单）；引导配置进 config.yaml；禁硬编码密钥。
+5. 业务可热更配置进动态配置中心（`sys_config` + schema 即表单）；引导配置进 config.yaml；**config.yaml 为入 git 的基线模板，严禁提交任何真实密钥**（密钥位一律留空，只注释 `to set real key`）；真实密钥只放 `config.<APP_ENV>.yaml`（gitignored，默认不存在，**开发时需自建 `config.dev.yaml`**，参考同目录注释示例）或 `CODEBIU_*` 环境变量。
 6. 向量表继承 `VectorModel`（LanceModel 不支持 dict 注解，聚合元数据存 JSON 字符串）。
 7. 前端页面自动路由（`pages/` 下文件路径即路由，**入口 .vue 不可改名/移位**，拆分只动同模块 `components/`）；菜单接 menu.ts；API 统一走 `common/api/http.ts`（流式/Blob 用 `authFetch.ts`，FastAPI 错误解析走 `httpError.ts`）；列表页用 `useTableQuery`、新增/编辑对话框用 `useCrudDialog`、日期格式化用 `common/utils/datetime.ts`，**禁止在页面内重复实现这些公共能力**；对话框子组件约定 `defineExpose({ open })`、打开时重置防脏数据、props/emits 必须带类型。
 8. 依赖变更先 grep 复用，再确认无 500MB+ 大库，最后两端同步（pyproject / package.json）。
@@ -102,7 +102,7 @@ frontend/vue3/src/
 | `src/common/utils/db/session/impl/db_vector_lancedb.py` | LanceDB 封装（建表/检索/谓词删除/重向量化） |
 | `src/module_authorization/config/permissions.py` | sys/main 域权限声明 |
 | `src/module_rag/config/permissions.py` | rag/task 域权限声明 |
-| `config.yaml` / `config.<APP_ENV>.yaml` | 基线层(零依赖默认, 单文件可启动) / 环境层(数据库/模型种子/密钥, gitignored) |
+| `config.yaml` / `config.<APP_ENV>.yaml` | 基线层(零依赖默认, 单文件可启动; **入 git，严禁真实密钥，只留 to-set-real-key 占位**) / 环境层(数据库/模型种子/真实密钥, gitignored; **默认不存在，开发时自建 `config.dev.yaml`**) |
 | `alembic/`、`alembic.ini`、`src/common/utils/db/migration.py` | 数据库结构迁移(REQ-008)：首启 create_all+自动 stamp；演进 `alembic revision --autogenerate` + `upgrade head`(详见 deveops/运维手册/数据库运维.md) |
 | `doc/dev/permission.md` | 新模块权限接入指南 |
 

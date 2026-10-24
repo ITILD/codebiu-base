@@ -34,10 +34,11 @@ middleware:
 # ############################# 文档解析(MinerU 外部服务) #############################
 # 唯一解析引擎: 远程 mineru.net API(默认)或本地 docker mineru-api
 # 新解析服务接入点: module_office/utils/file_parse/factory.py 引擎注册表
+# 密钥管理: 本文件为基线模板, 只留 to-set-real-key 占位; 真实 token 放 config.<APP_ENV>.yaml(gitignored) 或 CODEBIU_MINERU__TOKEN
 mineru:
   mode: remote                # remote(mineru.net, 支持批量) / local(本地 docker)
   remote_base_url: https://mineru.net/api/v4
-  token: ""                   # mineru.net 申请(https://mineru.net/apiManage/docs); 也可 CODEBIU_MINERU__TOKEN 注入
+  token: ""                   # to set real key: config.dev.yaml 的 mineru.token 或 CODEBIU_MINERU__TOKEN; 严禁真实密钥入本文件
   local_base_url: http://127.0.0.1:8000
   local_endpoint: /file_parse
   model_version: pipeline     # pipeline / vlm
@@ -147,39 +148,15 @@ websearch:
     default_tag: ''
   # Tavily 搜索(https://app.tavily.com 免费注册获取 API Key)
   tavily:
-    # API Key(为空则该引擎不可用)
-    api_key: '**REMOVED-SECRET**'
+    # API Key(to set real key: 写入 config.dev.yaml 的 websearch.tavily; 为空则该引擎不可用)
+    api_key: ''
     # 搜索深度: basic(快速)/advanced(更全但更慢、消耗额度更多)
     search_depth: basic
     # 是否返回 AI 摘要答案
     include_answer: false
   # Firecrawl 搜索(https://www.firecrawl.dev 免费注册获取 API Key)
   firecrawl:
-    # API Key(为空则该引擎不可用)
-    api_key: '**REMOVED-SECRET**'
+    # API Key(to set real key: 写入 config.dev.yaml 的 websearch.firecrawl; 为空则该引擎不可用)
+    api_key: ''
     # API 地址(可替换为自部署实例地址)
     api_base: https://api.firecrawl.dev
-
-# ############################# 文档解析引擎配置 #############################
-# module_office 文档解析默认引擎 mineru(ParserFactory 可选 docling)
-# 密钥管理: 本文件为基线模板(无 dev 层时直接可用), 生产建议经
-# config.dev.yaml(gitignored) 或 CODEBIU_MINERU__TOKEN 环境变量覆盖
-mineru:
-  # 部署模式: remote(mineru.net 远程 API, 默认, 支持批量) / local(本地 docker mineru-api)
-  mode: remote
-  # 远程 API 地址与 token(https://mineru.net/apiManage/docs 申请)
-  remote_base_url: https://mineru.net/api/v4
-  token: "**REMOVED-SECRET**"
-  # 本地 docker mineru-api 地址; 端点默认为 2.x 契约 /file_parse, 版本差异可调
-  local_base_url: http://127.0.0.1:8000
-  local_endpoint: /file_parse
-  # 解析参数
-  model_version: pipeline   # pipeline / vlm
-  language: ch
-  is_ocr: false             # false 自动判断是否 OCR
-  enable_formula: true
-  enable_table: true
-  # 网络与轮询(秒)
-  timeout: 300              # 单次 HTTP 请求超时
-  poll_interval: 5          # 远程结果轮询间隔
-  poll_timeout: 1800        # 远程任务最长等待
