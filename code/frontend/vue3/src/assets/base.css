@@ -38,18 +38,34 @@ body,
     --el-text-color-primary: #3f5348;
     --el-text-color-regular: #5a6b5f;
 
-    /* 品牌色变量(自用, 是 uno.config.ts note-* shortcut 的唯一取值来源) */
-    --note-green: #6b9e78;
-    --note-green-deep: #557f61;
-    --note-paper: #f7faf1;
-    --note-soft: #f1f6eb;
-    --note-card: #ffffff;
-    --note-tint: #e9f3e8;
-    --note-border: #dee8da;
-    --note-border-green: #a9c9b1;
-    --note-text: #3f5348;
-    --note-sub: #5a6b5f;
-    --note-accent: #557f61;
+    /* 品牌色变量(自用, 是 uno.config.ts note-* shortcut 的唯一取值来源)
+       写法: 通道三元组(--note-x-rgb)是唯一色值来源, --note-x 由其派生。
+       三元组专供 /透明度 修饰(如 bg-note-green/15 → rgb(var(--note-green-rgb) / 15%))
+       与 rgba() 组合色使用: 合成结果是浏览器可序列化的 legacy rgba,
+       html2canvas 才能解析; 若用 color-mix, computed 值会变成 color(srgb …),
+       html2canvas 1.4.x 直接抛错, 导致整页截图/PDF 导出失败 */
+    --note-green-rgb: 107 158 120;
+    --note-green: rgb(var(--note-green-rgb));
+    --note-green-deep-rgb: 85 127 97;
+    --note-green-deep: rgb(var(--note-green-deep-rgb));
+    --note-paper-rgb: 247 250 241;
+    --note-paper: rgb(var(--note-paper-rgb));
+    --note-soft-rgb: 241 246 235;
+    --note-soft: rgb(var(--note-soft-rgb));
+    --note-card-rgb: 255 255 255;
+    --note-card: rgb(var(--note-card-rgb));
+    --note-tint-rgb: 233 243 232;
+    --note-tint: rgb(var(--note-tint-rgb));
+    --note-border-rgb: 222 232 218;
+    --note-border: rgb(var(--note-border-rgb));
+    --note-border-green-rgb: 169 201 177;
+    --note-border-green: rgb(var(--note-border-green-rgb));
+    --note-text-rgb: 63 83 72;
+    --note-text: rgb(var(--note-text-rgb));
+    --note-sub-rgb: 90 107 95;
+    --note-sub: rgb(var(--note-sub-rgb));
+    --note-accent-rgb: 85 127 97;
+    --note-accent: rgb(var(--note-accent-rgb));
 
     /* 底部安全区高度(刘海屏 home indicator): 与主题无关仅声明一份,
        供 FloatTools 等贴底元素经 getComputedStyle 读取避让 */
@@ -90,7 +106,8 @@ body,
     --note-water-line: rgba(85, 127, 97, 0.38);  /* 水纹线 */
     --note-lotus: #e9c3bb;        /* 荷花瓣 */
     --note-lotus-core: #c39b57;   /* 花蕊金 */
-    --note-seal: #ad563e;         /* 朱砂闲章 */
+    --note-seal-rgb: 173 86 62;
+    --note-seal: rgb(var(--note-seal-rgb));         /* 朱砂闲章 */
 
     /* 页面底纸颗粒: 纸纤维(低频拉丝) + 细颗粒, 纯灰噪声不脏纸面 */
     --note-body-grain:
@@ -131,17 +148,29 @@ html.dark {
     --el-text-color-regular: #a8aeb8;
     --el-text-color-secondary: #858b95;
 
-    --note-green: #6cbf8f;
-    --note-green-deep: #88d2a7;
-    --note-paper: #0b0d10;
-    --note-soft: #14181d;
-    --note-card: #171c22;
-    --note-tint: #202a25;
-    --note-border: #2a3038;
-    --note-border-green: #3e5f4e;
-    --note-text: #e7eaee;
-    --note-sub: #a8aeb8;
-    --note-accent: #88d2a7;
+    /* 品牌色: 与亮色同构, 通道三元组为唯一色值来源(派生规则见 :root 注释) */
+    --note-green-rgb: 108 191 143;
+    --note-green: rgb(var(--note-green-rgb));
+    --note-green-deep-rgb: 136 210 167;
+    --note-green-deep: rgb(var(--note-green-deep-rgb));
+    --note-paper-rgb: 11 13 16;
+    --note-paper: rgb(var(--note-paper-rgb));
+    --note-soft-rgb: 20 24 29;
+    --note-soft: rgb(var(--note-soft-rgb));
+    --note-card-rgb: 23 28 34;
+    --note-card: rgb(var(--note-card-rgb));
+    --note-tint-rgb: 32 42 37;
+    --note-tint: rgb(var(--note-tint-rgb));
+    --note-border-rgb: 42 48 56;
+    --note-border: rgb(var(--note-border-rgb));
+    --note-border-green-rgb: 62 95 78;
+    --note-border-green: rgb(var(--note-border-green-rgb));
+    --note-text-rgb: 231 234 238;
+    --note-text: rgb(var(--note-text-rgb));
+    --note-sub-rgb: 168 174 184;
+    --note-sub: rgb(var(--note-sub-rgb));
+    --note-accent-rgb: 136 210 167;
+    --note-accent: rgb(var(--note-accent-rgb));
 
     /* 暗色阴影: 深色影定层次, 末段叠一层极淡墨绿辉光作为点缀(墨绿在阴影上体现) */
     --note-shadow:
@@ -179,7 +208,8 @@ html.dark {
     --note-water-line: rgba(140, 210, 167, 0.34);
     --note-lotus: #94655f;
     --note-lotus-core: #c39b57;
-    --note-seal: #c5735c;
+    --note-seal-rgb: 197 115 92;
+    --note-seal: rgb(var(--note-seal-rgb));
 
     /* 暗底需略强颗粒方可"摸"到质感(中性噪声) */
     --note-body-grain:
@@ -364,6 +394,17 @@ html.dark .paper-sheet::after {
     --el-tag-border-radius: 6px;
 }
 
+/* ---- 按钮: 恢复被 CSS reset 清掉的底色 ----
+   原因: UnoCSS reset 的 `button, [type='button']` 与 Element Plus 的 `.el-button`
+   同为 (0,1,0) 特异性, 而 virtual:uno.css 在 EP 按需注入的组件样式之后加载,
+   同特异性下后者败出 → 所有按钮 background-color 被重置为 transparent,
+   亮色主题里白字落在纸色底上即"隐形"。双写 `.el-button` 提高特异性,
+   与表格 `.el-table.el-table` 同一手法; text/link/plain/禁用态仍由 EP
+   自身更高特异性的规则接管, 不受影响。 */
+.el-button.el-button {
+    background-color: var(--el-button-bg-color);
+}
+
 /* ---- 按钮: 统一交互动效手感(只过渡合成器/低成本属性) ---- */
 .el-button {
     transition:
@@ -408,8 +449,16 @@ html.dark .paper-sheet::after {
 }
 
 /* ---- 标签: 胶囊形, 淡底色差即可辨识, 去掉描边 ---- */
+/* 长标签(分类名/来源等): 不撑破所在行, 文本单行省略 */
 .el-tag.el-tag {
     border-color: transparent;
+    max-width: 100%;
+}
+
+.el-tag.el-tag .el-tag__content {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ---- 菜单: 去默认右描边(侧栏以底色差分区) ---- */
@@ -613,6 +662,100 @@ html.dark .note-sk::after {
 .cv-auto {
     content-visibility: auto;
     contain-intrinsic-size: auto 360px;
+}
+
+/* ============================================
+   文字溢出与长内容处理(全局兜底)
+   ============================================ */
+
+/* 单行省略: 供不便使用 UnoCSS 类名的动态/DOM 场景(v-ellipsis 指令配套) */
+.note-ellipsis {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* 多行省略: 行数由 --note-clamp 控制(默认 2), 与 -webkit-line-clamp 共用 */
+.note-clamp {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: var(--note-clamp, 2);
+    overflow: hidden;
+    word-break: break-word;
+}
+
+/* 悬浮才出现的操作按钮: 触屏/无 hover 设备常显, 避免操作入口不可达 */
+@media (hover: none) {
+    .note-hover-reveal {
+        opacity: 1 !important;
+    }
+}
+
+/* 长串(URL / 哈希 / token)强制换行, 避免撑破卡片与表格 */
+.note-break {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+/* 表格单元格: 长串允许在任意位置断行, 防止撑出横向滚动条 */
+.el-table .cell {
+    overflow-wrap: anywhere;
+}
+
+/* 提示气泡: 超长提示自动换行, 不横跨整屏(原生 title 提示同样受此约束) */
+.el-popper.is-dark {
+    max-width: min(420px, calc(100vw - 2rem));
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+}
+
+/* 轻提示: 窄屏不溢出, 长文案可换行 */
+.el-message {
+    max-width: calc(100vw - 2rem);
+    overflow-wrap: anywhere;
+}
+
+/* ============================================
+   移动端弹层: 限制高度 + 内容区内部滚动
+   (避免长表单把按钮顶出视口, 或抽屉内容不可达)
+   ============================================ */
+@media (max-width: 640px) {
+    /* 对话框: 留出上下安全间距, 主体滚动、头尾常驻 */
+    .el-dialog:not(.is-fullscreen) {
+        --el-dialog-width: calc(100vw - 1.5rem) !important;
+        margin: 0.75rem auto !important;
+        max-height: calc(100dvh - 1.5rem);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .el-dialog:not(.is-fullscreen) .el-dialog__header,
+    .el-dialog:not(.is-fullscreen) .el-dialog__footer {
+        flex: 0 0 auto;
+    }
+
+    .el-dialog:not(.is-fullscreen) .el-dialog__body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    /* 抽屉: 内容区独立滚动, 不挤压页面 */
+    .el-drawer {
+        max-width: 92vw;
+    }
+
+    .el-drawer__body {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    /* 表格: 永不撑出页面横向滚动 */
+    .el-table {
+        max-width: 100%;
+    }
 }
 
 /* ============================================

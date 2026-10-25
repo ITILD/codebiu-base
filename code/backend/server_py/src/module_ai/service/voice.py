@@ -1,6 +1,6 @@
 """语音服务(ASR/TTS): 统一模型入口的门面(模型能力全部通过外部服务接入)
 
-配置解析与引擎构建委托 ModelEntryService(service/model_entry.py 统一入口):
+配置解析与引擎构建委托 ModelEntryService(service/model_config.py 统一入口):
     - model_type=asr/tts + server_type=online 的记录即为可选方案
     - engine 参数可选: 指定时精确匹配 server_type(旧值 dashscope/sherpa/qwen/local 自动归一化为 online),
       缺省时按 用户个人绑定 → 全局默认 解析
@@ -8,15 +8,33 @@
     - 表中无配置时抛出异常提示先添加在线语音模型
     - online 内部协议细节由 extra 分派: extra.protocol=dashscope|openai
 """
+import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
-from typing import Iterator, Tuple
+from typing import Iterator, Protocol, Tuple, runtime_checkable
 
+from module_ai.do.capability import TranscriptResult
 from module_ai.do.voice import VoiceEngine
-from module_ai.service.model_entry import ModelEntryService, get_model_entry
+from module_ai.service.model_config import ModelEntryService, get_model_entry
 from module_ai.utils.voice.interface import ASREngine, TTSEngine
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class AsrCapability(Protocol):
+    """语音转写能力契约: 音频字节 -> 文本(可选时间轴), 供 RAG 音视频入库调用"""
+
+    async def transcribe(
+        self,
+        audio: bytes,
+        *,
+        sample_rate: int = 16000,
+        user_id: str | None = None,
+    ) -> TranscriptResult:
+        """转写整段音频, sample_rate 仅为首选采样率提示"""
+        ...
 
 
 class ASRStreamSession:
@@ -178,3 +196,24 @@ class VoiceService:
         :return: 实际生效的引擎方案
         """
         return engine or VoiceEngine.ONLINE
+
+    # ---------- 整段转写(AsrCapability) ----------
+
+    async def transcribe(
+        self, audio: bytes, *, sample_rate: int = 16000, user_id: str | None = None
+    ) -> TranscriptResult:
+        """整段音频转写(音视频入库链路使用), 引擎为同步实现故放入线程池
+
+        :param audio: 音频原始字节(格式由引擎自动识别)
+        :param sample_rate: 首选采样率提示
+        :param user_id: 当前用户ID(绑定模型优先)
+        :return: 转写文本与引擎信息
+        """
+        engine = await self._entry.get_engine("asr", user_id=user_id)
+        started = time.monotonic()
+        text = await asyncio.to_thread(engine.recognize, audio, sample_rate)
+        return TranscriptResult(
+            text=str(text or "").strip(),
+            engine=type(engine).__name__,
+            elapsed=time.monotonic() - started,
+        )

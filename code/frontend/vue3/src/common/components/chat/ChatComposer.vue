@@ -354,7 +354,13 @@ onMounted(() => {
   width: 18px;
   height: 36px;
   border-radius: 0 999px 999px 0;
-  border-left: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  /* 分隔线用显式 rgba: color-mix 的计算值会变成 color(srgb …), html2canvas 截图会抛错 */
+  border-left: 1px solid var(--note-border);
+}
+
+/* 可发送态下按钮为绿底白字: 分隔线取 25% 白, 与原来的 currentColor 混色观感一致 */
+.cc-send-group.enabled .cc-send-caret {
+  border-left-color: rgba(255, 255, 255, 0.25);
 }
 
 /* 未启用语音输入: 无小下拉, 主按钮为完整圆形 */

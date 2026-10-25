@@ -1,5 +1,5 @@
 // src/modules/ai/types/model_config.ts
-// 模型配置类型定义(多类型模型: chat/embeddings/rerank/ocr/asr/tts)
+// 模型配置类型定义(多类型模型: chat/embeddings/rerank/ocr/asr/tts/image)
 
 /** 模型服务方案(与后端 ModelServerType 对齐; 模型能力全部通过外部服务接入) */
 enum ModelServerType {
@@ -24,6 +24,8 @@ enum ModelType {
   OCR = "ocr",
   ASR = "asr",
   TTS = "tts",
+  /** 生图: 文生图(T2I)/图生图·图像编辑(I2I) */
+  IMAGE = "image",
   VAD = "vad",
   DENOISE = "denoise",
 }
@@ -69,6 +71,7 @@ const modelTypeOptions: { label: string; value: ModelType }[] = [
   { label: 'OCR', value: ModelType.OCR },
   { label: '语音识别', value: ModelType.ASR },
   { label: '语音合成', value: ModelType.TTS },
+  { label: '生图', value: ModelType.IMAGE },
 ]
 
 /** 历史类型值中文标签(仅存量数据渲染用) */
@@ -85,6 +88,7 @@ const modelTypeTagType: Record<string, 'primary' | 'success' | 'warning' | 'info
   [ModelType.OCR]: 'danger',
   [ModelType.ASR]: 'info',
   [ModelType.TTS]: 'info',
+  [ModelType.IMAGE]: 'success',
   [ModelType.VAD]: 'info',
   [ModelType.DENOISE]: 'info',
 }
@@ -107,6 +111,7 @@ const VOICE_ONLINE_OPTIONS = [
  * 按模型类型返回可用的服务方案(与后端 server_types_for 对齐; 全部为外部服务接入)
  * - asr/tts: online(远程API/本地vllm发布)
  * - ocr: dashscope(阿里云在线)
+ * - image: openai(OpenAI 兼容生图)/dashscope(百炼兼容模式, 协议相同)
  * - 其余(chat/embeddings/rerank): openai/dashscope/vllm/ollama/aws
  */
 const serverTypeOptionsFor = (modelType: string) => {
@@ -118,6 +123,12 @@ const serverTypeOptionsFor = (modelType: string) => {
   }
   if (modelType === ModelType.OCR) {
     return [{ label: 'DashScope(阿里云在线)', value: ModelServerType.DASHSCOPE }]
+  }
+  if (modelType === ModelType.IMAGE) {
+    return [
+      { label: 'OpenAI 兼容(生图)', value: ModelServerType.OPENAI },
+      { label: 'DashScope(百炼兼容模式)', value: ModelServerType.DASHSCOPE },
+    ]
   }
   return API_SERVER_OPTIONS
 }
@@ -245,6 +256,26 @@ interface ModelMediaTestResponse {
   elapsed?: number;
 }
 
+/** 单张生图结果(与后端 ImageResultItem 对齐) */
+interface ModelImageResultItem {
+  /** 图片地址(临时地址, 约 24 小时有效) */
+  url: string;
+  /** 模型改写后的提示词(部分模型返回) */
+  revised_prompt?: string;
+}
+
+/** 生图单独测试响应(POST /ai/llm/test-image, 与后端 ImageGenerateResponse 对齐) */
+interface ModelImageTestResponse {
+  model_id?: string | null;
+  model?: string;
+  /** image=文生图 / image_edit=图生图 */
+  capability?: string;
+  ok: boolean;
+  images: ModelImageResultItem[];
+  elapsed?: number;
+  error?: string;
+}
+
 /** 各模型类型支持的能力项(capability -> 中文名, 与后端 MODEL_CAPABILITIES 对齐) */
 const capabilityOptionsFor: Record<string, { key: string; label: string }[]> = {
   [ModelType.CHAT]: [
@@ -257,6 +288,11 @@ const capabilityOptionsFor: Record<string, { key: string; label: string }[]> = {
   // 语音类: 后端用模拟音频对在线引擎做冒烟验证
   [ModelType.ASR]: [{ key: 'asr', label: '识别' }],
   [ModelType.TTS]: [{ key: 'tts', label: '合成' }],
+  // 生图类: 文生图与图生图(图像编辑)各生成一张小图验证
+  [ModelType.IMAGE]: [
+    { key: 'image', label: '文生图' },
+    { key: 'image_edit', label: '图生图' },
+  ],
 }
 
 /** 取模型已测试的能力列表(含未通过, 供标签渲染; 未测试返回 [])
@@ -266,7 +302,11 @@ const testedCapabilities = (config?: ModelConfig | null) =>
     .filter(([, v]) => !!v)
     .map(([key, v]) => ({
       key,
-      label: v.label || capabilityOptionsFor[key]?.find(c => c.key === key)?.label || key,
+      // 标签优先取后端回写值; 缺失时按该模型类型的能力项反查(image_edit 等子能力不在顶层键中)
+      label:
+        v.label
+        || capabilityOptionsFor[config?.model_type ?? '']?.find(c => c.key === key)?.label
+        || key,
       ok: !!v.ok,
       detail: v.detail || '',
       error: v.error || '',
@@ -302,19 +342,57 @@ interface ModelConfigUpdate {
   extra?: Record<string, any>;
 }
 
-/** extra 各方案常用键说明(编辑表单提示用) */
-const extraKeyHints: Record<string, string[]> = {
-  [ModelServerType.ONLINE]: [
-    'protocol: 上游协议(dashscope=阿里云WebSocket / openai=OpenAI兼容HTTP)',
-    'asr: language(语种提示) / enable_itn(逆文本正则化)',
-    'tts: voice(音色 ID, 如 longxiaochun)',
+/** 扩展配置常用键预设(key/默认值/注释), "添加配置"下拉时可选 */
+interface ExtraPresetOption {
+  key: string
+  value: string
+  comment: string
+}
+
+/** 各模型类型的常用扩展键(值为编辑文本, 数字/布尔按 JSON 语义解析) */
+const extraPresetsByType: Record<string, ExtraPresetOption[]> = {
+  [ModelType.CHAT]: [
+    { key: 'region_name', value: 'us-east-1', comment: 'AWS 区域(aws 方案)' },
+    { key: 'aws_access_key_id', value: '', comment: 'AWS 访问密钥 ID(aws 方案)' },
   ],
-  [ModelServerType.DASHSCOPE]: [
-    'asr: language(语种提示) / enable_itn(逆文本正则化)',
-    'tts: voice(音色 ID, 如 longxiaochun)',
-    'ocr: prompt(在线识别指令, 返回整图纯文本无坐标框)',
+  [ModelType.EMBEDDINGS]: [
+    { key: 'timeout', value: '60', comment: '单次调用超时秒数' },
+  ],
+  [ModelType.RERANK]: [
+    { key: 'score_threshold', value: '0.5', comment: '相关性过滤阈值(统一按 0~1 归一)' },
+    { key: 'score_min', value: '0', comment: '原始分数量纲下限(gte/Qwen 系为 0)' },
+    { key: 'score_max', value: '1', comment: '原始分数量纲上限(jina 系为 0.5)' },
+  ],
+  [ModelType.IMAGE]: [
+    { key: 'size', value: '1024x1024', comment: '默认出图尺寸(宽x高)' },
+    { key: 'n', value: '1', comment: '默认出图张数(1~4)' },
+    { key: 'negative_prompt', value: '', comment: '反向提示词' },
+    { key: 'prompt_extend', value: 'true', comment: '提示词智能改写(true/false)' },
+    { key: 'watermark', value: 'false', comment: '是否添加水印(true/false)' },
+    { key: 'timeout', value: '180', comment: '单次生图超时秒数' },
+  ],
+  [ModelType.ASR]: [
+    { key: 'protocol', value: 'dashscope', comment: '上游协议(dashscope/openai)' },
+    { key: 'language', value: 'zh', comment: '语种提示(如 zh/en)' },
+    { key: 'enable_itn', value: 'true', comment: '逆文本正则化(数字/标点)' },
+    { key: 'sample_rate', value: '16000', comment: '音频采样率(Hz)' },
+    { key: 'ws_url', value: 'wss://', comment: '流式识别 WebSocket 地址' },
+  ],
+  [ModelType.TTS]: [
+    { key: 'protocol', value: 'dashscope', comment: '上游协议(dashscope/openai)' },
+    { key: 'voice', value: 'longxiaochun', comment: '音色 ID(如 longxiaochun)' },
+    { key: 'ws_url', value: 'wss://', comment: '流式合成 WebSocket 地址' },
+  ],
+  [ModelType.OCR]: [
+    { key: 'protocol', value: 'dashscope', comment: '上游协议(dashscope/openai)' },
+    { key: 'prompt', value: '请提取图片中的全部文字', comment: '识别指令(整图纯文本, 无坐标框)' },
+    { key: 'poll_timeout', value: '120', comment: '异步识别轮询超时秒数' },
   ],
 }
+
+/** 按模型类型取扩展配置常用键预设 */
+const extraPresetsFor = (modelType: ModelType | string): ExtraPresetOption[] =>
+  extraPresetsByType[modelType] ?? []
 
 export {
   ModelServerType,
@@ -330,9 +408,10 @@ export {
   serverTypeOptionsFor,
   modelTypeLabel,
   serverTypeLabel,
-  extraKeyHints,
+  extraPresetsFor,
   capabilityOptionsFor,
   testedCapabilities,
+  type ExtraPresetOption,
   type ModelConfigBase,
   type ModelConfig,
   type ModelConfigCreate,
@@ -343,4 +422,6 @@ export {
   type ModelCustomTestItem,
   type ModelCustomTestResponse,
   type ModelMediaTestResponse,
+  type ModelImageResultItem,
+  type ModelImageTestResponse,
 }

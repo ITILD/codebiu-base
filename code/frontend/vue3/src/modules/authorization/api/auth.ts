@@ -1,5 +1,6 @@
 // src/modules/authorization/api/auth.ts
 import { http_base_server } from '@/common/api/http';
+import type { ThemeMode } from '@/common/types/theme';
 import type {
   AuthLoginRequest,
   AuthLogoutRequest,
@@ -102,6 +103,27 @@ export const getCurrentUser = () => {
  */
 export const getCurrentUserId = () => {
   return http_base_server.get<string>('/authorization/auth/me-id');
+};
+
+/** 当前用户样式配置 */
+export interface UserPreference {
+  /** 主题模式: auto=跟随系统, light=亮色, dark=暗色 */
+  theme: ThemeMode;
+}
+
+/**
+ * 获取当前用户保存的样式配置(未设置时后端返回 auto)
+ */
+export const getMyPreference = () => {
+  return http_base_server.get<UserPreference>('/authorization/auth/me/preference');
+};
+
+/**
+ * 保存当前用户的样式配置
+ * @param preference 样式配置(主题模式)
+ */
+export const updateMyPreference = (preference: UserPreference) => {
+  return http_base_server.put<UserPreference>('/authorization/auth/me/preference', preference);
 };
 
 /**

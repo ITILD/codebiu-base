@@ -1,11 +1,12 @@
 <template>
-  <!-- 能力测试 + 单独测试对话框 -->
+  <!-- 模型测试对话框: 预设测试(打开自动运行) + 自定义测试 -->
   <el-dialog v-model="dialogVisible" :title="`模型测试 - ${testTargetName}`" width="90%" class="max-w-[640px]">
     <div class="flex flex-col gap-4">
-      <!-- ===== 单独测试区(按模型类型提供自定义输入, 单次真实调用) ===== -->
-      <div class="rounded border border-note p-3">
+      <!-- ===== 自定义测试区(按模型类型提供自定义输入, 单次真实调用) =====
+           视觉顺序排在预设测试之后(order-2), 打开对话框先看"模型是否可用" -->
+      <div class="order-2 rounded border border-note p-3">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-bold text-note">单独测试</span>
+          <span class="text-sm font-bold text-note">自定义测试</span>
           <span class="text-xs text-note-sub">{{ customHint }}</span>
         </div>
 
@@ -13,6 +14,9 @@
         <template v-if="isType('chat')">
           <el-input v-model="chatQuestion" type="textarea" :rows="2" maxlength="2000"
             placeholder="输入问题, 真实调用一次该模型(如: 用一句话介绍你自己)" />
+          <div v-if="promptLimit > 0" class="mt-1">
+            <InputLimitBar :used="estimateTokens(chatQuestion)" :limit="promptLimit" label="提问" />
+          </div>
           <div class="mt-2">
             <el-button type="primary" size="small" :loading="customRunning" @click="runChatTest">发送提问</el-button>
           </div>
@@ -44,13 +48,16 @@
               class="flex items-start gap-2 text-xs p-1.5 bg-note-tint rounded">
               <el-tag size="small" type="warning" class="shrink-0">#{{ i + 1 }}</el-tag>
               <span class="shrink-0 text-note-sub">原始 {{ formatScore(r.score) }} → 归一 {{ formatScore(r.normalized) }}</span>
-              <span class="truncate">{{ r.document }}</span>
+              <span v-ellipsis class="truncate">{{ r.document }}</span>
             </div>
           </div>
         </template>
 
         <!-- asr: 上传音频识别 -->
         <template v-else-if="isType('asr')">
+          <div class="mb-2 text-xs text-note-sub">
+            也可直接使用上方「预设测试」的内置模拟音频，快速判断语音识别是否可用。
+          </div>
           <div class="flex flex-wrap items-center gap-2">
             <input ref="asrFileRef" type="file" accept="audio/*,.wav,.mp3,.m4a,.flac" class="hidden"
               @change="onAsrFileChange" />
@@ -77,17 +84,61 @@
           <audio v-if="ttsAudioUrl" :src="ttsAudioUrl" controls class="mt-2 w-full" />
         </template>
 
-        <!-- ocr: 上传图片识别 -->
+        <!-- ocr: 上传图片识别(可一键生成示例图并识别) -->
         <template v-else-if="isType('ocr')">
           <div class="flex flex-wrap items-center gap-2">
             <input ref="ocrFileRef" type="file" accept="image/*" class="hidden" @change="onOcrFileChange" />
             <el-button size="small" @click="ocrFileRef?.click()">选择图片文件</el-button>
+            <el-button size="small" plain :loading="customRunning" @click="runOcrSample">
+              使用示例图并识别
+            </el-button>
             <span v-if="ocrFileName" class="text-xs text-note-sub">{{ ocrFileName }}</span>
             <el-button type="primary" size="small" :disabled="!ocrFile" :loading="customRunning"
               @click="runOcrTest">识别</el-button>
           </div>
           <div v-if="ocrText" class="mt-2 p-2 bg-note-tint rounded text-sm whitespace-pre-wrap break-words">
             {{ ocrText }}
+          </div>
+        </template>
+
+        <!-- image: 提示词(可选参考图)生成图片 -->
+        <template v-else-if="isType('image')">
+          <el-input v-model="imagePrompt" type="textarea" :rows="2" maxlength="2000"
+            placeholder="输入提示词, 如: 一只戴墨镜的橘猫，扁平插画风格，纯色背景" />
+          <div v-if="promptLimit > 0" class="mt-1">
+            <InputLimitBar :used="estimateTokens(imagePrompt)" :limit="promptLimit" label="提示词" />
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <input ref="imageFileRef" type="file" accept="image/*" class="hidden" @change="onImageFileChange" />
+            <el-button size="small" @click="imageFileRef?.click()">选择参考图(可选)</el-button>
+            <span v-if="imageRefName" class="text-xs text-note-sub">{{ imageRefName }}</span>
+            <el-button v-if="imageRefName" size="small" link type="danger" @click="clearImageRef">移除</el-button>
+          </div>
+          <!-- 参考图体积: 超 10MB 已自动压缩, 仍超限则拦截 -->
+          <div v-if="imageRefMeta" class="mt-1">
+            <InputLimitBar
+              :used="imageRefMeta.bytes"
+              :limit="MAX_REFERENCE_IMAGE_BYTES"
+              unit="bytes"
+              :label="`参考图 ${imageRefMeta.width}×${imageRefMeta.height}`"
+            />
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <span class="text-xs text-note-sub shrink-0">尺寸</span>
+            <el-select v-model="imageSize" class="!w-36" size="small">
+              <el-option v-for="s in IMAGE_SIZE_OPTIONS" :key="s" :label="s" :value="s" />
+            </el-select>
+            <span class="text-xs text-note-sub shrink-0">张数</span>
+            <el-input-number v-model="imageCount" :min="1" :max="4" size="small" controls-position="right" class="!w-24" />
+            <el-button type="primary" size="small" :loading="customRunning" @click="runImageTest">
+              {{ imageRefDataUrl ? '图生图' : '文生图' }}
+            </el-button>
+          </div>
+          <div v-if="imageResults.length" class="mt-2 grid grid-cols-2 gap-2">
+            <a v-for="(img, i) in imageResults" :key="i" :href="img.url" target="_blank" rel="noopener"
+              class="block rounded overflow-hidden border border-note" :title="img.revised_prompt || '点击查看原图'">
+              <img :src="img.url" :alt="`生成结果 ${i + 1}`" class="w-full h-auto object-cover" />
+            </a>
           </div>
         </template>
 
@@ -100,14 +151,27 @@
         </div>
       </div>
 
-      <!-- ===== 能力测试区(预设用例批量冒烟, 结果持久化为能力标签) ===== -->
-      <div class="rounded border border-note p-3">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-bold text-note">能力测试</span>
+      <!-- ===== 预设测试区(打开对话框自动运行: 按模型类型执行预定用例, 判断当前模型是否可用) ===== -->
+      <div class="order-1 rounded border border-note p-3">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-bold text-note">预设测试</span>
+            <el-tag size="small" type="info" effect="plain">打开自动运行</el-tag>
+          </div>
           <el-button type="primary" size="small" plain :loading="capabilityRunning" @click="runAllCapabilities">
-            运行全部
+            {{ capabilityRunning ? '检测中…' : '重新检测' }}
           </el-button>
         </div>
+
+        <!-- 可用性结论: 直观回答"当前模型是否好用" -->
+        <div class="mb-2 flex flex-wrap items-center gap-2 rounded bg-note-soft/60 px-2.5 py-2">
+          <el-tag :type="availability.type" size="small">{{ availability.label }}</el-tag>
+          <span v-if="testResults.length" class="text-xs text-note-sub">
+            {{ passedCount }}/{{ testResults.length }} 项通过
+          </span>
+          <span v-else class="text-xs text-note-sub">正在按模型类型准备预定用例…</span>
+        </div>
+
         <div v-for="item in testResults" :key="item.capability"
           class="flex items-start gap-2 py-2 border-b border-note-glass last:border-b-0">
           <el-tag :type="item.ok ? 'success' : 'danger'" size="small" class="shrink-0">
@@ -141,7 +205,9 @@
             </div>
           </div>
         </div>
-        <div v-if="!testResults.length" class="text-sm text-note-sub">尚未测试, 点击"运行全部"开始</div>
+        <div v-if="!testResults.length" class="text-sm text-note-sub">
+          尚未开始检测，点击「重新检测」立即按预设用例验证当前模型。
+        </div>
       </div>
     </div>
     <template #footer>
@@ -153,6 +219,7 @@
 <script setup lang="ts">
 import {
   testAsrModel,
+  testImageModel,
   testModelCapability,
   testModelCustom,
   testOcrModel,
@@ -165,10 +232,18 @@ import {
   type ModelConfig,
   type ModelCapabilityResult,
   type ModelCustomTestItem,
+  type ModelImageResultItem,
   type ModelTestResponse,
   type RerankScoreSuggest,
 } from '../types/model_config'
 import { ElMessage } from 'element-plus'
+import InputLimitBar from './InputLimitBar.vue'
+import {
+  compressReferenceImage,
+  estimateTokens,
+  formatBytes,
+  MAX_REFERENCE_IMAGE_BYTES,
+} from '../utils/limits'
 
 // ################ 组件事件 ################
 const emit = defineEmits<{
@@ -184,6 +259,8 @@ const testTargetName = ref('')
 const applyingSuggest = ref(false)
 /** 当前测试目标行(应用建议时读取 extra 合并分数范围) */
 let currentRow: ModelConfig | null = null
+/** 当前目标模型的输入 token 上限(0=未知, 展示与拦截用) */
+const promptLimit = ref(0)
 
 /** 是否为目标模型类型(模板分区渲染用) */
 const isType = (type: string) => currentRow?.model_type === type
@@ -197,17 +274,36 @@ const customHint = computed(() => {
     [ModelType.ASR]: '上传音频真实识别一次',
     [ModelType.TTS]: '输入文字合成语音试听',
     [ModelType.OCR]: '上传图片真实识别一次',
+    [ModelType.IMAGE]: '输入提示词真实出图(可传参考图)',
   }
   const t = currentRow?.model_type ?? ''
-  return hints[t] ?? '该类型暂不支持单独测试'
+  return hints[t] ?? '该类型暂不支持自定义测试'
 })
 
 /** 分数格式化(保留4位小数, 异常值原样返回) */
 const formatScore = (v?: number) => (typeof v === 'number' && isFinite(v) ? v.toFixed(4) : '-')
 
-// ################ 能力测试结果(预设用例批量冒烟) ################
+// ################ 预设测试结果(按模型类型执行预定用例) ################
 const testResults = ref<ModelCapabilityResult[]>([])
 const capabilityRunning = ref(false)
+
+/** 预设用例通过数 */
+const passedCount = computed(() => testResults.value.filter((item) => item.ok).length)
+
+/**
+ * 模型可用性结论(直接回答"当前模型是否好用")
+ * - 全部通过: 模型可用
+ * - 部分通过: 部分能力异常
+ * - 全部失败: 模型不可用
+ */
+const availability = computed<{ type: 'success' | 'warning' | 'danger' | 'info', label: string }>(() => {
+  if (capabilityRunning.value && !testResults.value.length) return { type: 'info', label: '检测中' }
+  if (!testResults.value.length) return { type: 'info', label: '尚未检测' }
+  const passed = passedCount.value
+  if (passed === testResults.value.length) return { type: 'success', label: '模型可用' }
+  if (passed === 0) return { type: 'danger', label: '模型不可用' }
+  return { type: 'warning', label: '部分能力异常' }
+})
 
 /**
  * 打开测试对话框
@@ -216,15 +312,16 @@ const capabilityRunning = ref(false)
  */
 const open = (row: ModelConfig, results: ModelCapabilityResult[] = []) => {
   currentRow = row
+  promptLimit.value = Number(row.input_tokens || 0)
   testTargetName.value = modelMainLabel(row)
   testResults.value = results
   resetCustomState()
   dialogVisible.value = true
-  // 无历史结果时自动跑一次全部能力测试
-  if (!results.length) runAllCapabilities()
+  // 默认按预定用例直接检测当前模型是否好用(历史结果先展示, 随即刷新)
+  runAllCapabilities()
 }
 
-/** 运行全部能力测试(结果持久化并通知父组件刷新标签) */
+/** 运行全部预设测试(结果持久化并通知父组件刷新标签) */
 const runAllCapabilities = async () => {
   if (!currentRow) return
   try {
@@ -261,7 +358,7 @@ const applyScoreSuggest = async (suggest: RerankScoreSuggest) => {
   }
 }
 
-// ################ 单独测试(自定义参数单次真实调用) ################
+// ################ 自定义测试(自定义参数单次真实调用) ################
 const customRunning = ref(false)
 const customError = ref('')
 
@@ -289,27 +386,56 @@ const ocrFileRef = ref<HTMLInputElement>()
 const ocrFile = ref<File | null>(null)
 const ocrFileName = ref('')
 const ocrText = ref('')
+// image(文生图/图生图)
+const IMAGE_SIZE_OPTIONS = ['512x512', '768x768', '1024x1024', '1280x1280', '2048x2048']
+const imageFileRef = ref<HTMLInputElement>()
+const imagePrompt = ref('')
+const imageRefName = ref('')
+/** 参考图 data URL(为空则走文生图) */
+const imageRefDataUrl = ref('')
+/** 参考图体积度量(压缩后, 用于展示已用/上限) */
+const imageRefMeta = ref<{
+  originalBytes: number
+  bytes: number
+  width: number
+  height: number
+  compressed: boolean
+} | null>(null)
+const imageSize = ref('1024x1024')
+const imageCount = ref(1)
+const imageResults = ref<ModelImageResultItem[]>([])
 
-/** 重置单独测试状态(打开对话框时调用, 释放旧音频 URL) */
+/** 重置自定义测试状态(打开对话框时预填一组可直接发送的默认用例) */
 const resetCustomState = () => {
   customError.value = ''
-  chatQuestion.value = ''
+  chatQuestion.value = '请用一句话介绍你自己'
   chatAnswer.value = ''
-  embText.value = ''
+  embText.value = '人工智能正在改变世界'
   embResult.value = ''
-  rerankQuery.value = ''
-  rerankDocs.value = ''
+  rerankQuery.value = '什么是机器学习？'
+  rerankDocs.value = [
+    '机器学习是人工智能的一个分支，研究如何让计算机从数据中学习。',
+    '今天天气晴朗，适合出门散步。',
+    '深度学习通过多层神经网络自动提取特征。',
+  ].join('\n')
   rerankResults.value = []
   asrFile.value = null
   asrFileName.value = ''
   asrResult.value = ''
-  ttsText.value = ''
+  ttsText.value = '你好，欢迎使用智能助手'
   ttsSpeed.value = 1.0
   if (ttsAudioUrl.value) URL.revokeObjectURL(ttsAudioUrl.value)
   ttsAudioUrl.value = ''
   ocrFile.value = null
   ocrFileName.value = ''
   ocrText.value = ''
+  imagePrompt.value = '一只戴墨镜的橘猫，扁平插画风格，纯色背景'
+  imageRefName.value = ''
+  imageRefDataUrl.value = ''
+  imageRefMeta.value = null
+  imageSize.value = '1024x1024'
+  imageCount.value = 1
+  imageResults.value = []
 }
 
 /** chat 单独测试: 发送自定义提问 */
@@ -457,6 +583,100 @@ const runOcrTest = async () => {
   }
   catch (e) {
     customError.value = (e as Error).message || '识别失败'
+  }
+  finally {
+    customRunning.value = false
+  }
+}
+
+/**
+ * ocr 示例图: 用 Canvas 现画一张带文字的图片并立即识别
+ * 无需用户准备素材, 打开 OCR 模型即可验证"模型是否好用"
+ */
+const runOcrSample = async () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 640
+  canvas.height = 220
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    ElMessage.error('当前浏览器不支持 Canvas, 无法生成示例图')
+    return
+  }
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = '#1f2937'
+  ctx.font = 'bold 44px "Microsoft YaHei", "PingFang SC", sans-serif'
+  ctx.fillText('OCR TEST 2026', 36, 92)
+  ctx.font = '32px "Microsoft YaHei", "PingFang SC", sans-serif'
+  ctx.fillText('你好，世界', 36, 156)
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+  if (!blob) {
+    ElMessage.error('示例图生成失败, 请改用本地图片')
+    return
+  }
+  ocrFile.value = new File([blob], 'ocr-sample.png', { type: 'image/png' })
+  ocrFileName.value = '示例图 ocr-sample.png'
+  ocrText.value = ''
+  await runOcrTest()
+}
+
+/** image 参考图选择: 本地自动压缩到 10MB 内后转 data URL(为空则走文生图) */
+const onImageFileChange = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    const result = await compressReferenceImage(file)
+    if (result.bytes > MAX_REFERENCE_IMAGE_BYTES) {
+      ElMessage.warning('参考图压缩后仍超过 10MB, 请换一张更小的图片')
+      return
+    }
+    imageRefDataUrl.value = result.dataUrl
+    imageRefName.value = file.name
+    imageRefMeta.value = result
+    imageResults.value = []
+    if (result.compressed) {
+      ElMessage.info(
+        `参考图已自动压缩: ${formatBytes(result.originalBytes)} → ${formatBytes(result.bytes)}`
+      )
+    }
+  } catch (error) {
+    ElMessage.error((error as Error).message || '参考图读取失败')
+  }
+}
+
+/** 清除参考图(回到文生图) */
+const clearImageRef = () => {
+  imageRefDataUrl.value = ''
+  imageRefName.value = ''
+  imageRefMeta.value = null
+  imageResults.value = []
+}
+
+/** image 单独测试: 提示词(+可选参考图)出图 */
+const runImageTest = async () => {
+  if (!currentRow || !imagePrompt.value.trim()) {
+    ElMessage.warning('请输入提示词')
+    return
+  }
+  try {
+    customRunning.value = true
+    customError.value = ''
+    imageResults.value = []
+    const res = await testImageModel({
+      model_id: currentRow.id,
+      prompt: imagePrompt.value.trim(),
+      image: imageRefDataUrl.value || undefined,
+      size: imageSize.value || undefined,
+      n: imageCount.value || undefined,
+    })
+    if (res.ok) imageResults.value = res.images ?? []
+    else customError.value = res.error || '生成失败'
+  }
+  catch (e) {
+    customError.value = (e as Error).message || '生成失败'
   }
   finally {
     customRunning.value = false

@@ -93,6 +93,28 @@
         </el-form-item>
       </template>
 
+      <!-- 生图模型: 默认出图参数(写入 extra, 请求未传时生效) -->
+      <template v-if="form.model_type === ModelType.IMAGE">
+        <el-form-item label="出图尺寸">
+          <el-input v-model="imageSize" placeholder="如 1024x1024(512x512 ~ 2048x2048)" class="!w-56" />
+        </el-form-item>
+        <el-form-item label="出图张数">
+          <el-input-number v-model="imageN" :min="1" :max="4" w-full />
+        </el-form-item>
+        <el-form-item label="提示词改写">
+          <el-switch v-model="imagePromptExtend" active-text="开启" inactive-text="关闭" />
+        </el-form-item>
+        <el-form-item label="图片水印">
+          <el-switch v-model="imageWatermark" active-text="添加" inactive-text="不加" />
+        </el-form-item>
+        <el-form-item label=" ">
+          <div class="text-xs text-note-sub leading-5">
+            qwen-image 系列走 OpenAI 兼容协议(url 后接 /images/generations)；
+            支持文生图与图生图(传参考图)；保存后可在"测试"中用提示词或参考图真实出图验证。
+          </div>
+        </el-form-item>
+      </template>
+
       <!-- 超时与成本 -->
       <el-form-item label="超时(秒)" prop="timeout">
         <el-input-number v-model="form.timeout" :min="1" :max="600" w-full />
@@ -104,13 +126,52 @@
         <el-input-number v-model="form.pay_out" :min="0" :step="0.5" w-full />
       </el-form-item>
 
-      <!-- 扩展配置(自定义 JSON 参数, 如语音协议/音色等) -->
-      <el-form-item label="扩展配置" prop="extra_text">
+      <!-- 扩展配置: 动态键值行(键/值/注释), 常用键由"添加配置"下拉补齐 -->
+      <el-form-item label="扩展配置">
         <div w-full flex flex-col gap-2>
-          <el-input v-model="form.extra_text" type="textarea" :rows="4"
-            placeholder='JSON 对象, 如 {"protocol": "dashscope", "voice": "longxiaochun_v2"}' />
-          <div v-if="extraHints.length" text-xs text-note-sub leading-5>
-            <div v-for="hint in extraHints" :key="hint">· {{ hint }}</div>
+          <!-- 列头(窄屏隐藏, 行内自行堆叠) -->
+          <div v-if="extraRows.length" class="hidden sm:grid extra-grid gap-2 px-1 text-xs text-note-sub">
+            <span>键名</span><span>值</span><span>注释</span><span></span>
+          </div>
+          <div
+            v-for="(row, i) in extraRows" :key="i"
+            class="extra-grid grid items-center gap-2"
+          >
+            <el-input v-model="row.key" size="small" placeholder="键名"
+              :aria-label="`扩展配置第 ${i + 1} 项键名`" />
+            <el-input v-model="row.value" size="small" placeholder="值"
+              :aria-label="`扩展配置第 ${i + 1} 项值`" />
+            <el-input v-model="row.comment" size="small" placeholder="注释(可选)"
+              :aria-label="`扩展配置第 ${i + 1} 项注释`" />
+            <el-button link type="danger" class="!p-1" :aria-label="`删除第 ${i + 1} 项`"
+              @click="removeExtraRow(i)">
+              <el-icon :size="14"><Delete /></el-icon>
+            </el-button>
+          </div>
+          <div v-if="!extraRows.length" class="px-1 py-1 text-xs text-note-sub">
+            暂无扩展配置，可从下方添加常用项
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <el-dropdown trigger="click" @command="addExtraRow">
+              <el-button size="small" plain>+ 添加配置</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="__custom__">
+                    <span text-note>自定义配置项</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-for="preset in extraPresetOptions" :key="preset.key"
+                    :command="preset.key" :disabled="hasExtraKey(preset.key)"
+                  >
+                    <span class="flex flex-col leading-tight">
+                      <span class="text-note">{{ preset.key }}</span>
+                      <span class="text-xs text-note-sub">{{ preset.comment }}</span>
+                    </span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <span class="text-xs text-note-sub">值按 JSON 解析：数字/true/false/对象，其余按字符串</span>
           </div>
         </div>
       </el-form-item>
@@ -132,11 +193,13 @@ import {
   modelTypeOptions,
   serverTypeOptionsFor,
   modelScopeOptions,
-  extraKeyHints,
+  extraPresetsFor,
+  type ExtraPresetOption,
   type ModelConfig,
   type ModelConfigCreate,
   type ModelConfigUpdate,
 } from '../types/model_config'
+import { Delete } from '@element-plus/icons-vue'
 import { ElMessage, type FormInstance } from 'element-plus'
 
 // ################ 组件属性与事件 ################
@@ -159,7 +222,7 @@ const submitting = ref(false)
 /** 编辑目标 ID(null 为新增态) */
 const currentModelConfigId = ref<string | null>(null)
 
-/** 表单数据(extra 以文本形式编辑) */
+/** 表单数据(扩展配置以动态键值行编辑) */
 interface ModelConfigForm {
   model_type: ModelType
   server_type: string
@@ -177,7 +240,6 @@ interface ModelConfigForm {
   temperature: number
   timeout: number
   no_think: boolean
-  extra_text: string
 }
 
 const defaultForm = (): ModelConfigForm => ({
@@ -197,7 +259,6 @@ const defaultForm = (): ModelConfigForm => ({
   temperature: 0.7,
   timeout: 60,
   no_think: false,
-  extra_text: '',
 })
 
 const form = reactive<ModelConfigForm>(defaultForm())
@@ -216,32 +277,112 @@ const dialogTitle = computed(() =>
 /** 当前类型可用方案选项 */
 const serverTypeOptions = computed(() => serverTypeOptionsFor(form.model_type))
 
-/** 当前方案 extra 键提示 */
-const extraHints = computed(() => extraKeyHints[form.server_type] ?? [])
+// ################ 扩展配置(动态键值行) ################
+/** 行注释在 extra 中的保留键(仅用于回显, 不参与模型调用) */
+const EXTRA_COMMENTS_KEY = '_comments'
 
-// ################ extra JSON 编辑(容忍非法 JSON 的实时双向) ################
-/** 容忍非法 JSON 的 extra 读取(表单实时编辑中可能尚未合法) */
+interface ExtraRow {
+  /** 配置键 */
+  key: string
+  /** 值(编辑文本, 提交时按 JSON 语义解析) */
+  value: string
+  /** 注释(可选, 随配置保存) */
+  comment: string
+}
+
+const extraRows = ref<ExtraRow[]>([])
+
+/** 当前类型可选的常用扩展键("添加配置"下拉) */
+const extraPresetOptions = computed<ExtraPresetOption[]>(() => extraPresetsFor(form.model_type))
+
+/** 判断键是否已存在(下拉中已添加的项置灰) */
+const hasExtraKey = (key: string) => extraRows.value.some(row => row.key.trim() === key)
+
+/** 添加行: __custom__ 为空行, 其余按预设键回填默认值与注释 */
+const addExtraRow = (command: string) => {
+  if (command === '__custom__') {
+    extraRows.value.push({ key: '', value: '', comment: '' })
+    return
+  }
+  const preset = extraPresetOptions.value.find(item => item.key === command)
+  if (!preset || hasExtraKey(preset.key)) return
+  extraRows.value.push({ ...preset })
+}
+
+/** 删除行 */
+const removeExtraRow = (index: number) => {
+  extraRows.value.splice(index, 1)
+}
+
+/** 编辑文本 → 值: 数字/布尔/null/对象数组按 JSON 解析, 其余按字符串 */
+const textToValue = (text: string): unknown => {
+  const raw = text.trim()
+  if (!raw) return ''
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  if (raw === 'null') return null
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw)
+  if (raw.startsWith('{') || raw.startsWith('[')) {
+    try {
+      return JSON.parse(raw)
+    }
+    catch {
+      return text
+    }
+  }
+  return text
+}
+
+/** 值 → 编辑文本(字符串原样, 其余按 JSON 序列化) */
+const valueToText = (value: unknown): string =>
+  typeof value === 'string' ? value : JSON.stringify(value ?? '')
+
+/** 读取当前行组成的 extra 对象 */
 const peekExtra = (): Record<string, unknown> => {
-  const text = form.extra_text.trim()
-  if (!text) return {}
-  try {
-    const obj = JSON.parse(text)
-    return typeof obj === 'object' && obj !== null && !Array.isArray(obj) ? obj : {}
+  const extra: Record<string, unknown> = {}
+  for (const row of extraRows.value) {
+    const key = row.key.trim()
+    if (key && key !== EXTRA_COMMENTS_KEY) extra[key] = textToValue(row.value)
   }
-  catch {
-    return {}
-  }
+  return extra
 }
 
-/** 写入单个 extra 键(保留其余键; 非法 JSON 时以新对象重建) */
+/** 写入单个 extra 键(已存在则更新值, 否则追加行; 值缺失则删除该行) */
 const setExtraKey = (key: string, value: unknown) => {
-  const base = peekExtra()
-  if (value === undefined || value === null || Number.isNaN(value)) delete base[key]
-  else base[key] = value
-  form.extra_text = Object.keys(base).length ? JSON.stringify(base, null, 2) : ''
+  const index = extraRows.value.findIndex(row => row.key.trim() === key)
+  if (value === undefined || value === null || Number.isNaN(value)) {
+    if (index >= 0) extraRows.value.splice(index, 1)
+    return
+  }
+  if (index >= 0) extraRows.value[index].value = valueToText(value)
+  else extraRows.value.push({ key, value: valueToText(value), comment: '' })
 }
 
-/** rerank 分数范围(与 extra_text 中的 score_min/score_max 双向绑定) */
+/** 行 → 提交用 extra 对象(空键忽略, 非空注释写入 _comments) */
+const rowsToExtra = (): Record<string, unknown> | undefined => {
+  const extra: Record<string, unknown> = {}
+  const comments: Record<string, string> = {}
+  for (const row of extraRows.value) {
+    const key = row.key.trim()
+    if (!key || key === EXTRA_COMMENTS_KEY) continue
+    if (key in extra) throw new Error(`扩展配置键重复: ${key}`)
+    extra[key] = textToValue(row.value)
+    if (row.comment.trim()) comments[key] = row.comment.trim()
+  }
+  if (Object.keys(comments).length) extra[EXTRA_COMMENTS_KEY] = comments
+  return Object.keys(extra).length ? extra : undefined
+}
+
+/** extra 对象 → 行(注释从 _comments 还原) */
+const extraToRows = (extra?: Record<string, unknown> | null): ExtraRow[] => {
+  if (!extra) return []
+  const comments = (extra[EXTRA_COMMENTS_KEY] ?? {}) as Record<string, string>
+  return Object.entries(extra)
+    .filter(([key]) => key !== EXTRA_COMMENTS_KEY)
+    .map(([key, value]) => ({ key, value: valueToText(value), comment: comments[key] ?? '' }))
+}
+
+/** rerank 分数范围(与扩展配置中的 score_min/score_max 双向绑定) */
 const rerankScoreMin = computed<number | undefined>({
   get: () => peekExtra().score_min as number | undefined,
   set: v => setExtraKey('score_min', v),
@@ -257,27 +398,35 @@ const applyScorePreset = (min: number, max: number) => {
   setExtraKey('score_max', max)
 }
 
-/** 类型切换: 重置方案为该类型第一个可用项 */
+/** 生图默认尺寸(与扩展配置中的 size 双向绑定) */
+const imageSize = computed<string>({
+  get: () => (peekExtra().size as string) ?? '',
+  set: v => setExtraKey('size', v.trim() || undefined),
+})
+/** 生图默认张数(与扩展配置中的 n 双向绑定) */
+const imageN = computed<number | undefined>({
+  get: () => peekExtra().n as number | undefined,
+  set: v => setExtraKey('n', v),
+})
+/** 提示词智能改写(与扩展配置中的 prompt_extend 双向绑定) */
+const imagePromptExtend = computed<boolean>({
+  get: () => (peekExtra().prompt_extend as boolean) ?? true,
+  set: v => setExtraKey('prompt_extend', v),
+})
+/** 是否添加水印(与扩展配置中的 watermark 双向绑定) */
+const imageWatermark = computed<boolean>({
+  get: () => (peekExtra().watermark as boolean) ?? false,
+  set: v => setExtraKey('watermark', v),
+})
+
+/** 类型切换: 重置方案为该类型第一个可用项; 生图默认放宽超时 */
 const handleTypeChange = () => {
   const options = serverTypeOptions.value
   if (!options.some(o => o.value === form.server_type)) {
     form.server_type = options[0]?.value ?? ''
   }
-}
-
-/** 解析 extra 文本为对象(空文本返回 undefined) */
-const parseExtra = (): Record<string, unknown> | undefined => {
-  const text = form.extra_text.trim()
-  if (!text) return undefined
-  try {
-    const obj = JSON.parse(text)
-    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-      throw new Error('必须是 JSON 对象')
-    }
-    return obj as Record<string, unknown>
-  }
-  catch (e) {
-    throw new Error(`扩展配置 JSON 无效: ${(e as Error).message}`)
+  if (form.model_type === ModelType.IMAGE && form.timeout < 120) {
+    form.timeout = 180
   }
 }
 
@@ -300,7 +449,7 @@ const fillFromDetail = (detail: ModelConfig) => {
   form.temperature = detail.temperature ?? 0.7
   form.timeout = detail.timeout ?? 60
   form.no_think = detail.no_think ?? false
-  form.extra_text = detail.extra ? JSON.stringify(detail.extra, null, 2) : ''
+  extraRows.value = extraToRows(detail.extra)
 }
 
 /**
@@ -309,6 +458,7 @@ const fillFromDetail = (detail: ModelConfig) => {
  */
 const open = async (row?: ModelConfig) => {
   Object.assign(form, defaultForm())
+  extraRows.value = []
   formRef.value?.clearValidate()
   currentModelConfigId.value = row?.id ?? null
   if (row) {
@@ -332,7 +482,7 @@ const handleSubmit = async () => {
 
   let extra: Record<string, unknown> | undefined
   try {
-    extra = parseExtra()
+    extra = rowsToExtra()
   }
   catch (e) {
     ElMessage.warning((e as Error).message)
@@ -389,3 +539,16 @@ const handleSubmit = async () => {
 // 供父组件调用: 打开对话框
 defineExpose({ open })
 </script>
+
+<style scoped>
+/* 扩展配置行: 窄屏堆叠, ≥640px 时为 键名/值/注释/删除 四列 */
+.extra-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 640px) {
+  .extra-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  }
+}
+</style>

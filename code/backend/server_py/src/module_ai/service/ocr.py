@@ -9,10 +9,33 @@
 """
 import asyncio
 import logging
+from typing import Protocol, runtime_checkable
 
-from module_ai.service.model_entry import ModelEntryService, get_model_entry
+from common.utils.media.file_format import bytes_to_cv2
+from module_ai.do.capability import OcrLine, OcrResult
+from module_ai.service.model_config import ModelEntryService, get_model_entry
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class OcrCapability(Protocol):
+    """文字识别能力契约: 图片识别 + 整份文档识别(如 PaddleOCR-VL)
+
+    其他模块面向本契约编程, 具体实现由 ``module_ai.dependencies.ocr`` 注入。
+    """
+
+    async def recognize_image(
+        self, image: bytes, *, user_id: str | None = None
+    ) -> OcrResult:
+        """识别单张图片中的文字(字节输入, 不要求调用方掌握图像库)"""
+        ...
+
+    async def recognize_document(
+        self, data: bytes, filename: str, *, user_id: str | None = None
+    ) -> OcrResult:
+        """识别整份文档(pdf/图片), 由支持文档解析的 OCR 引擎实现"""
+        ...
 
 
 class OcrService:
@@ -66,3 +89,60 @@ class OcrService:
         result = await self.recognize(image_cv, lang, inpaint, user_id=user_id)
         result["layout"] = []
         return result
+
+    # ########## 对外契约(OcrCapability): 字节进出, 供其他模块调用 ##########
+
+    async def recognize_image(
+        self, image: bytes, *, user_id: str | None = None
+    ) -> OcrResult:
+        """识别单张图片中的文字(契约口径, 字节输入)
+
+        :param image: 图片原始字节
+        :param user_id: 当前用户ID(绑定模型优先)
+        :return: 标准 OCR 结果
+        """
+        image_cv = await asyncio.to_thread(bytes_to_cv2, image)
+        if image_cv is None:
+            raise ValueError("无法解析该图片(格式不支持或已损坏)")
+        raw = await self.recognize(image_cv, user_id=user_id)
+        lines = [
+            OcrLine(
+                text=str(item.get("text") or ""),
+                box=item.get("box"),
+                score=float(item.get("score") or 1.0),
+            )
+            for item in raw.get("results") or []
+        ]
+        return OcrResult(
+            text="\n".join(line.text for line in lines if line.text),
+            lines=lines,
+            engine=str(raw.get("engine") or ""),
+            elapsed=float((raw.get("ts") or {}).get("total") or 0.0),
+        )
+
+    async def recognize_document(
+        self, data: bytes, filename: str, *, user_id: str | None = None
+    ) -> OcrResult:
+        """识别整份文档(pdf/图片), 由支持文档解析的 OCR 引擎实现
+
+        当前仅 PaddleOCR-VL 系在线引擎具备该能力; 其余 OCR 引擎会给出明确提示。
+
+        :param data: 文件原始字节
+        :param filename: 文件名(用于推断 MIME 与内容类型)
+        :param user_id: 当前用户ID(绑定模型优先)
+        :return: 标准 OCR 结果(整份文档合并为一个文本块)
+        """
+        engine = await self._get_engine(user_id)
+        parse_document = getattr(engine, "parse_document", None)
+        if parse_document is None:
+            raise RuntimeError(
+                f"当前 OCR 引擎 {type(engine).__name__} 不支持整份文档解析, "
+                "请改用 PaddleOCR-VL 系在线模型"
+            )
+        text = await asyncio.to_thread(parse_document, data, filename)
+        text = str(text or "").strip()
+        return OcrResult(
+            text=text,
+            lines=[OcrLine(text=text)] if text else [],
+            engine=type(engine).__name__,
+        )

@@ -32,26 +32,32 @@
     <div flex-1 overflow-y-auto px-2 pb-3>
       <template v-for="group in groupedConversations" :key="group.label">
         <div px-3 pt-3 pb-1 text-xs font-medium text-note-sub>{{ group.label }}</div>
+        <!-- 行支持键盘操作(Enter/Space 选中), 触屏设备无 hover 时操作按钮常显 -->
         <div
           v-for="conv in group.items" :key="conv.id"
           flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer group transition-colors
           :class="conv.id === currentId
             ? 'bg-note-tint text-note shadow-note'
             : 'text-note-sub hover:bg-note-tint/60'"
+          role="button"
+          tabindex="0"
+          :aria-label="conv.title || '新对话'"
           @click="handleSelect(conv.id)"
+          @keydown.enter.prevent="handleSelect(conv.id)"
+          @keydown.space.prevent="handleSelect(conv.id)"
         >
           <el-icon :size="15" shrink-0 opacity-70><ChatDotRound /></el-icon>
-          <span flex-1 truncate text-sm>{{ conv.title || '新对话' }}</span>
+          <span v-ellipsis flex-1 truncate text-sm>{{ conv.title || '新对话' }}</span>
           <!-- 重命名 -->
           <button
-            op-0 group-hover:op-100 shrink-0 p-1 rounded-md class="hover:bg-note-green/15" hover:text-note-green transition
+            op-0 group-hover:op-100 group-focus-within:op-100 note-hover-reveal shrink-0 p-1 rounded-md class="hover:bg-note-green/15" hover:text-note-green transition
             title="重命名对话" @click.stop="emit('rename', conv)"
           >
             <el-icon :size="14"><EditPen /></el-icon>
           </button>
           <!-- 删除 -->
           <button
-            op-0 group-hover:op-100 shrink-0 p-1 rounded-md class="hover:bg-red-500/15" hover:text-red-500 transition
+            op-0 group-hover:op-100 group-focus-within:op-100 note-hover-reveal shrink-0 p-1 rounded-md class="hover:bg-red-500/15" hover:text-red-500 transition
             title="删除对话" @click.stop="emit('remove', conv)"
           >
             <el-icon :size="14"><Delete /></el-icon>

@@ -107,14 +107,16 @@ export default defineConfig(
           ],
           // 路由 meta 标记(登录拦截与侧边栏显示的依据):
           // 1. 首页与 404 为公开页, 不加标记
-          // 2. 前台应用模块(rag 知识库问答)标记 app: 需登录, 但无侧边栏,
+          // 2. 前台应用模块(rag 知识库问答 / agent 智能体编排)标记 app: 需登录, 但无侧边栏,
           //    从首页直接进入, 模块内孙页面导航由各模块页面自行承担
           // 3. 其余(后台工作台/账户设置/后台管理模块页面)标记 admin: 需登录 + 显示侧边栏,
           //    仅经头像下拉"后台管理"入口可达
           extendRoute: (route) => {
             const file = (route.component ?? '').replace(/\\/g, '/')
             const isPublic = file.endsWith('/src/pages/index.vue') || file.includes('/[..all].vue')
-            const isMainApp = /\/src\/modules\/rag\//.test(file)
+            // rag(AI 助手/知识库) 与 agent(智能体编排) 同属 AI 助手主应用: 无后台侧边栏,
+            // 三者由 RagPageNav 内页导航同级切换
+            const isMainApp = /\/src\/modules\/(rag|agent)\//.test(file)
             if (file && !isPublic) route.addToMeta(isMainApp ? { app: true } : { admin: true })
             // 独立页面(如账户设置): 属后台路由(需登录), 但页面自带导航, 不渲染侧边栏
             if (file.endsWith('/src/pages/setting.vue')) route.addToMeta({ standalone: true })

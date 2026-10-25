@@ -1,12 +1,13 @@
 """Office 本地解析器: docx/pptx 纯标准库解析, 不依赖外部服务。
 
-背景: MinerU 远程 API 仅支持 pdf 与图片, docx/pptx 直传必失败
-("parsing failed, please try again later"), 导致 Office 文档永远无法入库。
-本解析器用 zipfile + ElementTree 直接读取 OOXML, 输出与 MinerU 对齐的 Chunk:
+定位: MinerU 4.0 已原生支持 DOC/DOCX、PPT/PPTX 等文档, office 默认优先走
+MinerU 做版式解析; 本解析器作为「MinerU 不可用(未配置 Token/服务不可达/
+旧版本)」时的离线兜底引擎(优先级最低)。用 zipfile + ElementTree 直接读取
+OOXML, 输出与 MinerU 对齐的 Chunk:
 
 - docx: 段落(outlineLvl/pStyle Heading* → TITLE) + 表格 → markdown TABLE
 - pptx: 每页 slide, 标题占位符 → TITLE(级别1), 正文 → TEXT, 表格 → TABLE
-- .doc/.ppt 为二进制旧格式, 标准库无法解析, 给出明确的另存提示
+- .doc/.ppt 为二进制旧格式, 标准库无法解析, 给出明确的另存提示(交由 MinerU 处理)
 """
 import logging
 import re

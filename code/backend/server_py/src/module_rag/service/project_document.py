@@ -565,9 +565,8 @@ class ProjectDocumentService:
             ):
                 await f.write(chunk)
 
-        # 获取当前用户绑定的模型实例(OCR 暂与对话模型共用, 待拆分专用 OCR 模型配置)
+        # 获取当前用户绑定的模型实例(视觉/OCR 由 office 通过 ai 能力按 user_id 解析)
         chat_llm: BaseChatModel | None = await self.user_model_service.get_llm_by_user_id(user_id,False)
-        ocr_llm: BaseChatModel | None = chat_llm
         embedding_llm: BaseChatModel | None = await self.user_model_service.get_llm_by_user_id(user_id,False,ModelType.EMBEDDINGS)
 
         # 步骤进度快照(流水线推进时整体回写 document.parse_steps)
@@ -600,8 +599,10 @@ class ProjectDocumentService:
         await self._update_parse_status(document_id, ParseStatus.PARSING)
         await _report(IngestStep.PARSE, IngestStepState.RUNNING, 5, "开始解析文档")
         try:
-            # 1.文件解析
-            chunked:list[Chunk] =await self.document_parse_service.file2chunk(file_path,ocr_llm)
+            # 1.文件解析(引擎路由由 office 决策, 视觉/OCR 模型由 ai 按 user_id 解析)
+            chunked: list[Chunk] = await self.document_parse_service.file2chunk(
+                file_path, user_id=user_id
+            )
             await _report(
                 IngestStep.PARSE, IngestStepState.COMPLETED, 100,
                 f"解析完成, 提取 {len(chunked)} 个原始块",

@@ -1,0 +1,45 @@
+/**
+ * i18n 词条后台管理词条(三元数组: [zh, ja, en])
+ * 由 language.ts 合并进全局语言对照表
+ */
+export const i18nAdminKeys: Record<string, string[]> = {
+  i18n_title: ['多语言词条', '多言語の文言', 'Localization'],
+  i18n_subtitle: [
+    '在线覆盖界面词条并检测代码中缺失的键，保存后全站即时生效。',
+    '画面の文言を上書きし、未定義キーを検出。保存後すぐに反映されます。',
+    'Override UI strings and detect missing keys. Changes apply instantly.',
+  ],
+  i18n_tab_overrides: ['词条覆盖', '文言の上書き', 'Overrides'],
+  i18n_tab_missing: ['缺失检测', '欠落チェック', 'Missing keys'],
+  i18n_key: ['键名', 'キー', 'Key'],
+  i18n_zh: ['简体中文', '簡体中国語', 'Chinese'],
+  i18n_ja: ['日本語', '日本語', 'Japanese'],
+  i18n_en: ['English', 'English', 'English'],
+  i18n_updated_at: ['更新时间', '更新日時', 'Updated'],
+  i18n_add: ['新增词条', '文言を追加', 'Add entry'],
+  i18n_delete: ['删除', '削除', 'Delete'],
+  i18n_save: ['保存', '保存', 'Save'],
+  i18n_import: ['导入 JSON', 'JSON 取込', 'Import JSON'],
+  i18n_export: ['导出 JSON', 'JSON 出力', 'Export JSON'],
+  i18n_search_key: ['搜索键名…', 'キーを検索…', 'Search keys…'],
+  i18n_scan: ['开始扫描', 'スキャン開始', 'Scan'],
+  i18n_missing_desc: [
+    '扫描源码中 t() 使用的键，与语言对照表比对，找出未定义的词条。',
+    'ソース内の t() キーを走査し、定義済み文言と比較して未定義を検出します。',
+    'Scan t() keys in source and compare with defined entries.',
+  ],
+  i18n_missing_count: ['缺失 {n} 个', '未定義 {n} 件', '{n} missing'],
+  i18n_unused_count: ['未使用 {n} 个', '未使用 {n} 件', '{n} unused'],
+  i18n_no_missing: ['没有缺失词条', '未定義の文言はありません', 'No missing keys'],
+  i18n_source: ['来源文件', '参照元', 'Source'],
+  i18n_filter_missing: ['只看缺失', '未定義のみ', 'Missing only'],
+  i18n_add_all: ['一键补齐', 'まとめて追加', 'Add all'],
+  i18n_key_exists: ['该键已存在', '既存のキーです', 'Key already exists'],
+  i18n_saved: ['已保存', '保存しました', 'Saved'],
+  i18n_scanning: ['扫描中…', 'スキャン中…', 'Scanning…'],
+  i18n_overwrite: ['覆盖同名', '同名を上書き', 'Overwrite existing'],
+  i18n_imported: ['已导入 {n} 条', '{n} 件取込済み', '{n} imported'],
+  i18n_skipped: ['跳过 {n} 条', '{n} 件スキップ', '{n} skipped'],
+  i18n_need_key: ['请先填写键名', 'キーを入力してください', 'Key is required'],
+  i18n_error: ['操作失败', '操作に失敗しました', 'Operation failed'],
+}

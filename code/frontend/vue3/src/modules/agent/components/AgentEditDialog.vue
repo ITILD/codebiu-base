@@ -38,7 +38,7 @@
           >
             <span flex items-center justify-between gap-3>
               <span>{{ s.display_name }}</span>
-              <span text-xs opacity-50 truncate max-w-50>{{ s.description }}</span>
+              <span v-ellipsis text-xs opacity-50 truncate max-w-50>{{ s.description }}</span>
             </span>
           </el-option>
         </el-select>

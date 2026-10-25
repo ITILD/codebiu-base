@@ -145,10 +145,12 @@ export const restoreMathHtml = async (
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        // 失败时降级展示原始公式 + 错误说明(取色走 --note-* 变量, 暗色模式自适应)
+        // 失败时降级展示原始公式 + 错误说明(取色走 --note-* 变量, 暗色模式自适应;
+        // 半透明色统一用 rgb(var(--note-seal-rgb) / α), 避免 color-mix 的 color(srgb …)
+        // 计算值让 html2canvas 截图抛错)
         return item.displayMode
-          ? `<div class="katex-error" style="color:var(--note-seal,#ad563e);text-align:center;padding:8px 12px;border:1px dashed color-mix(in srgb, var(--note-seal,#ad563e) 38%, transparent);border-radius:6px;margin:8px 0;background:color-mix(in srgb, var(--note-seal,#ad563e) 7%, var(--note-card,#fff));">${escapeHtml(`$$${item.latex}$$`)}<div style="font-size:12px;margin-top:4px;color:var(--note-seal,#ad563e);">${escapeHtml(message)}</div></div>`
-          : `<span class="katex-error" style="color:var(--note-seal,#ad563e);background:color-mix(in srgb, var(--note-seal,#ad563e) 7%, var(--note-card,#fff));padding:1px 4px;border-radius:4px;border:1px dashed color-mix(in srgb, var(--note-seal,#ad563e) 38%, transparent);" title="${escapeHtml(message)}">${escapeHtml(`$${item.latex}$`)}</span>`
+          ? `<div class="katex-error" style="color:var(--note-seal,#ad563e);text-align:center;padding:8px 12px;border:1px dashed rgba(var(--note-seal-rgb,173 86 62) / 0.38);border-radius:6px;margin:8px 0;background:rgba(var(--note-seal-rgb,173 86 62) / 0.07);">${escapeHtml(`$$${item.latex}$$`)}<div style="font-size:12px;margin-top:4px;color:var(--note-seal,#ad563e);">${escapeHtml(message)}</div></div>`
+          : `<span class="katex-error" style="color:var(--note-seal,#ad563e);background:rgba(var(--note-seal-rgb,173 86 62) / 0.07);padding:1px 4px;border-radius:4px;border:1px dashed rgba(var(--note-seal-rgb,173 86 62) / 0.38);" title="${escapeHtml(message)}">${escapeHtml(`$${item.latex}$`)}</span>`
       }
     },
   )

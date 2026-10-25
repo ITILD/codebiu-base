@@ -94,10 +94,22 @@ class CacheClearRequest(BaseModel):
     )
 
 
+class InputLimitInfo(BaseModel):
+    """统一输入限制度量(前端渲染 "已输入 X / 限制 Y")"""
+
+    used: int = Field(0, description="当前输入用量")
+    limit: int = Field(0, description="限制总量(0 表示不限)")
+    unit: str = Field("token", description="计量单位(token/bytes/seconds)")
+    exceeded: bool = Field(False, description="是否已超出限制")
+
+
 class TokenCountRequest(BaseModel):
     """token 计数请求模型"""
 
     texts: list[str] = Field(..., description="待计数的文本列表(批量)")
+    model_id: str | None = Field(
+        None, description="模型配置ID(传入时同时返回该模型的输入 token 上限)"
+    )
 
     @model_validator(mode="after")
     def check_size(self) -> "TokenCountRequest":
@@ -114,6 +126,10 @@ class TokenCountResponse(BaseModel):
 
     counts: list[int] = Field(..., description="与请求 texts 顺序对应的 token 数列表")
     total: int = Field(0, description="全部文本 token 数合计")
+    limit: int | None = Field(None, description="模型输入 token 上限(未传 model_id 时为空)")
+    remaining: int | None = Field(None, description="剩余可用 token(limit - total)")
+    exceeded: bool = Field(False, description="合计是否已超出上限")
+    unit: str = Field("token", description="计量单位")
 
 
 class ModelChatCheckFormat(BaseModel):
@@ -143,6 +159,8 @@ MODEL_CAPABILITIES: dict[str, list[tuple[str, str]]] = {
     # 语音类: 用模拟音频对在线引擎做冒烟验证(通过=引擎可用不抛异常)
     ModelType.ASR.value: [("asr", "识别")],
     ModelType.TTS.value: [("tts", "合成")],
+    # 生图类: 文生图(T2I)与图生图(I2I)各生成一张小图验证
+    ModelType.IMAGE.value: [("image", "文生图"), ("image_edit", "图生图")],
 }
 
 
@@ -197,6 +215,87 @@ class TtsTestRequest(BaseModel):
     model_id: str = Field(..., description="模型配置ID")
     text: str = Field(..., description="待合成文本")
     speed: float = Field(1.0, description="语速(0.5~2.0)")
+
+
+class RerankRequest(BaseModel):
+    """重排序请求"""
+
+    query: str = Field(..., description="检索查询文本")
+    documents: list[str | dict] = Field(
+        ..., description="待排序文档列表(字符串 或 含 sort_key 字段的字典)"
+    )
+    model_id: str | None = Field(
+        None, description="模型配置ID或标识名称(缺省取 rerank 类型默认配置)"
+    )
+    top_n: int | None = Field(None, ge=1, description="返回前 N 条结果(缺省返回全部)")
+    sort_key: str = Field("content", description="documents 为字典时提取文本的字段名")
+
+
+class RerankResponse(BaseModel):
+    """重排序响应(按相关性降序)"""
+
+    results: list[dict] = Field(
+        default_factory=list, description="排序结果 [{node: 原文档, relevance_score: 相关性分数}]"
+    )
+    elapsed: float = Field(0.0, description="耗时(秒)")
+    input_limit: InputLimitInfo | None = Field(
+        None, description="查询文本 token 度量(相对模型输入上限)"
+    )
+
+
+class ImageGenerateRequest(BaseModel):
+    """图像生成请求(文生图/图生图)"""
+
+    model_id: str | None = Field(
+        None, description="模型配置ID(缺省取 image 类型默认配置)"
+    )
+    prompt: str = Field(..., description="提示词(图生图时为编辑指令)")
+    image: str | None = Field(
+        None,
+        description="参考图(data URL / base64 / http URL), 传入即为图生图(图像编辑)",
+    )
+    size: str | None = Field(
+        None, description="输出尺寸(宽*高, 如 1024*1024; 缺省由模型按提示词推荐)"
+    )
+    n: int | None = Field(None, ge=1, le=4, description="生成张数(1~4, 缺省取配置默认值)")
+    negative_prompt: str | None = Field(None, description="反向提示词")
+    seed: int | None = Field(None, description="随机种子(可复现结果)")
+    prompt_extend: bool | None = Field(None, description="提示词智能改写(缺省按配置)")
+    watermark: bool | None = Field(None, description="是否添加水印(缺省按配置)")
+
+
+class ImageResultItem(BaseModel):
+    """单张生成结果"""
+
+    url: str = Field("", description="图片地址(临时地址, 约 24 小时有效)")
+    revised_prompt: str = Field("", description="模型改写后的提示词(部分模型返回)")
+
+
+class ImageGenerateResponse(BaseModel):
+    """图像生成响应"""
+
+    model_id: str | None = Field(None, description="模型配置ID")
+    model: str = Field("", description="模型名称")
+    capability: str = Field("image", description="能力标识(image 文生图 / image_edit 图生图)")
+    ok: bool = Field(False, description="是否成功")
+    images: list[ImageResultItem] = Field(default_factory=list, description="生成结果列表")
+    elapsed: float = Field(0.0, description="耗时(秒)")
+    error: str = Field("", description="失败原因")
+    input_limit: InputLimitInfo | None = Field(
+        None, description="参考图体积度量(图生图时返回, 单位 bytes)"
+    )
+
+
+class ImageTestRequest(BaseModel):
+    """生图单独测试请求(模型配置页"单独测试")"""
+
+    model_id: str = Field(..., description="模型配置ID")
+    prompt: str = Field(..., description="提示词(图生图时为编辑指令)")
+    image: str | None = Field(
+        None, description="参考图(data URL / base64 / http URL), 传入即为图生图"
+    )
+    size: str | None = Field(None, description="输出尺寸(宽x高, 兼容 * 分隔)")
+    n: int | None = Field(None, ge=1, le=4, description="生成张数(1~4)")
 
 
 class ModelTestResponse(BaseModel):

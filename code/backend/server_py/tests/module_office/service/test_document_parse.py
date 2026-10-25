@@ -2,7 +2,7 @@
 
 覆盖层次:
 - 单元层(必跑, 零外部依赖):
-  * ParserFactory 工厂路由(mineru 引擎按后缀路由, 未注册后缀/未知引擎报错)
+  * EngineRegistry 路由(按后缀与能力矩阵选择引擎, 未注册后缀/未知引擎报错)
   * MinerU 结果 zip 解包契约(content_list.json/images 落盘)与条目→Chunk 映射
   * LocalMinerUClient HTTP 契约(zip 成功 / 非 zip 错误体 / 5xx)
 - 集成层(环境就绪才跑, 否则 skip):
@@ -24,7 +24,8 @@ import httpx
 import pytest
 
 from common.config.path import DIR_TEMP
-from module_office.utils.file_parse.factory import ParserFactory
+from module_office.do.parse import ParseContext
+from module_office.utils.file_parse.registry import engine_registry
 from module_office.utils.file_parse.do.chunk import ContentType
 from module_office.utils.file_parse.mineru.client import (
     LocalMinerUClient,
@@ -111,15 +112,15 @@ def _build_mineru_zip(stem: str) -> bytes:
     return buf.getvalue()
 
 
-# ==================== 单元层: 工厂路由 ====================
+# ==================== 单元层: 引擎路由 ====================
 
 
-def test_factory_engine_routing(monkeypatch):
-    """工厂路由: 按后缀选择解析器, 未注册后缀/未知引擎报错。
+def test_engine_registry_routing(monkeypatch):
+    """引擎注册表路由: 按后缀 + 能力矩阵 + 优先级选择解析器。
 
-    - pdf/图片 → MinerUParser(版式文档与图片走 MinerU)
-    - docx/pptx 等 Office 格式 → OfficeParser(MinerU 远程 API 实测不支持
-      Office 格式, 由本地标准库解析兜底, 见 ParserFactory 注册表注释)
+    - pdf/图片 → MinerUParser(优先级最高)
+    - docx/pptx → 默认 MinerUParser(MinerU 4.0 原生支持 Office 文档)
+    - office-local → 显式指定时可用, 且在 MinerU 初始化失败时兜底
     打桩 build_client: 单元层不依赖真实 mineru 配置(token/网络)。
     """
     from module_office.utils.file_parse.office import OfficeParser
@@ -128,21 +129,40 @@ def test_factory_engine_routing(monkeypatch):
         "module_office.utils.file_parse.mineru.parser.build_client", lambda cfg: None
     )
     # 版式文档与图片路由到 MinerUParser
-    assert isinstance(
-        ParserFactory.create(Path("a.pdf"), engine="mineru"), MinerUParser
+    parser, descriptor, _ = engine_registry.create(
+        Path("a.pdf"), ParseContext(), engine="mineru"
     )
-    assert isinstance(ParserFactory.create(Path("a.png")), MinerUParser)
-    # Office 格式路由到本地 OfficeParser 兜底
-    assert isinstance(ParserFactory.create(Path("a.pptx")), OfficeParser)
-    assert isinstance(ParserFactory.create(Path("a.docx")), OfficeParser)
-    # mineru 不支持的纯文本等格式直接拒绝(基线不回退轻量解析引擎)
+    assert isinstance(parser, MinerUParser) and descriptor.name == "mineru"
+    assert isinstance(engine_registry.create(Path("a.png"), ParseContext())[0], MinerUParser)
+    # Office 格式默认走 MinerU(4.0 支持 doc/docx/ppt/pptx 等原生文档)
+    assert isinstance(engine_registry.create(Path("a.pptx"), ParseContext())[0], MinerUParser)
+    assert isinstance(engine_registry.create(Path("a.docx"), ParseContext())[0], MinerUParser)
+    assert {".doc", ".docx", ".ppt", ".pptx", ".xlsx"} <= engine_registry.get("mineru").suffixes
+    # 离线兜底: 显式指定 office-local, 或 MinerU 初始化失败时自动降级
+    office_parser, office_desc, _ = engine_registry.create(
+        Path("a.docx"), ParseContext(), engine="office-local"
+    )
+    assert isinstance(office_parser, OfficeParser) and office_desc.name == "office-local"
+
+    def _broken_client(cfg):
+        raise RuntimeError("MINERU_TOKEN 未配置")
+
+    monkeypatch.setattr(
+        "module_office.utils.file_parse.mineru.parser.build_client", _broken_client
+    )
+    fallback_parser, fallback_desc, failed = engine_registry.create(
+        Path("a.docx"), ParseContext()
+    )
+    assert isinstance(fallback_parser, OfficeParser) and fallback_desc.name == "office-local"
+    assert [attempt.engine for attempt in failed] == ["mineru"]
+    # mineru 不支持的格式直接拒绝(MinerU 4.0 不支持 markdown)
     with pytest.raises(ValueError, match="不支持的文件类型"):
-        ParserFactory.create(Path("a.md"), engine="mineru")
+        engine_registry.create(Path("a.md"), ParseContext(), engine="mineru")
     with pytest.raises(ValueError, match="不支持的文件类型"):
-        ParserFactory.create(Path("a.xyz"), engine="mineru")
+        engine_registry.create(Path("a.xyz"), ParseContext())
     # 未注册引擎报错
     with pytest.raises(ValueError, match="不支持的解析引擎"):
-        ParserFactory.create(Path("a.pdf"), engine="unknown")
+        engine_registry.create(Path("a.pdf"), ParseContext(), engine="unknown")
 
 
 # ==================== 单元层: MinerU 结果契约 ====================
@@ -156,7 +176,7 @@ async def test_mineru_unpack_and_chunk_mapping(monkeypatch):
     )
     stem = f"mineru_test_{time.strftime('%H%M%S')}_{threading.get_ident()}"
     try:
-        parser = MinerUParser(ocr_llm=None)
+        parser = MinerUParser(ParseContext())
         zip_bytes = _build_mineru_zip(stem)
 
         content_list, images = parser._unpack(zip_bytes, stem)
@@ -252,7 +272,9 @@ async def test_mineru_remote_real_parse_pdf(sample_pdf: Path):
     except httpx.HTTPError:
         pytest.skip("mineru.net 网络不可达")
 
-    parser = ParserFactory.create(sample_pdf, engine="mineru")
+    parser, _, _ = engine_registry.create(
+        sample_pdf, ParseContext(), engine="mineru"
+    )
     assert isinstance(parser, MinerUParser)
     chunks = await asyncio.wait_for(parser.extract(sample_pdf), timeout=600)
     assert chunks, "mineru 远程解析结果为空"
@@ -276,7 +298,9 @@ async def test_mineru_local_real_parse_pdf(sample_pdf: Path):
     except httpx.HTTPError:
         pytest.skip(f"本地 mineru 服务不可达: {cfg.local_base_url}")
 
-    parser = ParserFactory.create(sample_pdf, engine="mineru")
+    parser, _, _ = engine_registry.create(
+        sample_pdf, ParseContext(), engine="mineru"
+    )
     chunks = await asyncio.wait_for(parser.extract(sample_pdf), timeout=600)
     assert chunks and any(
         c.content_type in (ContentType.TEXT, ContentType.TITLE) for c in chunks

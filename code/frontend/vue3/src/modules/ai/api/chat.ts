@@ -23,12 +23,27 @@ export const sendChatMessage = async (request: ChatRequest) => {
 /**
  * 批量统计文本 token 数(输入/输出/上下文历史统计, 计数口径与后端一致)
  * @param texts 待计数的文本列表(返回 counts 顺序一一对应)
+ * @param modelId 可选模型配置ID(传入时同时返回该模型输入上限)
  */
-export const countTokens = async (texts: string[]) => {
+export const countTokens = async (texts: string[], modelId?: string) => {
   if (texts.length === 0) return { counts: [], total: 0 }
-  return http_base_server.post<{ counts: number[]; total: number }>(
-    '/ai/llm/token-count',
-    { texts }
+  return http_base_server.post<{
+    counts: number[]
+    total: number
+    limit?: number | null
+    remaining?: number | null
+    exceeded?: boolean
+  }>('/ai/llm/token-count', { texts, model_id: modelId })
+}
+
+/**
+ * 查询对话模型的输入 token 上限(未选定时取全局默认 chat 配置)
+ * @param modelId 模型配置ID(可选)
+ */
+export const getChatInputLimit = async (modelId?: string) => {
+  return http_base_server.get<{ limit: number; model: string; unit: string }>(
+    '/ai/llm/input-limit',
+    { params: modelId ? { model_id: modelId } : {} }
   )
 }
 

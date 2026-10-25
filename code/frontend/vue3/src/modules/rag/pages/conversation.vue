@@ -18,30 +18,37 @@
     <section flex-1 flex flex-col min-w-0 relative>
       <!-- 顶部栏: 侧栏开关 + 当前会话标题 -->
       <header
-        flex items-center gap-2 px-3 md:px-5 py-2.5
+        flex flex-col gap-2 px-3 md:px-5 py-2.5
         class="note-edge-b bg-note-soft/70" backdrop-blur
       >
-        <button
-          rounded-full p-2 transition
-          :class="sidebarOpen ? 'bg-note-tint text-note-green' : 'text-note hover:bg-note-tint'"
-          :title="sidebarOpen ? '收起会话列表' : '展开会话列表'"
-          @click="sidebarOpen = !sidebarOpen"
-        >
-          <el-icon :size="20">
-            <Fold v-if="sidebarOpen" />
-            <Expand v-else />
-          </el-icon>
-        </button>
-        <h2 v-if="currentConversation" flex-1 min-w-0 truncate text-sm font-medium text-note m-0 flex items-center gap-2>
-          <el-tag
-            v-if="currentConversation.agent_id"
-            size="small" effect="plain" type="success"
-            class="shrink-0"
+        <div flex items-center gap-2 w-full min-w-0>
+          <button
+            rounded-full p-2 transition
+            :class="sidebarOpen ? 'bg-note-tint text-note-green' : 'text-note hover:bg-note-tint'"
+            :title="sidebarOpen ? '收起会话列表' : '展开会话列表'"
+            @click="sidebarOpen = !sidebarOpen"
           >
-            {{ agentName(currentConversation.agent_id) }}
-          </el-tag>
-          <span truncate>{{ currentConversation.title || '新对话' }}</span>
-        </h2>
+            <el-icon :size="20">
+              <Fold v-if="sidebarOpen" />
+              <Expand v-else />
+            </el-icon>
+          </button>
+          <h2 v-if="currentConversation" flex-1 min-w-0 truncate text-sm font-medium text-note m-0 flex items-center gap-2>
+            <el-tag
+              v-if="currentConversation.agent_id"
+              size="small" effect="plain" type="success"
+              class="shrink-0"
+            >
+              {{ agentName(currentConversation.agent_id) }}
+            </el-tag>
+            <span v-ellipsis truncate>{{ currentConversation.title || '新对话' }}</span>
+          </h2>
+          <span v-else flex-1 min-w-0 text-sm font-medium text-note>{{ t('asst_nav_chat') }}</span>
+          <!-- 桌面/平板: 知识库管理与智能体编排同为 AI 助手内页(页面内无后台侧边栏) -->
+          <RagPageNav class="hidden lg:flex ml-auto shrink-0" />
+        </div>
+        <!-- 手机: 内页导航单独一行, 横向可滚动不挤压标题 -->
+        <RagPageNav class="lg:hidden w-full overflow-x-auto" />
       </header>
 
       <!-- 消息流: 居中阅读宽度(过程区块/引用溯源/交互卡片 + 富文本) -->
@@ -66,7 +73,7 @@
               <button
                 v-for="s in suggestions" :key="s.label"
                 flex items-center gap-3 p-3.5 rounded-xl bg-note-card text-left
-                hover:shadow-note hover:-translate-y-0.5 transition-all
+                hover:shadow-note hover:-translate-y-0.5 note-transition
                 @click="applySuggestion(s.question)"
               >
                 <div w-8 h-8 rounded-lg bg-note-tint flex-center shrink-0>
@@ -74,7 +81,7 @@
                 </div>
                 <div min-w-0>
                   <div text-sm font-medium text-note>{{ s.label }}</div>
-                  <div text-xs text-note-sub truncate>{{ s.question }}</div>
+                  <div v-ellipsis text-xs text-note-sub truncate>{{ s.question }}</div>
                 </div>
               </button>
             </div>
@@ -175,6 +182,14 @@
               </el-tooltip>
             </template>
           </ChatComposer>
+          <!-- 输入用量: 已输入 / 对话模型输入上限(仅在输入时显示, 保持界面素净) -->
+          <div v-if="chatInputLimit > 0 && inputMessage.trim()" class="mt-1.5 px-2">
+            <InputLimitBar
+              :used="draftTokenCount ?? estimateTokens(inputMessage)"
+              :limit="chatInputLimit"
+              label="输入"
+            />
+          </div>
         </div>
       </div>
     </section>
@@ -209,7 +224,12 @@ import { listAgents, sendAgentChatAguiStream } from '@/modules/agent/api/agent'
 import type { AgentInfo } from '@/modules/agent/types'
 import ChatMessageList from '@/common/components/chat/ChatMessageList.vue'
 import ChatComposer from '@/common/components/chat/ChatComposer.vue'
+import InputLimitBar from '@/modules/ai/components/InputLimitBar.vue'
+import { countTokens, getChatInputLimit } from '@/modules/ai/api/chat'
+import { estimateTokens } from '@/modules/ai/utils/limits'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
+import RagPageNav from '../components/RagPageNav.vue'
+import { i18n } from '@/common/i18n/language'
 import { useAguiMessages } from '@/common/composables/useAguiMessages'
 import { StreamEventType } from '@/common/types/chat'
 import type { AguiStreamCallbacks } from '@/common/api/aguiStream'
@@ -220,6 +240,9 @@ import type {
   MessageInteraction,
 } from '@/common/types/agui'
 import type { Conversation, ChatMessage, MyProject, RagChatRequest } from '../types'
+
+// 三语词条(AI 助手内页导航等)
+const { t } = i18n.global
 
 // ===== 会话列表 =====
 const conversations = ref<Conversation[]>([])
@@ -276,6 +299,30 @@ const messagePage = ref(1)
 const hasMoreMessages = ref(false)
 const loadingOlderMessages = ref(false)
 const inputMessage = ref('')
+// ===== 输入 token 用量(后端权威计数 + 模型输入上限) =====
+const draftTokenCount = ref<number | null>(null)
+const chatInputLimit = ref(0)
+let draftCountTimer: ReturnType<typeof setTimeout> | null = null
+watch(inputMessage, (val) => {
+  if (draftCountTimer) clearTimeout(draftCountTimer)
+  if (!val.trim()) {
+    draftTokenCount.value = null
+    return
+  }
+  draftCountTimer = setTimeout(async () => {
+    try {
+      const res = await countTokens([val])
+      if (val === inputMessage.value) draftTokenCount.value = res.counts[0] ?? 0
+    } catch { /* 统计失败静默, 不影响聊天 */ }
+  }, 400)
+})
+/** 拉取当前对话模型的输入上限(失败保持 0, 即不展示/不拦截) */
+const loadChatInputLimit = async () => {
+  try {
+    const res = await getChatInputLimit()
+    chatInputLimit.value = Number(res.limit || 0)
+  } catch { /* 上限未知时仅展示后端错误 */ }
+}
 const isSending = ref(false)
 const deepThinking = ref(false)
 const enableWebsearch = ref(false)
@@ -661,6 +708,13 @@ const handleSend = async () => {
     ElMessage.warning('附件解析中，请稍候再发送')
     return
   }
+  // 输入上限前置拦截: 超出对话模型 input_tokens 时不发送
+  if (chatInputLimit.value > 0 && estimateTokens(message) > chatInputLimit.value) {
+    ElMessage.warning(
+      `输入超出模型上下文限制(上限 ${chatInputLimit.value.toLocaleString('en-US')} tokens), 请精简内容后重试`
+    )
+    return
+  }
   // 仅携带解析成功的附件; 发送即消费(内容经 SystemMessage 持久化, 后续追问仍可引用)
   const readyFiles = tempAttachments.value.filter((a) => a.status === 'ready' && a.content)
   const attachBlocks: MessageBlock[] | null = readyFiles.length
@@ -732,6 +786,7 @@ onMounted(() => {
   loadMyProjects()
   loadAgents()
   loadConversations()
+  loadChatInputLimit()
 })
 </script>
 

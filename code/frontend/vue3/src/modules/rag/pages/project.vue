@@ -46,12 +46,12 @@
               <el-icon :size="20" text-note-green><Collection /></el-icon>
             </div>
             <div min-w-0 flex-1>
-              <div font-medium text-note truncate>{{ row.name }}</div>
+              <div v-ellipsis font-medium text-note truncate>{{ row.name }}</div>
               <div text-xs text-note-sub mt-0.5>{{ formatDate(row.created_at) }} 创建</div>
             </div>
           </div>
           <!-- 描述 -->
-          <p text-sm text-note-sub leading-relaxed line-clamp-2 min-h-10 m-0>
+          <p v-ellipsis:2 text-sm text-note-sub leading-relaxed line-clamp-2 min-h-10 m-0>
             {{ row.description || '暂无描述' }}
           </p>
           <!-- 底部: 分类/可见性标签 + 操作 -->

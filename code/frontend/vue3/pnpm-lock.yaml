@@ -32,6 +32,9 @@ importers:
       '@vueuse/core':
         specifier: ^13.9.0
         version: 13.9.0(vue@3.5.25(typescript@5.8.3))
+      '@zumer/snapdom':
+        specifier: ^3.3.7
+        version: 3.3.7
       babylonjs:
         specifier: ^9.3.0
         version: 9.31.0
@@ -1740,6 +1743,9 @@ packages:
   '@xmldom/xmldom@0.9.12':
     resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
     engines: {node: '>=14.6'}
+
+  '@zumer/snapdom@3.3.7':
+    resolution: {integrity: sha512-32gUTSVJ8wCRLjJO2FiHhDGq5W6Z8bs7oMdKLF3LnBvsr6DOEEQtshOQ5QIV2hTszhBruo97st1CriS4ytXrOA==}
 
   abbrev@2.0.0:
     resolution: {integrity: sha512-6/mh1E2u2YgEsCHdY0Yx5oW+61gZU+1vXaoiHHrpKeuRNNgFvS+/jrwHiQhB5apAf5oB7UB7E19ol2R2LKH8hQ==}
@@ -5748,6 +5754,8 @@ snapshots:
       chevrotain: 7.1.1
 
   '@xmldom/xmldom@0.9.12': {}
+
+  '@zumer/snapdom@3.3.7': {}
 
   abbrev@2.0.0: {}
 

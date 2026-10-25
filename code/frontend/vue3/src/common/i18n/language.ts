@@ -1,4 +1,9 @@
 import { createI18n } from 'vue-i18n'
+import { protableKeys } from './keys/protable'
+import { codegenKeys } from './keys/codegen'
+import { i18nAdminKeys } from './keys/i18nAdmin'
+import { layoutKeys } from './keys/layout'
+import { assistantKeys } from './keys/assistant'
 
 /**
  * 系统语言切换(中/英/日三语)
@@ -103,6 +108,9 @@ const languageObj = {
   float_tools: ['悬浮工具', 'フロートツール', 'Float Tools'],
 } as Record<string, string[]>
 
+// 合并各功能模块的词条(每个模块独立文件维护, 避免多人/多任务改同一文件冲突)
+Object.assign(languageObj, protableKeys, codegenKeys, i18nAdminKeys, layoutKeys, assistantKeys)
+
 /** 首次访问按浏览器语言自动匹配; 已有用户选择时以 localStorage 为准 */
 function detectLanguage(): string {
   try {
@@ -161,4 +169,28 @@ function changeLanguage(lang: string) {
 // 启动时同步 html lang 到初始语言
 changeLanguage(initial)
 
-export { i18n, languageOptions, currentLanguage, changeLanguage, languageTypeFullArray }
+/**
+ * 应用后台维护的词条覆盖(运行时热更新, 无需重新构建前端)
+ * @param overrides 覆盖词条: key → [zh, ja, en]; 空字符串表示该语言不覆盖
+ */
+function applyI18nOverrides(overrides: Record<string, string[]>) {
+  for (let index = 0; index < languageTypeArray.length; index++) {
+    const languageType = languageTypeArray[index]
+    const patch: Record<string, string> = {}
+    for (const key in overrides) {
+      const value = overrides[key]?.[index]
+      if (typeof value === 'string' && value.trim()) patch[key] = value
+    }
+    if (Object.keys(patch).length) i18n.global.mergeLocaleMessage(languageType, patch)
+  }
+}
+
+export {
+  i18n,
+  languageObj,
+  languageOptions,
+  currentLanguage,
+  changeLanguage,
+  applyI18nOverrides,
+  languageTypeFullArray,
+}

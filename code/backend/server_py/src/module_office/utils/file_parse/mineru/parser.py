@@ -17,17 +17,14 @@ from io import BytesIO
 from pathlib import Path
 
 from bs4 import BeautifulSoup
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
-from PIL import Image
 
 from common.config.path import DIR_TEMP
-from common.utils.media.file_format import base64_to_url, pil_to_base64
-from module_office.utils.file_parse.mineru.prompt import OCR_SYSTEM_PROMPT
+from module_office.do.parse import ParseContext
 from module_office.utils.file_parse.base import BaseParser
 from module_office.utils.file_parse.do.chunk import Chunk, ContentType, Position
 from module_office.utils.file_parse.mineru.client import BaseMinerUClient, MinerUError, build_client
 from module_office.utils.file_parse.mineru.config import load_config
+from module_office.utils.file_parse.mineru.prompt import OCR_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +35,13 @@ _TABLE_LARGE_THRESHOLD = 2000
 class MinerUParser(BaseParser):
     """MinerU 引擎解析器(远程 mineru.net / 本地 docker 双支持)。
 
-    构造协议统一(``__init__(ocr_llm=None)``), 供 ParserFactory
-    统一实例化; ``ocr_llm`` 仅用于图片内容提取(IMAGE_CONTENT), 不参与服务调用。
+    构造协议统一(``__init__(ctx)``), 供 EngineRegistry 统一实例化;
+    图片内容提取通过 ``ctx.vision``(module_ai 视觉能力契约)完成,
+    本解析器不再直接持有任何 langchain/模型实现。
     """
 
-    def __init__(self, ocr_llm=None):
-        self.ocr_llm: BaseChatModel = ocr_llm
+    def __init__(self, ctx: ParseContext | None = None):
+        super().__init__(ctx)
         self._client: BaseMinerUClient = build_client(load_config())
 
     async def extract(self, file: Path) -> list[Chunk]:
@@ -210,7 +208,7 @@ class MinerUParser(BaseParser):
             )
 
         content_text = caption
-        if not content_text and self.ocr_llm and local_path:
+        if not content_text and self.ctx.vision and local_path:
             content_text = await self._ocr_image(local_path)
         if content_text:
             result.append(
@@ -224,23 +222,15 @@ class MinerUParser(BaseParser):
         return result
 
     async def _ocr_image(self, img_path: str) -> str:
-        """用 ocr_llm(VLM) 提取图片内容, 失败返回空串。"""
+        """通过 module_ai 视觉能力提取图片内容, 失败返回空串。"""
+        vision = self.ctx.vision
+        if vision is None:
+            return ""
         try:
-            def _encode_image() -> str:
-                # 磁盘读 + 图像解码/编码为同步 CPU/IO, 放线程池避免阻塞事件循环
-                with Image.open(img_path) as pil_img:
-                    return pil_to_base64(pil_img)
-
-            img_base64 = await asyncio.to_thread(_encode_image)
-            image_url = base64_to_url(img_base64)
-            messages = [
-                SystemMessage(content=OCR_SYSTEM_PROMPT),
-                HumanMessage(
-                    content=[{"type": "image_url", "image_url": {"url": image_url}}]
-                ),
-            ]
-            response = await self.ocr_llm.ainvoke(messages)
-            return response.content.strip()
+            image = await asyncio.to_thread(Path(img_path).read_bytes)
+            return await vision.describe_image(
+                image, prompt=OCR_SYSTEM_PROMPT, user_id=self.ctx.user_id
+            )
         except Exception as e:
             logger.error("VLM 图片内容提取失败: %s", e)
             return ""

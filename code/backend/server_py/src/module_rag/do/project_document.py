@@ -128,9 +128,11 @@ type IngestProgressCallback = Callable[[float, str], Awaitable[None]]
 class DocType:
     """RAG文档允许的文件类型
 
-    白名单与解析引擎(ParserFactory→MinerU)的真实支持面对齐(远程 API 实测):
-    版式文档 pdf/doc/docx/ppt/pptx + 图片 png/jpg/jpeg。
-    纯文本类(txt/md/csv 等)引擎不支持, 不入知识库白名单 —— 仅会话临时文件
+    白名单与解析引擎注册表(EngineRegistry)的真实支持面对齐:
+    pdf + Office(doc/docx/ppt/pptx) + 图片(png/jpg/jpeg)。
+    Office 格式默认由 MinerU 4.0 解析; docx/pptx 在 MinerU 不可用时自动降级到
+    本地 Office 引擎, doc/ppt 为二进制旧格式, 仅 MinerU 可解析。
+    纯文本类(txt/md 等)引擎不支持, 不入知识库白名单 —— 仅会话临时文件
     口径(rag_chat.parse_temp_file)做轻量解码, 不经解析引擎。
     """
 

@@ -17,3 +17,12 @@ def get_llm_service():
         LLMService实例
     """
     return llm_service
+
+
+def get_vision_service() -> LLMService:
+    """获取视觉理解能力(VLM)
+
+    视觉理解属于 LLM 多模态线(同样基于 chat 模型), 复用同一服务实例,
+    供 module_office 解析图片内容时注入使用。
+    """
+    return llm_service

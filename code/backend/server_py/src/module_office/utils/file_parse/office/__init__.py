@@ -1,6 +1,6 @@
 """Office 本地解析引擎(docx/pptx, 纯标准库实现)。
 
-MinerU 远程 API 仅支持 pdf/图片, Office 格式由本引擎本地解析兜底。
+MinerU 4.0 已支持 Office 原生文档, 默认走 MinerU; 本引擎作为离线兜底。
 """
 from module_office.utils.file_parse.office.parser import OfficeParser
 

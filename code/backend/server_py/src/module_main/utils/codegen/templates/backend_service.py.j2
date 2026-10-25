@@ -1,0 +1,66 @@
+﻿"""系统主模块 {{ module_name }} 业务逻辑层(代码生成器生成)"""
+
+from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
+from {{ module_package }}.dao.{{ module_name }} import {{ class_name }}Dao
+from {{ module_package }}.do.{{ module_name }} import (
+    {{ class_name }},
+    {{ class_name }}Create,
+    {{ class_name }}Update,
+)
+
+
+class {{ class_name }}Service:
+    """{{ page_title }}服务"""
+
+    def __init__(self, dao: {{ class_name }}Dao | None = None):
+        """依赖注入构造器: 初始化数据访问对象"""
+        self.dao = dao or {{ class_name }}Dao()
+
+    async def add(self, data: {{ class_name }}Create) -> {{ id_py_type }}:
+        """
+        新增记录
+
+        :param data: 创建数据
+        :return: 新记录主键
+        """
+        return await self.dao.add(data)
+
+    async def delete(self, item_id: {{ id_py_type }}) -> None:
+        """
+        删除记录
+
+        :param item_id: 主键值
+        """
+        await self.dao.delete(item_id)
+
+    async def update(self, item_id: {{ id_py_type }}, data: {{ class_name }}Update) -> None:
+        """
+        更新记录
+
+        :param item_id: 主键值
+        :param data: 更新数据
+        """
+        await self.dao.update(item_id, data)
+
+    async def get(self, item_id: {{ id_py_type }}) -> {{ class_name }} | None:
+        """
+        获取单条记录
+
+        :param item_id: 主键值
+        :return: 记录对象, 不存在返回 None
+        """
+        return await self.dao.get(item_id)
+
+    async def list_paged(
+        self, pagination: PaginationParams, keyword: str | None = None
+    ) -> PaginationResponse:
+        """
+        分页查询记录列表
+
+        :param pagination: 分页参数
+        :param keyword: 关键字模糊匹配
+        :return: 分页响应
+        """
+        items = await self.dao.list_paged(pagination, keyword=keyword)
+        total = await self.dao.count(keyword=keyword)
+        return PaginationResponse.create(items, total, pagination)

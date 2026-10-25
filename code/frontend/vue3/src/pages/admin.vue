@@ -20,7 +20,7 @@
           <div min-w-0>
             <p text-sm text-note-sub>{{ card.label }}</p>
             <p text-2xl font-bold mt-2 text-note-green class="tabular-nums">{{ card.value }}</p>
-            <p text-xs text-note-sub mt-1 truncate>{{ card.sub }}</p>
+            <p v-ellipsis text-xs text-note-sub mt-1 truncate>{{ card.sub }}</p>
           </div>
           <div w-11 h-11 rounded-full bg-note-tint center shrink-0>
             <el-icon :size="24" text-note-green><component :is="card.icon" /></el-icon>
@@ -43,7 +43,7 @@
           <el-icon :size="28" mb-2 text-note-green>
             <component :is="shortcut.icon" />
           </el-icon>
-          <span text-sm text-note>{{ shortcut.title }}</span>
+          <span v-ellipsis text-sm text-note max-w-full truncate>{{ shortcut.title }}</span>
         </RouterLink>
       </div>
     </div>
@@ -61,7 +61,7 @@
           >
             <div flex items-center gap-2 min-w-0>
               <el-icon text-note-sub><Clock /></el-icon>
-              <span text-sm text-note truncate>{{ item.title }}</span>
+              <span v-ellipsis text-sm text-note truncate>{{ item.title }}</span>
             </div>
             <el-icon text-note-sub><ArrowRight /></el-icon>
           </RouterLink>
@@ -182,7 +182,7 @@ async function loadStatus() {
 // ===== 快捷入口: 从后台菜单树按路径挑选(自动带权限过滤, 未授权自动隐藏), 图标取父分组 =====
 const SHORTCUT_PATHS = [
   '/authorization/user',
-  '/ai/chat',
+  '/ai/model_config',
   '/file',
   '/monitor/server_status',
 ] as const

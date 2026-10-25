@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 import time
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,14 @@ _DEFAULT_TIMEOUT = 60
 _DEFAULT_POLL_BUDGET = 300
 # 轮询间隔(秒)
 _POLL_INTERVAL = 2.0
+
+# 文档解析支持的 MIME 映射(其余按二进制流提交, 由服务端判定)
+_MIME_BY_SUFFIX = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+}
 
 
 class PaddleOCROnline:
@@ -157,3 +166,52 @@ class PaddleOCROnline:
             "results": [{"box": [[0, 0], [w, 0], [w, h], [0, h]], "text": text, "score": 1.0}],
             "engine": "paddle",
         }
+
+    def parse_document(self, data: bytes, filename: str) -> str:
+        """整份文档解析(PaddleOCR-VL 系): 上传原始文件 → 轮询 → 抽取纯文本
+
+        与 ``recognize`` 的区别: 不要求 cv2 图像, pdf 可整份提交, 由服务端完成
+        版面分析与阅读顺序还原。
+
+        :param data: 文件原始字节(pdf/png/jpg)
+        :param filename: 文件名(用于推断 MIME)
+        :return: 文档文本(版面块按阅读顺序拼接, 或 markdown 回退)
+        """
+        suffix = Path(filename or "").suffix.lower()
+        mime = _MIME_BY_SUFFIX.get(suffix, "application/octet-stream")
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        url = str(self._conf.get("url") or _DEFAULT_JOBS_URL).rstrip("/")
+        try:
+            import httpx
+
+            with httpx.Client(
+                timeout=float(self._conf.get("timeout") or _DEFAULT_TIMEOUT)
+            ) as client:
+                resp = client.post(
+                    url,
+                    headers=headers,
+                    data={
+                        "model": str(self._conf.get("model") or "PaddleOCR-VL-1.6"),
+                        "optionalPayload": json.dumps({"visualize": False}),
+                    },
+                    files={
+                        "file": (
+                            filename or f"document{suffix or '.bin'}",
+                            data,
+                            mime,
+                        )
+                    },
+                )
+        except Exception as e:
+            raise RuntimeError(f"PaddleOCR 文档提交失败: {e}") from e
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"PaddleOCR 文档提交失败({resp.status_code}): {resp.text[:500]}"
+            )
+        job_id = (resp.json() or {}).get("data", {}).get("jobId")
+        if not job_id:
+            raise RuntimeError(f"PaddleOCR 文档提交未返回 jobId: {resp.text[:300]}")
+        text = self._extract_text(self._poll_result(headers, job_id))
+        if not text:
+            raise RuntimeError("PaddleOCR 文档解析未返回文本")
+        return text

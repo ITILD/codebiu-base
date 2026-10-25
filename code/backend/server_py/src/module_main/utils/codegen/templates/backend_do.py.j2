@@ -1,0 +1,57 @@
+"""系统主模块 {{ module_name }} 表模型与请求/响应体定义(代码生成器生成)
+
+对应数据表: {{ table_name }}{% if table_comment %}({{ table_comment }}){% endif %}
+"""
+
+from datetime import date, datetime, time, timezone
+from uuid import uuid4
+
+from sqlmodel import Field, SQLModel
+
+
+class {{ class_name }}Base(SQLModel):
+    """{{ page_title }}基础模型(不含数据库表配置)"""
+{% if base_fields %}
+{% for field in base_fields %}
+    {{ field.base_declaration }}
+{% endfor %}
+{% else %}
+    pass
+{% endif %}
+
+
+class {{ class_name }}({{ class_name }}Base, table=True):
+    """{{ page_title }}数据库模型(对应数据库表 {{ table_name }})"""
+
+    __tablename__ = "{{ table_name }}"
+
+{% for field in pk_fields %}
+    {{ field.declaration }}
+{% endfor %}
+{% if has_created_at %}
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="创建时间",
+    )
+{% endif %}
+{% if has_updated_at %}
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="最后更新时间",
+    )
+{% endif %}
+
+
+class {{ class_name }}Create({{ class_name }}Base):
+    """创建{{ page_title }}的请求模型"""
+
+
+class {{ class_name }}Update(SQLModel):
+    """更新{{ page_title }}的请求模型(仅提交需变更的字段)"""
+{% if update_fields %}
+{% for field in update_fields %}
+    {{ field.update_declaration }}
+{% endfor %}
+{% else %}
+    pass
+{% endif %}

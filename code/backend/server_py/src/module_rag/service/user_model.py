@@ -6,7 +6,6 @@ from module_rag.do.user_model import UserModel, UserModelUpdate
 from module_rag.dao.user_model import UserModelDao
 from langchain_core.language_models import BaseChatModel
 from module_ai.service.llm import LLMService
-from module_ai.service.rerank import RerankService
 from module_ai.utils.llm.rerank.interface import Rerank
 from module_ai.do.model_config import ModelScope
 from module_ai.utils.llm.types import ModelType
@@ -37,12 +36,10 @@ class UserModelService:
         self,
         user_model_dao: UserModelDao | None = None,
         llm_service: LLMService | None = None,
-        rerank_service: RerankService | None = None,
     ):
         """依赖注入构造器:初始化所需的数据访问对象"""
         self.user_model_dao = user_model_dao or UserModelDao()
         self.llm_service = llm_service or LLMService()
-        self.rerank_service = rerank_service or RerankService()
         self._user_dao = UserDao()  # 查询用户部门以校验部门模型
 
     async def _validate_model_access(self, model_id: str | None, user_id: str) -> None:
@@ -275,6 +272,22 @@ class UserModelService:
                 missing.append(model_type)
         return missing
 
+    async def get_chat_input_tokens(self, user_id: str) -> int:
+        """解析用户对话模型的输入 token 上限(供上下文裁剪预算使用)
+
+        :param user_id: 用户ID
+        :return: 输入 token 上限; 未解析到配置时回退 16000(与既有裁剪默认一致)
+        """
+        try:
+            model_id = await self.resolve_model_id(user_id, ModelType.CHAT)
+            if model_id:
+                limit, _model = await self.llm_service.input_token_limit(model_id)
+                if limit:
+                    return limit
+        except Exception as e:
+            logger.warning(f"解析用户 {user_id} 对话模型输入上限失败, 使用默认预算: {e}")
+        return 16000
+
     async def get_llm_by_user_id(
         self, user_id: str, streaming: bool = True, model_type: ModelType = ModelType.CHAT
     ) -> BaseChatModel | Rerank | None:
@@ -296,8 +309,8 @@ class UserModelService:
                 case ModelType.CHAT:
                     return await self.llm_service.get_llm(model_id, streaming=streaming)
                 case ModelType.RERANK:
-                    # rerank 引擎走独立工厂(build_model 不支持 rerank, 直接构建会抛 ValueError)
-                    return await self.rerank_service.get_reranker(model_id)
+                    # rerank 已并入 llm 能力线, 由 LLMService 统一构建/缓存
+                    return await self.llm_service.get_reranker(model_id)
                 case _:
                     return await self.llm_service.get_llm(model_id, False)
         except Exception as e:

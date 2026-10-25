@@ -1,0 +1,18 @@
+﻿"""系统主模块 {{ module_name }} FastAPI 依赖注入(代码生成器生成)"""
+
+from fastapi import Depends
+
+from {{ module_package }}.dao.{{ module_name }} import {{ class_name }}Dao
+from {{ module_package }}.service.{{ module_name }} import {{ class_name }}Service
+
+
+async def get_{{ module_name }}_dao() -> {{ class_name }}Dao:
+    """{{ page_title }}DAO工厂"""
+    return {{ class_name }}Dao()
+
+
+async def get_{{ module_name }}_service(
+    dao: {{ class_name }}Dao = Depends(get_{{ module_name }}_dao),
+) -> {{ class_name }}Service:
+    """{{ page_title }}Service工厂"""
+    return {{ class_name }}Service(dao)

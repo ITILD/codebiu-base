@@ -17,6 +17,9 @@ from module_authorization.dependencies.auth import (
     get_current_user_id
 )
 from module_authorization.dependencies.avatar import get_avatar_service
+from module_authorization.dependencies.user_preference import get_user_preference_service
+from module_authorization.service.user_preference import UserPreferenceService
+from module_authorization.do.user_preference import UserPreferenceUpdate, UserPreferenceResponse
 from module_authorization.do.user import UserCreate,User
 from module_authorization.do.auth import AuthResponse,AuthLogoutRequest,SelfProfileUpdate,PasswordChange
 from module_authorization.do.auth import (
@@ -43,6 +46,26 @@ async def get_me(current_user: User = Depends(get_current_user)):
 async def get_me_id(current_user_id: str = Depends(get_current_user_id)):
     """根据访问令牌返回当前登录用户的ID(轻量级身份校验)"""
     return current_user_id
+
+
+@router.get("/me/preference", summary="获取当前用户样式配置")
+async def get_my_preference(
+    current_user_id: str = Depends(get_current_user_id),
+    service: UserPreferenceService = Depends(get_user_preference_service),
+) -> UserPreferenceResponse:
+    """返回当前登录用户保存的样式配置(未设置时返回默认 auto, 登录即可调用)"""
+    return await service.get(current_user_id)
+
+
+@router.put("/me/preference", summary="保存当前用户样式配置")
+async def update_my_preference(
+    preference: UserPreferenceUpdate,
+    current_user_id: str = Depends(get_current_user_id),
+    service: UserPreferenceService = Depends(get_user_preference_service),
+) -> UserPreferenceResponse:
+    """保存当前登录用户的样式配置(主题模式主题值非法时返回400, 登录即可调用)"""
+    # service 校验失败抛 ValueError, 由全局处理器统一映射为 400
+    return await service.save(current_user_id, preference)
 
 
 @router.put("/me", summary="自助更新个人资料")

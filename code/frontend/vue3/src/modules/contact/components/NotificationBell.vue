@@ -1,10 +1,16 @@
-<!-- 顶栏通知铃铛(REQ-011): 未读数轮询 + 最近通知面板 + 订阅设置 -->
+<!-- 顶栏通知铃铛(REQ-011): SSE 实时未读 + 轮询兜底 + 最近通知面板 + 订阅设置 -->
 <template>
-  <el-popover trigger="click" width="360" placement="bottom-end" @show="openPanel">
+  <el-popover
+    trigger="click"
+    width="360"
+    placement="bottom-end"
+    @show="openPanel"
+    @hide="panelOpen = false"
+  >
     <template #reference>
       <button
         type="button"
-        aria-label="通知中心"
+        :aria-label="bellLabel"
         relative
         flex
         items-center
@@ -18,6 +24,7 @@
         <el-icon :size="20"><Bell /></el-icon>
         <span
           v-if="unread > 0"
+          aria-hidden="true"
           class="-top-0.5 -right-0.5"
           absolute
           min-w-4
@@ -46,7 +53,7 @@
       </div>
     </div>
 
-    <!-- 最近通知列表 -->
+    <!-- 最近通知列表: 行支持键盘操作(Enter/Space 标记已读) -->
     <el-scrollbar max-height="320px">
       <div v-if="messages.length === 0" py-8 text-center text-sm text-note-sub>暂无通知</div>
       <div
@@ -60,7 +67,12 @@
         rounded
         cursor-pointer
         hover:bg-note-tint
+        role="button"
+        tabindex="0"
+        :aria-label="messageLabel(msg)"
         @click="handleRead(msg)"
+        @keydown.enter.prevent="handleRead(msg)"
+        @keydown.space.prevent="handleRead(msg)"
       >
         <span
           mt-1.5
@@ -71,8 +83,8 @@
           :class="msg.is_read ? 'bg-gray-300' : 'bg-blue-500'"
         />
         <div min-w-0 flex-1>
-          <div text-sm :class="msg.is_read ? 'text-note-sub' : 'font-medium'" truncate>{{ msg.title }}</div>
-          <div v-if="msg.content" text-xs text-note-sub line-clamp-2>{{ msg.content }}</div>
+          <div v-ellipsis text-sm :class="msg.is_read ? 'text-note-sub' : 'font-medium'" truncate>{{ msg.title }}</div>
+          <div v-if="msg.content" v-ellipsis:2 text-xs text-note-sub>{{ msg.content }}</div>
           <div text-xs text-note-sub mt-0.5>{{ formatDateTime(msg.created_at) }}</div>
         </div>
       </div>
@@ -122,17 +134,26 @@ import {
   listSubscriptions,
   markAllNotificationsRead,
   markNotificationRead,
+  openNotificationStream,
   setSubscription,
 } from '../api/notification'
+import type { ContactMessageResponse } from '../api/notification'
 import type { NotificationMessage, NotificationSubscription } from '../types/notification'
 
 const authStore = useAuthStore()
 const authState = authStore.authState
 
-// 未读数(铃铛角标, 60s 轮询; 请求走 user_id+is_read 复合索引, 开销极低)
+// 未读数(铃铛角标): SSE 实时推送, 未连通时 60s 轮询兜底
 const unread = ref(0)
 const POLL_INTERVAL = 60_000
+/** SSE 断线重连退避(达到 30s 后保持该上限) */
+const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000] as const
+
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let closeStream: (() => void) | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let sseConnected = false
+let reconnectAttempt = 0
 
 const refreshUnread = async () => {
   if (!authState.user.id) return
@@ -144,41 +165,129 @@ const refreshUnread = async () => {
   }
 }
 
-watch(
-  () => authState.user.id,
-  (id) => {
-    if (id) {
-      refreshUnread()
-      if (!pollTimer) pollTimer = setInterval(refreshUnread, POLL_INTERVAL)
-    } else {
-      unread.value = 0
-      if (pollTimer) {
-        clearInterval(pollTimer)
-        pollTimer = null
-      }
-    }
-  },
-  { immediate: true },
-)
-
-onUnmounted(() => {
+/** 停止轮询兜底 */
+const stopPolling = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
   }
-})
+}
+
+/** 启动轮询兜底(SSE 已连通或已有轮询任务时不重复启动) */
+const startPolling = () => {
+  if (pollTimer || sseConnected || !authState.user.id) return
+  refreshUnread()
+  pollTimer = setInterval(refreshUnread, POLL_INTERVAL)
+}
 
 // 面板与列表(openPanel 由 popover show 事件触发)
+const panelOpen = ref(false)
 const messages = ref<NotificationMessage[]>([])
 
-const openPanel = async () => {
+/** 拉取最近通知(失败时保留现有列表, 避免清掉 SSE 刚插入的条目) */
+const loadMessages = async () => {
   try {
     const res = await listNotifications({ page: 1, size: 20 })
     messages.value = res.items
   } catch {
-    messages.value = []
+    // 保持当前列表
   }
 }
+
+const openPanel = async () => {
+  panelOpen.value = true
+  await loadMessages()
+}
+
+/** SSE 新通知: 插入列表头 + 未读数 +1; 面板打开中则重新拉取列表 */
+const handleStreamNotification = (payload: ContactMessageResponse) => {
+  unread.value += 1
+  messages.value = [payload, ...messages.value.filter((m) => m.id !== payload.id)].slice(0, 20)
+  if (panelOpen.value) void loadMessages()
+}
+
+/** 安排下一次重连(指数退避, 上限 30s) */
+const scheduleReconnect = () => {
+  if (!authState.user.id || reconnectTimer) return
+  // SSE 恢复前继续用轮询兜底
+  startPolling()
+  const delay = RECONNECT_DELAYS[Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)]
+  reconnectAttempt += 1
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    connectStream()
+  }, delay)
+}
+
+/** 建立 SSE 连接(onError 后由调用方退避重连) */
+const connectStream = () => {
+  if (!authState.user.id || closeStream) return
+  closeStream = openNotificationStream({
+    onOpen: () => {
+      sseConnected = true
+      reconnectAttempt = 0
+      // 已连通即停止轮询; 补一次未读与列表, 弥补断线期间遗漏
+      stopPolling()
+      refreshUnread()
+      if (panelOpen.value) void loadMessages()
+    },
+    onUnread: (count) => {
+      unread.value = count
+    },
+    onNotification: handleStreamNotification,
+    onError: () => {
+      sseConnected = false
+      closeStream = null
+      scheduleReconnect()
+    },
+  })
+}
+
+/** 关闭 SSE 与重连定时器 */
+const stopStream = () => {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  if (closeStream) {
+    closeStream()
+    closeStream = null
+  }
+  sseConnected = false
+  reconnectAttempt = 0
+}
+
+/** 登录用户变化/组件卸载时的统一清理 */
+const teardown = () => {
+  stopPolling()
+  stopStream()
+}
+
+watch(
+  () => authState.user.id,
+  (id) => {
+    teardown()
+    if (!id) {
+      unread.value = 0
+      messages.value = []
+      return
+    }
+    startPolling()
+    connectStream()
+  },
+  { immediate: true },
+)
+
+onUnmounted(teardown)
+
+// 铃铛无障碍标签: 含未读数(未登录时不会渲染该组件)
+const bellLabel = computed(() =>
+  unread.value > 0 ? `通知中心，${unread.value} 条未读` : '通知中心',
+)
+
+/** 列表行无障碍标签(含已读状态与操作提示) */
+const messageLabel = (msg: NotificationMessage) =>
+  msg.is_read ? `${msg.title}（已读）` : `${msg.title}（未读，点击标记为已读）`
 
 const handleRead = async (msg: NotificationMessage) => {
   if (msg.is_read) return

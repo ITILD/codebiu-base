@@ -187,26 +187,29 @@ const toggleFullscreen = async () => {
   }
 }
 
-// 整页截图: html2canvas 动态引入(不占首包), 悬浮工具自身不参与截图
+// 整页截图: snapdom 动态引入(不占首包)。它把 DOM 序列化成 SVG foreignObject
+// 交给浏览器原生渲染, 纸面颗粒(mix-blend-mode)、文字遮罩、WebGL 画布等现代效果
+// 都能原样出图; html2canvas 不支持这些, 且无法解析 color-mix/color(srgb …) 会直接报错
 const takeScreenshot = async () => {
   expanded.value = false
   if (shooting.value) return
   shooting.value = true
+  // 悬浮工具自身不进截图: 临时隐藏(fixed 定位, 不影响页面布局), 结束后恢复
+  const rootEl = rootRef.value
+  if (rootEl) rootEl.style.visibility = 'hidden'
   try {
-    const { default: html2canvas } = await import('html2canvas')
-    const canvas = await html2canvas(document.body, {
-      useCORS: true,
-      backgroundColor: null,
-      ignoreElements: (el) => el.classList?.contains('float-tools-root')
+    const { snapdom } = await import('@zumer/snapdom')
+    // download 内部会生成 <a download> 并触发保存, 避免再经手 dataURL
+    await snapdom.download(document.body, {
+      scale: Math.min(window.devicePixelRatio || 1, 2),
+      filename: `screenshot_${dayjs().format('YYYYMMDD-HHmmss')}.png`
     })
-    const a = document.createElement('a')
-    a.download = `screenshot_${dayjs().format('YYYYMMDD-HHmmss')}.png`
-    a.href = canvas.toDataURL('image/png')
-    a.click()
     ElMessage.success('截图已保存')
-  } catch {
+  } catch (err) {
+    console.error('[FloatTools] 截图失败', err)
     ElMessage.error('截图失败')
   } finally {
+    if (rootEl) rootEl.style.visibility = ''
     shooting.value = false
   }
 }

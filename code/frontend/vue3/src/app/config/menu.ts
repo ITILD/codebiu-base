@@ -13,7 +13,7 @@ import {
   HomeFilled, UserFilled,
   Monitor, ChatDotRound, Setting,
   Files, Collection, FolderOpened,
-  Timer, MagicStick, Search,
+  Timer, Search,
 } from '@element-plus/icons-vue'
 
 /** 菜单项定义(perm 为权限码:与后端模块权限声明一致;缺省表示登录即可见) */
@@ -63,21 +63,13 @@ export const menuItems: MenuItem[] = [
     title: 'AI 助手',
     perm: 'rag',
     mainApp: true,
-    desc: '知识库问答与智能体助手, 一处对话。',
+    desc: 'AI 的最终使用界面: 对话、知识库与智能体编排同级。',
     children: [
       // 首页入口卡取 children[0] 跳转, AI 助手为主入口(知识库/助手切换在对话页工具栏)
       { index: '/rag/conversation', title: 'AI 助手', perm: 'rag:chat' },
       { index: '/rag/project', title: '知识库管理', perm: 'rag:project' },
-    ],
-  },
-  {
-    index: '/agent',
-    icon: markRaw(MagicStick),
-    title: '智能体',
-    perm: 'agent:manage',
-    desc: '智能体助手与技能注册表管理。',
-    children: [
-      { index: '/agent/manage', title: '助手管理', perm: 'agent:manage' },
+      // 智能体编排与知识库管理同级(统一由 AI 助手内页导航进入)
+      { index: '/agent/manage', title: '智能体编排', perm: 'agent:manage' },
     ],
   },
   {
@@ -94,12 +86,15 @@ export const menuItems: MenuItem[] = [
     index: '/ai',
     icon: markRaw(ChatDotRound),
     title: 'AI 服务',
-    desc: 'AI 对话、模型配置、OCR 识别与语音能力。',
+    desc: '模型统一配置与「打开即自测」；AI 助手形态与悬浮入口。',
     children: [
-      { index: '/ai/chat', title: 'AI 对话' },
       { index: '/ai/model_config', title: '模型配置' },
-      { index: '/ai/ocr', title: 'OCR 识别' },
-      { index: '/ai/voice', title: '语音识别' },
+      { index: '/ai/assistant', title: 'AI 助手配置' },
+      // AI 助手三个使用页(独立布局, 自带内页导航): 后台侧边栏也提供直达入口,
+      // 从后台进入后经顶栏头像下拉可回到后台管理
+      { index: '/rag/conversation', title: 'AI 助手', perm: 'rag:chat' },
+      { index: '/rag/project', title: '知识库管理', perm: 'rag:project' },
+      { index: '/agent/manage', title: '智能体编排', perm: 'agent:manage' },
     ],
   },
   {
@@ -124,13 +119,15 @@ export const menuItems: MenuItem[] = [
     index: '/main',
     icon: markRaw(Setting),
     title: '数据与配置',
-    desc: '数据概览、字段表与系统通用配置管理。',
+    desc: '数据概览、字段表、通用配置与研发工具。',
     children: [
       { index: '/main/overview', title: '数据概览', perm: 'main:db' },
       { index: '/main/db', title: '数据监测', perm: 'main:db' },
       { index: '/main/dict', title: '字段表管理', perm: 'main:dict' },
       { index: '/main/audit', title: '操作审计', perm: 'sys:audit' },
       { index: '/main/config', title: '通用配置', perm: 'main:config' },
+      { index: '/main/codegen', title: '代码生成器', perm: 'sys:codegen' },
+      { index: '/main/i18n', title: '多语言词条', perm: 'sys:i18n' },
     ],
   },
   {

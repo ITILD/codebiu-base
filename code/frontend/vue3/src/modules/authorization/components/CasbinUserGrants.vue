@@ -13,8 +13,8 @@
           <div class="flex items-center gap-2">
             <UserAvatar :size="28" :src="c.user.avatar" :name="c.user.nickname || c.user.username" />
             <div class="min-w-0">
-              <div class="text-sm text-note truncate">{{ c.user.nickname || c.user.username }}</div>
-              <div class="text-xs text-note-sub truncate">{{ c.user.username }}</div>
+              <div v-ellipsis class="text-sm text-note truncate">{{ c.user.nickname || c.user.username }}</div>
+              <div v-ellipsis class="text-xs text-note-sub truncate">{{ c.user.username }}</div>
             </div>
             <el-tag size="small" type="info" class="ml-auto shrink-0">{{ c.bindings.length }} 个角色</el-tag>
           </div>

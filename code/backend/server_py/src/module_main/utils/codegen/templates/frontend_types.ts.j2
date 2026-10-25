@@ -1,0 +1,28 @@
+// src/modules/{{ module_name }}/types/{{ module_name }}.ts
+// {{ page_title }} 数据结构(代码生成器生成, 对应后端 {{ route_prefix }})
+
+/** {{ page_title }}记录 */
+export type {{ class_name }} = {
+{% for field in columns %}
+  {{ field.name }}: {{ field.ts_type }}
+{% endfor %}
+}
+
+/** 创建{{ page_title }}请求 */
+{% if create_ts_fields %}
+export type {{ class_name }}Create = {
+{% for field in create_ts_fields %}
+  {{ field.name }}{% if field.optional %}?{% endif %}: {{ field.ts_type }}
+{% endfor %}
+}
+{% else %}
+export type {{ class_name }}Create = Record<string, never>
+{% endif %}
+
+/** 更新{{ page_title }}请求(仅提交需变更的字段) */
+export type {{ class_name }}Update = Partial<{{ class_name }}Create>
+
+/** 列表查询参数 */
+export type {{ class_name }}ListParams = {
+  keyword?: string
+}

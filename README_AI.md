@@ -34,14 +34,15 @@ code/backend/server_py/src/
 ├── module_contact/    # 联系触达: 验证码收发 + 通知中心(站内信必达+邮件/短信按订阅路由)
 └── module_template/   # 新模块脚手架示例(CRUD/组件选型/布局/Babylon 3D)
 
-# 每个业务线模块标准结构(五件套齐全 + utils):
+# 每个业务线模块只允许七类目录(名称固定, 禁自建 api/dto/types 等平行目录):
 module_<业务线>/
-├── controller/        # 路由端点(参数校验+调 service)
-├── service/           # 业务逻辑; 复杂跨模块业务 = service 之间互相调用
+├── controller/        # 对外路由(即 api 层): 参数校验 + 调度 service, 不写业务
+├── service/           # 业务逻辑; 跨模块调用唯一入口; 能力契约(Protocol)随实现放这里
 ├── dao/               # 数据访问(关系库/向量库)
-├── do/                # 表模型 + 请求响应体
-├── dependencies/      # FastAPI 依赖注入
-└── utils/             # 非业务算法与纯工具函数(不依赖业务状态)
+├── do/                # 数据对象: 表模型/请求响应体/DTO/枚举/运行时上下文
+├── dependencies/      # FastAPI 依赖注入(仅装配 service/dao 单例)
+├── config/            # 配置层: 模块路由挂载、权限声明、模块级常量
+└── utils/             # 从业务中抽取的纯工具与非业务算法(不依赖业务状态)
 ```
 
 前端按业务垂直切分，与后端模块一一对应（删模块文件夹即删整个功能）：
@@ -75,13 +76,14 @@ frontend/vue3/src/
 ## 4. 架构硬规则
 
 1. Python 3.13 新类型语法（禁 `typing.Optional/Union/List`），async 优先，重库惰性 import。
-2. **每个业务线模块必须有完整的 controller/service/dao/do/dependencies 五件套**；非业务算法放模块 `utils/`；业务逻辑只写 service，controller 只做参数校验与调度。
-3. 模块间禁止互引 controller/dao/do 等内部文件；**复杂业务依靠 service 之间调用实现**；通用能力下沉 `common/`（后端）或 `src/common/`（前端）。
-4. 权限点 `域:资源:动作`，前后端声明必须一致（`config/permissions.py` ↔ `menu.ts`）。
-5. 业务可热更配置进动态配置中心（`sys_config` + schema 即表单）；引导配置进 config.yaml；**config.yaml 为入 git 的基线模板，严禁提交任何真实密钥**（密钥位一律留空，只注释 `to set real key`）；真实密钥只放 `config.<APP_ENV>.yaml`（gitignored，默认不存在，**开发时需自建 `config.dev.yaml`**，参考同目录注释示例）或 `CODEBIU_*` 环境变量。
-6. 向量表继承 `VectorModel`（LanceModel 不支持 dict 注解，聚合元数据存 JSON 字符串）。
-7. 前端页面自动路由（`pages/` 下文件路径即路由，**入口 .vue 不可改名/移位**，拆分只动同模块 `components/`）；菜单接 menu.ts；API 统一走 `common/api/http.ts`（流式/Blob 用 `authFetch.ts`，FastAPI 错误解析走 `httpError.ts`）；列表页用 `useTableQuery`、新增/编辑对话框用 `useCrudDialog`、日期格式化用 `common/utils/datetime.ts`，**禁止在页面内重复实现这些公共能力**；对话框子组件约定 `defineExpose({ open })`、打开时重置防脏数据、props/emits 必须带类型。
-8. 依赖变更先 grep 复用，再确认无 500MB+ 大库，最后两端同步（pyproject / package.json）。
+2. **每个业务线模块只允许七类目录**：`controller / service / dao / do / dependencies / config / utils`（结构见第 2 节）。**禁止自建 `api/`、`dto/`、`types/`、`core/` 等平行目录**——`controller` 就是 api 层，数据对象一律进 `do/`，能力契约（Protocol）随实现放进对应 `service/` 文件。
+3. **层间职责固定**：controller 只做参数校验与调度；业务逻辑只写 service；dao 只碰数据访问；do 只放对象（含能力契约的输入输出 DTO/枚举/上下文），不含逻辑；utils 只放可从业务中抽取、无业务状态的纯工具与外部服务适配；config 只放模块配置、路由挂载与权限声明。**controller / service / dependencies 三层文件必须一一同名对应**（一个业务能力一条线，如 `llm`、`voice`、`ocr`、`rerank`、`model_config`）；同一条线的细分能力（向量化、视觉理解归 `llm`，整段转写归 `voice`，模型解析归 `model_config`）合并在该线内，禁止出现没有 controller 的独立能力 service 文件。
+4. **跨模块调用只走 service**：调用方只能依赖目标模块的 `service`（业务入口，含能力契约 Protocol）与 `dependencies`（注入装配），**禁止引用对方的 controller/dao/do/utils**；依赖方向固定 `module_rag → module_office → module_ai`，禁止反向依赖；通用能力下沉 `common/`（后端）或 `src/common/`（前端）。
+5. 权限点 `域:资源:动作`，前后端声明必须一致（`config/permissions.py` ↔ `menu.ts`）。
+6. 业务可热更配置进动态配置中心（`sys_config` + schema 即表单）；引导配置进 config.yaml；**config.yaml 为入 git 的基线模板，严禁提交任何真实密钥**（密钥位一律留空，只注释 `to set real key`）；真实密钥只放 `config.<APP_ENV>.yaml`（gitignored，默认不存在，**开发时需自建 `config.dev.yaml`**，参考同目录注释示例）或 `CODEBIU_*` 环境变量。
+7. 向量表继承 `VectorModel`（LanceModel 不支持 dict 注解，聚合元数据存 JSON 字符串）。
+8. 前端页面自动路由（`pages/` 下文件路径即路由，**入口 .vue 不可改名/移位**，拆分只动同模块 `components/`）；菜单接 menu.ts；API 统一走 `common/api/http.ts`（流式/Blob 用 `authFetch.ts`，FastAPI 错误解析走 `httpError.ts`）；列表页用 `useTableQuery`、新增/编辑对话框用 `useCrudDialog`、日期格式化用 `common/utils/datetime.ts`，**禁止在页面内重复实现这些公共能力**；对话框子组件约定 `defineExpose({ open })`、打开时重置防脏数据、props/emits 必须带类型。
+9. 依赖变更先 grep 复用，再确认无 500MB+ 大库，最后两端同步（pyproject / package.json）。
 
 ## 5. 关键文件索引
 
@@ -102,6 +104,9 @@ frontend/vue3/src/
 | `src/common/utils/db/session/impl/db_vector_lancedb.py` | LanceDB 封装（建表/检索/谓词删除/重向量化） |
 | `src/module_authorization/config/permissions.py` | sys/main 域权限声明 |
 | `src/module_rag/config/permissions.py` | rag/task 域权限声明 |
+| `src/module_main/controller/codegen.py` + `utils/codegen/` | 代码生成器（表元数据 → 后端七层 + 前端模块，Jinja2 模板渲染，AI 辅助可勾选，写盘限定 src/ 根内） |
+| `src/module_main/controller/i18n.py` | 多语言词条覆盖存储（前端启动时拉取热更新）+ 导入导出 |
+| `src/module_contact/utils/notification_hub.py` | 通知 SSE 进程内发布订阅（`GET /contact/notifications/stream`，断线由前端退避重连） |
 | `config.yaml` / `config.<APP_ENV>.yaml` | 基线层(零依赖默认, 单文件可启动; **入 git，严禁真实密钥，只留 to-set-real-key 占位**) / 环境层(数据库/模型种子/真实密钥, gitignored; **默认不存在，开发时自建 `config.dev.yaml`**) |
 | `alembic/`、`alembic.ini`、`src/common/utils/db/migration.py` | 数据库结构迁移(REQ-008)：首启 create_all+自动 stamp；演进 `alembic revision --autogenerate` + `upgrade head`(详见 deveops/运维手册/数据库运维.md) |
 | `doc/dev/permission.md` | 新模块权限接入指南 |
@@ -113,6 +118,13 @@ frontend/vue3/src/
 | `vite.config.ts` | **extendRoute 路由主题约定**（app/admin/standalone）+ 自动导入范围（common/app 组件全局注册，模块组件显式 import）+ 分包 |
 | `src/app/config/menu.ts` | 全局菜单/权限/主应用入口卡数据源 |
 | `src/common/api/http.ts` | fetch 封装（token 注入/401 单飞刷新重试） |
+| `src/common/components/pro-table/` | 通用增强表格 ProTable（列设置/密度/批量/行内编辑/手机卡片切换，偏好持久化于 localStorage） |
+| `src/common/components/AppErrorBoundary.vue` / `RouteSkeleton.vue` | 全局错误边界（可重试回退卡片）/ 路由懒加载骨架屏 |
+| `src/common/i18n/language.ts` + `src/common/i18n/keys/*.ts` | 三语词条（**新增功能词条写各自的 keys 文件，禁止多人同改 language.ts**）；启动时合并后端覆盖词条（`applyI18nOverrides`） |
+| `src/modules/ai/pages/model_config.vue` + `components/ModelTestDialog.vue` | 模型统一配置与测试：打开测试对话框即按模型类型自动跑预设用例并给出「模型可用/部分异常/不可用」结论；自定义测试承接原 AI 对话、OCR 识别、语音识别页面能力（含 OCR 示例图一键识别） |
+| `src/modules/ai/pages/assistant.vue` + `utils/assistantConfig.ts` | AI 助手配置（展示形态、悬浮位置、会话级自动弹开、默认助手/知识库/思考/联网、欢迎语与快捷提问），配置经 localStorage 单例即时同步到悬浮入口 |
+| `src/app/components/layout/AssistantFloat.vue` + `src/modules/rag/components/AssistantWidgetPanel.vue` | 悬浮 AI 助手（异步懒加载面板、每会话自动弹开一次、桌面 400px/手机全屏、Esc 关闭与焦点归还），与完整对话页共用 AG-UI 流式链路 |
+| `src/modules/rag/components/RagPageNav.vue` | AI 助手内页导航：AI 助手（对话）/ 知识库管理 / 智能体编排三个同级入口（rag 与 agent 页面均为无侧边栏 app 路由） |
 | `src/common/api/authFetch.ts` + `httpError.ts` | 原生 fetch 助手（流式/Blob 自动带令牌）+ FastAPI 错误解析共享层 |
 | `src/common/api/aguiStream.ts` | AG-UI 流式事件（RAG 问答） |
 | `src/common/composables/useTableQuery.ts` / `useCrudDialog.ts` | 分页列表查询 / 新增编辑对话框统一 composables（新 CRUD 页面必须复用，禁手写重复逻辑） |

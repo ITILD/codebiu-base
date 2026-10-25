@@ -15,6 +15,7 @@ from pydantic import SecretStr
 
 from module_ai.do.model_config import ModelConfig
 from module_ai.utils.llm.chat.think import ChatQwenWithReasoning
+from module_ai.utils.llm.image.interface import ImageGenerator
 from module_ai.utils.llm.rerank.interface import Rerank
 from module_ai.utils.llm.types import ModelType, ModelServerType
 
@@ -184,3 +185,30 @@ def build_rerank_model(config: ModelConfig) -> Rerank:
             score_max=score_max,
         )
     raise ValueError(f"服务方案 {config.server_type} 暂不支持重排序")
+
+
+def build_image_model(config: ModelConfig) -> ImageGenerator:
+    """按配置构建生图引擎(文生图/图生图)
+
+    OpenAI 兼容协议: POST {url}/images/generations(百炼 qwen-image 系列走兼容模式, 同协议)
+    extra 可配置默认参数: size/n/negative_prompt/seed/prompt_extend/watermark/timeout
+    """
+    extra = config.extra or {}
+    defaults = {
+        key: extra[key]
+        for key in ("size", "n", "negative_prompt", "seed", "prompt_extend", "watermark")
+        if extra.get(key) is not None
+    }
+    timeout = float(extra.get("timeout") or config.timeout or 180)
+    if config.server_type in (ModelServerType.OPENAI, ModelServerType.DASHSCOPE):
+        from module_ai.utils.llm.image.impl.openai import OpenAIImage
+
+        return OpenAIImage(
+            api_key=config.api_key,
+            model=config.model,
+            base_url=config.url
+            or "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            timeout=timeout,
+            defaults=defaults,
+        )
+    raise ValueError(f"服务方案 {config.server_type} 暂不支持图像生成")

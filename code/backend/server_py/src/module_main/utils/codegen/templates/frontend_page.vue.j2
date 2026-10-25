@@ -1,0 +1,227 @@
+<template>
+  <div p-4 md:p-6 w-full class="{{ module_name }}-page">
+    <InkPageHead title="{{ page_title | e }}" sub="{{ sub_title | e }}" seal="{{ seal }}" />
+
+    <div page-card>
+      <div mb-3 flex flex-wrap items-center gap-3>
+        <el-input
+          v-model="keyword"
+          placeholder="请输入关键字"
+          clearable
+          w-64
+          @keyup.enter="handleSearch"
+          @clear="handleSearch"
+        />
+        <el-button type="primary" @click="handleSearch">查询</el-button>
+        <div flex-1 />
+        <el-button type="primary" @click="openCreate">新增</el-button>
+      </div>
+
+      <el-table :data="tableData" v-loading="loading" stripe w-full>
+{% for field in list_columns %}
+{% if field.control == 'switch' %}
+        <el-table-column label="{{ field.label | e }}" width="{{ field.width }}" align="center">
+          <template #default="{ row }">
+            <el-tag
+              :type="row.{{ field.name }} ? 'success' : 'info'"
+              v-text="row.{{ field.name }} ? '是' : '否'"
+            />
+          </template>
+        </el-table-column>
+{% else %}
+        <el-table-column
+          prop="{{ field.name }}"
+          label="{{ field.label | e }}"
+          min-width="{{ field.width }}"
+          show-overflow-tooltip
+        />
+{% endif %}
+{% endfor %}
+        <el-table-column label="操作" width="140" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div mt-3 flex justify-end>
+        <el-pagination
+          v-model:current-page="pagination.page"
+          v-model:page-size="pagination.size"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          @current-change="fetchData"
+          @size-change="handleSearch"
+        />
+      </div>
+    </div>
+
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" destroy-on-close>
+{% if form_columns %}
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+{% for field in form_columns %}
+        <el-form-item label="{{ field.label | e }}" prop="{{ field.name }}">
+{% if field.control == 'textarea' %}
+          <el-input
+            v-model="form.{{ field.name }}"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入{{ field.label | e }}"
+          />
+{% elif field.control == 'number' %}
+          <el-input-number v-model="form.{{ field.name }}" w-full />
+{% elif field.control == 'switch' %}
+          <el-switch v-model="form.{{ field.name }}" />
+{% elif field.control == 'date' %}
+          <el-date-picker
+            v-model="form.{{ field.name }}"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="请选择日期"
+            w-full
+          />
+{% elif field.control == 'datetime' %}
+          <el-date-picker
+            v-model="form.{{ field.name }}"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            placeholder="请选择时间"
+            w-full
+          />
+{% else %}
+          <el-input v-model="form.{{ field.name }}" placeholder="请输入{{ field.label | e }}" />
+{% endif %}
+        </el-form-item>
+{% endfor %}
+      </el-form>
+{% else %}
+      <el-empty description="该表没有可编辑的业务字段" />
+{% endif %}
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleSubmit">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { useTableQuery } from '@/common/composables/useTableQuery'
+import {
+  create{{ class_name }},
+  delete{{ class_name }},
+  list{{ class_name }},
+  update{{ class_name }},
+} from '../api/{{ module_name }}'
+import type { {{ class_name }}, {{ class_name }}Create } from '../types/{{ module_name }}'
+
+/** 列表关键字(仅用于首列模糊检索) */
+const keyword = ref('')
+
+const { pagination, tableData, total, loading, fetchData, refreshAfterRemove } =
+  useTableQuery<{{ class_name }}>(async (params) => {
+    return list{{ class_name }}({
+      page: params.page,
+      size: params.size,
+      keyword: keyword.value || undefined,
+    })
+  })
+
+/** 搜索: 回到第一页并重新拉取 */
+const handleSearch = () => {
+  pagination.value.page = 1
+  fetchData()
+}
+
+/** 表单初始值 */
+const defaultForm = (): {{ class_name }}Create => ({
+{% for field in form_columns %}
+  {{ field.name }}: {{ field.form_default }},
+{% endfor %}
+})
+
+const dialogVisible = ref(false)
+const submitting = ref(false)
+const editingId = ref<{{ id_ts_type }} | null>(null)
+const formRef = ref<FormInstance>()
+const form = reactive<{{ class_name }}Create>(defaultForm())
+const dialogTitle = computed(() => (editingId.value === null ? '新增{{ page_title }}' : '编辑{{ page_title }}'))
+
+/** 表单校验规则 */
+const rules: FormRules = {
+{% for field in required_form_columns %}
+  {{ field.name }}: [{ required: true, message: '该字段为必填项', trigger: 'blur' }],
+{% endfor %}
+}
+
+/** 重置表单与编辑态 */
+const resetForm = () => {
+  formRef.value?.clearValidate()
+  editingId.value = null
+  Object.assign(form, defaultForm())
+}
+
+/** 打开新增弹窗 */
+const openCreate = () => {
+  resetForm()
+  dialogVisible.value = true
+}
+
+/** 打开编辑弹窗并回填数据 */
+const openEdit = (row: {{ class_name }}) => {
+  resetForm()
+  editingId.value = row.{{ pk_name }}
+  Object.assign(form, {
+{% for field in form_columns %}
+    {{ field.name }}: {{ field.edit_expr }},
+{% endfor %}
+  })
+  dialogVisible.value = true
+}
+
+/** 提交新增/更新 */
+const handleSubmit = async () => {
+  if (!formRef.value) return
+  try {
+    await formRef.value.validate()
+    submitting.value = true
+    if (editingId.value === null) {
+      await create{{ class_name }}(form)
+    } else {
+      await update{{ class_name }}(editingId.value, form)
+    }
+    ElMessage.success(editingId.value === null ? '创建成功' : '更新成功')
+    dialogVisible.value = false
+    await fetchData()
+  } catch (error) {
+    // 校验失败时 Element Plus 抛出 { errors } 结构, 无需额外提示
+    if (error && typeof error === 'object' && 'errors' in error) return
+    console.error('保存{{ page_title }}失败:', error)
+    ElMessage.error('保存失败, 请重试')
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** 删除记录 */
+const handleDelete = (row: {{ class_name }}) => {
+  ElMessageBox.confirm('确定删除该记录吗? 删除后不可恢复。', '删除确认', { type: 'warning' })
+    .then(async () => {
+      try {
+        await delete{{ class_name }}(row.{{ pk_name }})
+        ElMessage.success('删除成功')
+        await refreshAfterRemove()
+      } catch (error) {
+        console.error('删除{{ page_title }}失败:', error)
+        ElMessage.error('删除失败, 请重试')
+      }
+    })
+    .catch(() => {
+      // 用户取消删除
+    })
+}
+</script>

@@ -19,6 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 from module_ai.service.llm import LLMService
 from module_ai.utils.llm.types import RoleType, ModelType
 from module_ai.utils.llm.chat.trim import messages_trim_with_max_tokens
+from module_ai.utils.llm.limits import count_tokens
 from common.utils.fastapi_ex.exceptions import BusinessError
 from module_rag.config.checkpointer import get_checkpointer
 from module_rag.dao.rag_chat_prompt import (
@@ -386,7 +387,6 @@ class RagChatService:
             # 与 agent_chat 一致: 明确报错而非 AttributeError, 由 chat_stream 转 ERROR 事件
             raise ValueError("无可用对话模型, 请先在模型设置中绑定或由管理员配置默认公共模型")
 
-        messages = messages_trim_with_max_tokens(list(state["messages"]))
         knowledge_context_list: list[ProjectDocumentChunkSearchResponse] = state.get(
             "knowledge_context_list", []
         )
@@ -418,6 +418,13 @@ class RagChatService:
                 supplement_content=supplement_content
             )
 
+        # 按模型输入上限动态裁剪历史: 先扣除 system prompt 与输出预留, 再裁剪历史
+        input_tokens = await self.user_model_service.get_chat_input_tokens(user_id)
+        system_tokens = count_tokens(system_prompt)
+        history_budget = max(512, input_tokens - system_tokens - 512)
+        messages = messages_trim_with_max_tokens(
+            list(state["messages"]), max_tokens=history_budget
+        )
         full_response = await llm.ainvoke(
             [SystemMessage(content=system_prompt)] + messages
         )

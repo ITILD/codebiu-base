@@ -1,4 +1,4 @@
-"""LLM 工具包(文本类大模型: chat/embeddings/rerank)
+"""LLM 工具包(文本类大模型: chat/embeddings/rerank, 图像生成: image)
 
 按功能子包组织:
     - types:    全局类型枚举(ModelType/ModelServerType/RoleType/StreamStatus...)

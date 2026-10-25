@@ -157,12 +157,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
         if length and int(length) > MAX_BODY_BYTES:
             return "(请求体过大, 未采集)", None
         try:
+            # body() 会缓存请求体, 下游可重复读取; 不可替换 request._receive,
+            # 否则 SSE 等长连接的下游接收通道会拿到伪造的 http.request,
+            # 与断开监听并发 receive 时抛 "Unexpected message received" 中断流
             body = await request.body()
-            # 重注入接收通道(BaseHTTPMiddleware 下游共享同一 Request)
-            async def receive() -> dict:
-                return {"type": "http.request", "body": body, "more_body": False}
-
-            request._receive = receive
             if not body:
                 return None, None
             if "json" in content_type:

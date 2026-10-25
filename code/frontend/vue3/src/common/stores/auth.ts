@@ -4,8 +4,10 @@
  * 此处跨层引用该模块 api 属于唯一例外(会话基础设施依赖认证接口)。
  */
 import type { AuthResponse } from '@/modules/authorization/types/auth'
+import type { ThemeMode } from '@/common/types/theme'
 import { defineStore } from 'pinia'
-import { getUserPermissions } from '@/modules/authorization/api/auth'
+import { getMyPreference, getUserPermissions, updateMyPreference } from '@/modules/authorization/api/auth'
+import { SysSettingStore } from './sys'
 
 const createInitialAuthState = (): AuthResponse => ({
   tokens: {
@@ -73,12 +75,40 @@ const useAuthStore = defineStore(
       permState.value = createInitialPermState()
     }
 
+    /**
+     * 拉取并套用当前用户保存的样式配置(登录成功/会话恢复时调用)
+     * 后端未设置时返回 auto(跟随系统)
+     */
+    const applyUserTheme = async () => {
+      if (!authState.value.user.id) return
+      try {
+        const preference = await getMyPreference()
+        SysSettingStore().applyThemeValue(preference.theme)
+      } catch (error) {
+        console.error('拉取用户样式配置失败:', error)
+      }
+    }
+
+    /**
+     * 把当前主题偏好同步到后端(未登录时不请求; 请求失败仅告警, 本地已持久化)
+     */
+    const saveUserTheme = async (theme: ThemeMode) => {
+      if (!authState.value.user.id) return
+      try {
+        await updateMyPreference({ theme })
+      } catch (error) {
+        console.error('保存用户样式配置失败:', error)
+      }
+    }
+
     return {
       authState,
       permState,
       initAuthState,
       setAuthState,
       fetchPermissions,
+      applyUserTheme,
+      saveUserTheme,
       resetPermState,
     }
   },

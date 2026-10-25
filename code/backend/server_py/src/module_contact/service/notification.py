@@ -29,6 +29,7 @@ from module_contact.do.notification import (
 )
 from module_contact.service.email import EmailService, get_email_service
 from module_contact.service.sms import SmsService, get_sms_service
+from module_contact.utils.notification_hub import notification_hub
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,25 @@ class NotificationService:
             channels=channels,
         )
         message.id = await self.message_dao.add(message)
+
+        # SSE 实时推送: 落库成功后广播 notification + 最新未读数
+        # 推送失败只记日志, 绝不阻断后续邮件/短信与通知落库结果返回
+        try:
+            payload = ContactMessageResponse(
+                id=message.id,  # type: ignore[arg-type]
+                notify_type=message.notify_type,
+                title=message.title,
+                content=message.content,
+                channels=list(message.channels or []),
+                is_read=message.is_read,
+                created_at=message.created_at,  # type: ignore[arg-type]
+            ).model_dump(mode="json")
+            await notification_hub.publish(user_id, "notification", payload)
+            await notification_hub.publish(
+                user_id, "unread", {"count": await self.unread_count(user_id)}
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"通知实时推送失败(user_id={user_id}): {e}")
 
         if send_email and email:
             if not await self.email_service.send_notification(email, title, content or title):

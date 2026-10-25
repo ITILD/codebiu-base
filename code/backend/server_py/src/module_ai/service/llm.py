@@ -1,32 +1,59 @@
-"""LLM 服务: chat/embeddings 模型的统一调用入口
+"""LLM 服务: chat / embeddings / 视觉理解(VLM) / 生图 / 重排 的统一调用入口
 
 职责:
     - 按模型配置加载 LangChain 模型实例(解析/构建/缓存统一委托 ModelEntryService 统一入口)
-    - chat 对话(流式/非流式) 与 embeddings 调用
+    - chat 对话(流式/非流式)、embeddings 向量化、视觉理解(VisionCapability)、图像生成、重排序调用
     - 模型配置连通性/格式化能力校验
     - 实例缓存键含配置 updated_at, 配置变更自动重建(clear_cache 仅供管理接口手动刷新)
 """
+import asyncio
+import base64
 import logging
 import time
 from datetime import datetime, timezone
+from io import BytesIO
+from typing import Protocol, runtime_checkable
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableSequence
 
+from common.utils.fastapi_ex.exceptions import BusinessError
+from common.utils.media.file_format import base64_to_url
+from module_ai.do.capability import ChatMessage
 from module_ai.do.llm import (
     MODEL_CAPABILITIES,
     ChatRequest,
+    ImageGenerateRequest,
+    ImageGenerateResponse,
+    ImageResultItem,
+    ImageTestRequest,
+    InputLimitInfo,
     ModelCapabilityTestItem,
     ModelChatCheckFormat,
     ModelConfigCheckResponse,
     ModelCustomTestResponse,
     ModelTestResponse,
+    RerankRequest,
+    RerankResponse,
 )
 from module_ai.do.model_config import ModelConfig, ModelConfigCreateRequest
-from module_ai.service.model_config import ModelConfigService
-from module_ai.service.model_entry import get_model_entry
+from module_ai.service.model_config import (
+    ModelConfigService,
+    ModelEntryService,
+    ModelNotConfiguredError,
+    get_model_entry,
+)
+from module_ai.utils.llm.embed import embed_documents_concurrent
+from module_ai.utils.llm.limits import (
+    MAX_IMAGE_BYTES,
+    compress_reference_image,
+    count_tokens,
+    friendly_remote_error,
+    limit_info,
+    messages_tokens,
+)
 from module_ai.utils.llm.prompts.base import LLMPrompt
 from module_ai.utils.llm.types import ModelType
 
@@ -51,6 +78,82 @@ _RERANK_TEST_DOC_TEXTS = [
     "今天天气晴朗，适合外出散步和野餐",
 ]
 
+# 重排单文档文本截断上限(超长文档重排序意义有限且耗费 token)
+_MAX_DOC_CHARS = 4000
+
+# 生图能力测试用例: 文生图提示词 / 图生图编辑指令 / 输出尺寸(512x512 为模型最小档)
+_IMAGE_TEST_PROMPT = "一只戴墨镜的橘猫，扁平插画风格，纯色背景"
+_IMAGE_EDIT_PROMPT = "把图中方块的颜色改成蓝色，保持构图和背景不变"
+_IMAGE_TEST_SIZE = "512x512"
+
+
+# 默认图片理解提示词(版式文档图片内容提取, 覆盖图文/表格/图表三类常见场景)
+DEFAULT_IMAGE_PROMPT = (
+    "请提取图片中的全部信息, 保留原文语言与层级: 纯文字直接输出文本; "
+    "表格输出 markdown 表格; 图表/流程图输出 Mermaid 代码; 不要添加解释性说明。"
+)
+
+
+def _encode_image(image: bytes) -> str:
+    """图片字节 -> JPEG data URL(统一压缩到合理尺寸, 降低视觉模型输入开销)"""
+    from PIL import Image
+
+    with Image.open(BytesIO(image)) as img:
+        rgb = img.convert("RGB")
+        rgb.thumbnail((1600, 1600))
+        buf = BytesIO()
+        rgb.save(buf, format="JPEG", quality=85)
+    return base64_to_url(base64.b64encode(buf.getvalue()).decode("ascii"))
+
+
+def _build_test_reference_image() -> str:
+    """生成图生图能力测试参考图(512x512 红底黄方块 PNG), 返回 data URL"""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (512, 512), (220, 60, 60))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((156, 156, 356, 356), fill=(250, 220, 60))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return base64_to_url(base64.b64encode(buf.getvalue()).decode("ascii"))
+
+
+@runtime_checkable
+class TextGenCapability(Protocol):
+    """对话生成能力契约(含结构化输出场景)"""
+
+    async def chat(
+        self, messages: list[ChatMessage], *, user_id: str | None = None
+    ) -> str:
+        """一次对话补全, 返回纯文本"""
+        ...
+
+
+@runtime_checkable
+class VisionCapability(Protocol):
+    """视觉理解能力契约(VLM): 面向版式文档中抽出的单张图片做内容提取"""
+
+    async def describe_image(
+        self,
+        image: bytes,
+        *,
+        prompt: str | None = None,
+        user_id: str | None = None,
+    ) -> str:
+        """按提示词理解单张图片, 返回文本/表格/Mermaid 等结构化文本"""
+        ...
+
+
+@runtime_checkable
+class EmbeddingCapability(Protocol):
+    """向量化能力契约: 文本批量转向量"""
+
+    async def embed(
+        self, texts: list[str], *, user_id: str | None = None
+    ) -> list[list[float]]:
+        """批量向量化, 返回与输入同序的向量列表"""
+        ...
+
 
 class LLMService:
     """
@@ -63,15 +166,19 @@ class LLMService:
         self,
         model_config_service: ModelConfigService | None = None,
         llm_prompt: LLMPrompt | None = None,
+        model_entry: ModelEntryService | None = None,
     ):
         """
         初始化LLM服务
 
         Args:
             model_config_service: 模型配置服务实例，如果不提供则创建默认实例
+            llm_prompt: 提示词模板实例，如果不提供则创建默认实例
+            model_entry: 统一模型入口实例(chat/embeddings/VLM 共用同一份解析与缓存)
         """
         self.model_config_service = model_config_service or ModelConfigService()
         self.llm_prompt = llm_prompt or LLMPrompt()
+        self._entry = model_entry or get_model_entry()
 
     async def check_config(
         self, model_config_create_request: ModelConfigCreateRequest
@@ -212,6 +319,8 @@ class LLMService:
                 ok, detail, suggest = await self._test_rerank(config)
             elif capability in ("asr", "tts"):
                 ok, detail = await self._test_voice(capability, config)
+            elif capability in ("image", "image_edit"):
+                ok, detail = await self._test_image(capability, config)
         except Exception as e:
             logger.warning(f"能力测试失败 [{capability}]: {e}")
             error = str(e)[:500]
@@ -382,6 +491,21 @@ class LLMService:
         ok = bool(pcm) and len(pcm) > 0
         return ok, f"合成 {len(pcm)} 字节音频 @ {sr}Hz"
 
+    async def _test_image(self, capability: str, config) -> tuple[bool, str]:
+        """生图能力测试(image 文生图 / image_edit 图生图)
+
+        通过标准 = 引擎返回至少一张可用图片; 统一使用 512*512 最小档控制耗时与费用,
+        图生图以程序生成的"红底黄方块"作为参考图。
+        """
+        # 统一入口按配置直接构建生图引擎(不走解析/缓存)
+        engine = get_model_entry().build(config)
+        image = _build_test_reference_image() if capability == "image_edit" else None
+        prompt = _IMAGE_EDIT_PROMPT if capability == "image_edit" else _IMAGE_TEST_PROMPT
+        results = await engine.agenerate(prompt, image=image, size=_IMAGE_TEST_SIZE, n=1)
+        if not results:
+            return False, "模型未返回图片"
+        return True, f"生成 {len(results)} 张, 首张: {str(results[0].get('url', ''))[:80]}"
+
     async def test_and_persist(
         self, model_id: str, capability: str | None = None
     ) -> ModelTestResponse:
@@ -491,7 +615,7 @@ class LLMService:
                 resp.detail = f"返回 {len(resp.results)} 条排序结果"
             else:
                 raise ValueError(
-                    f"{type_key} 类型请使用对应的单独测试(语音/OCR 走上传接口)"
+                    f"{type_key} 类型请使用对应的单独测试(语音/OCR 走上传接口, 生图走 /test-image)"
                 )
             resp.ok = True
         except Exception as e:
@@ -589,8 +713,34 @@ class LLMService:
             self._model_type_key(config), model_id=config.id
         )
 
+    async def input_token_limit(self, model_id: str | None = None) -> tuple[int, str]:
+        """查询对话模型的输入 token 上限(前端展示"已输入/限制"用)
+
+        :param model_id: 模型配置ID(缺省取全局默认 chat 配置)
+        :return: (上限 token 数, 模型名); 无可用配置时返回 (0, "")
+        """
+        try:
+            config = await self._entry.resolve_config(
+                ModelType.CHAT.value, model_id=model_id
+            )
+        except Exception as e:
+            logger.warning(f"查询输入 token 上限失败: {e}")
+            return 0, ""
+        return int(config.input_tokens or 0), str(getattr(config, "model", "") or "")
+
     async def chat_completion(self, request: ChatRequest):
         """聊天完成接口"""
+        # 输入 token 上限前置校验: 超限直接给出可读提示, 避免上游截断/400
+        # (model_id 允许是模型标识名, 非配置ID时跳过预检交由 get_llm 处理)
+        config = await self.model_config_service.get(request.model_id)
+        limit = int(config.input_tokens or 0) if config else 0
+        if limit:
+            used = messages_tokens(list(request.messages))
+            if used > limit:
+                raise BusinessError(
+                    f"输入超出模型上下文限制: 已输入 {used} / 上限 {limit} tokens, "
+                    "请精简内容或清空部分历史对话后重试"
+                )
         # 获取LLM处理链
         llm_chain: BaseChatModel = await self.get_llm(request.model_id, streaming=request.streaming)
         # request.messages 是langchain类型
@@ -612,3 +762,229 @@ class LLMService:
             model_id: 模型配置ID或模型标识名称，如果为None则清除所有缓存
         """
         get_model_entry().clear_cache(model_id)
+
+    # ---------- 视觉理解(VisionCapability) ----------
+
+    async def describe_image(
+        self, image: bytes, *, prompt: str | None = None, user_id: str | None = None
+    ) -> str:
+        """按提示词理解单张图片(字节输入), 失败返回空串
+
+        :param image: 图片原始字节(JPG/PNG/WEBP 等常见格式)
+        :param prompt: 提示词(None 时使用默认图片理解提示词)
+        :param user_id: 当前用户ID(绑定模型优先)
+        :return: 文本/表格/Mermaid 等结构化文本
+        """
+        if not image:
+            return ""
+        try:
+            image_url = await asyncio.to_thread(_encode_image, image)
+            llm = await self._entry.get_engine("chat", user_id=user_id, streaming=False)
+            messages = [
+                SystemMessage(content=prompt or DEFAULT_IMAGE_PROMPT),
+                HumanMessage(
+                    content=[{"type": "image_url", "image_url": {"url": image_url}}]
+                ),
+            ]
+            return self._content_text(await llm.ainvoke(messages))
+        except Exception as e:
+            logger.error("视觉理解失败: %s", e)
+            return ""
+
+    # ---------- 向量化(EmbeddingCapability) ----------
+
+    async def embed(
+        self, texts: list[str], *, user_id: str | None = None
+    ) -> list[list[float]]:
+        """批量向量化, 返回与输入同序的向量列表
+
+        :param texts: 待向量化文本列表
+        :param user_id: 当前用户ID(绑定模型优先)
+        """
+        if not texts:
+            return []
+        engine = await self._entry.get_engine("embeddings", user_id=user_id)
+        return await embed_documents_concurrent(engine, texts)
+
+    # ---------- 图像生成(文生图/图生图) ----------
+
+    async def generate_image(
+        self, request: ImageGenerateRequest
+    ) -> ImageGenerateResponse:
+        """按模型配置生成图像: 不传 image 为文生图, 传 image 为图生图(图像编辑)
+
+        :param request: 生图请求(提示词/参考图/尺寸/张数等)
+        :raises ValueError: 指定的模型配置不存在
+        :raises BusinessError: 未配置 image 模型或服务方案不支持
+        """
+        prompt = request.prompt.strip()
+        if not prompt:
+            raise ValueError("请输入提示词")
+        config = await self._image_config(request.model_id)
+        # 参考图超限自动缩放/压缩(百炼单图 10MB 上限, 超出会直接 400)
+        reference, input_limit = self._prepare_reference_image(request.image)
+        try:
+            engine = get_model_entry().build(config)
+        except ValueError as e:
+            raise BusinessError(str(e))
+        start = time.perf_counter()
+        try:
+            images = await engine.agenerate(
+                prompt,
+                image=reference,
+                size=request.size,
+                n=request.n,
+                negative_prompt=request.negative_prompt,
+                seed=request.seed,
+                prompt_extend=request.prompt_extend,
+                watermark=request.watermark,
+            )
+        except RuntimeError as e:
+            raise BusinessError(friendly_remote_error(str(e)))
+        return ImageGenerateResponse(
+            model_id=config.id,
+            model=getattr(config, "model", "") or "",
+            capability="image_edit" if reference else "image",
+            ok=True,
+            images=[ImageResultItem(**item) for item in images],
+            elapsed=round(time.perf_counter() - start, 2),
+            input_limit=input_limit,
+        )
+
+    @staticmethod
+    def _prepare_reference_image(
+        image: str | None,
+    ) -> tuple[str | None, InputLimitInfo | None]:
+        """参考图体积治理: 超 10MB 自动压缩, 返回可用参考图与体积度量
+
+        :param image: 原始参考图(data URL / base64 / http URL / None)
+        :return: (处理后的参考图, 体积度量; 无参考图时度量为 None)
+        :raises BusinessError: 参考图无法解析
+        """
+        if not image:
+            return None, None
+        try:
+            compressed, meta = compress_reference_image(image)
+        except ValueError as e:
+            raise BusinessError(str(e))
+        return compressed, InputLimitInfo(
+            **limit_info(meta["bytes"], MAX_IMAGE_BYTES, "bytes")
+        )
+
+    async def image_test(self, request: ImageTestRequest) -> ImageGenerateResponse:
+        """生图单独测试(模型配置页): 用自定义提示词/参考图生成并返回图片
+
+        失败以 ok=False + error 返回, 便于前端展示失败原因。
+
+        :raises ValueError: 模型配置不存在
+        """
+        prompt = request.prompt.strip()
+        if not prompt:
+            raise ValueError("请输入提示词")
+        config = await self.model_config_service.get(request.model_id)
+        if not config:
+            raise ValueError(f"模型配置不存在: {request.model_id}")
+        resp = ImageGenerateResponse(
+            model_id=request.model_id,
+            model=getattr(config, "model", "") or "",
+            capability="image_edit" if request.image else "image",
+        )
+        start = time.perf_counter()
+        try:
+            # 参考图超限自动压缩, 避免"File size exceeds 10MB"直接失败
+            reference, resp.input_limit = self._prepare_reference_image(request.image)
+            resp.capability = "image_edit" if reference else "image"
+            engine = get_model_entry().build(config)
+            images = await engine.agenerate(
+                prompt,
+                image=reference,
+                size=request.size,
+                n=request.n,
+            )
+            resp.images = [ImageResultItem(**item) for item in images]
+            resp.ok = True
+        except Exception as e:
+            logger.warning(f"生图单独测试失败 [{request.model_id}]: {e}")
+            resp.error = friendly_remote_error(str(e))[:500]
+        resp.elapsed = round(time.perf_counter() - start, 2)
+        return resp
+
+    async def _image_config(self, model_id: str | None) -> ModelConfig:
+        """解析生图模型配置: 指定ID精确取用, 缺省按 用户绑定 → 全局默认 解析
+
+        :raises ValueError: 指定的模型配置不存在
+        :raises BusinessError: 未配置 image 模型
+        """
+        if model_id:
+            config = await self.model_config_service.get(model_id)
+            if not config:
+                raise ValueError(f"模型配置不存在: {model_id}")
+            return config
+        try:
+            return await self._entry.resolve_config(ModelType.IMAGE.value)
+        except ModelNotConfiguredError as e:
+            raise BusinessError(str(e))
+
+    # ---------- 重排序(Rerank) ----------
+
+    async def get_reranker(self, model_id: str | None = None):
+        """获取重排序引擎(指定 model_id 或按 用户绑定/全局配置 自动选择)
+
+        :param model_id: 模型配置ID(None 时自动选择)
+        :raises BusinessError: 配置类型不匹配 / 未配置 rerank 模型 / 方案不支持
+        """
+        try:
+            # 构建失败(ValueError: 方案不支持/分数范围非法)与未配置统一转 BusinessError
+            return await self._entry.get_engine("rerank", model_id=model_id)
+        except ModelNotConfiguredError as e:
+            raise BusinessError(str(e))
+        except ValueError as e:
+            raise BusinessError(str(e))
+
+    async def rerank(self, request: RerankRequest) -> RerankResponse:
+        """执行重排序: 返回按相关性降序的 [{node, relevance_score}] 列表
+
+        :param request: 重排序请求(query + documents)
+        """
+        start = time.time()
+        reranker = await self.get_reranker(request.model_id)
+        # 提取待排序文本(字典按 sort_key 取值, 超长截断)
+        docs = request.documents
+        texts = [
+            (doc if isinstance(doc, str) else str(doc.get(request.sort_key, "")))[
+                :_MAX_DOC_CHARS
+            ]
+            for doc in docs
+        ]
+        if not texts:
+            return RerankResponse(results=[], elapsed=round(time.time() - start, 3))
+        ranked = await reranker.arerank(request.query, texts, request.top_n)
+        # 查询文本 token 度量(相对 rerank 配置的输入上限, 便于前端展示用量)
+        query_limit = None
+        try:
+            config = await self._entry.resolve_config(
+                ModelType.RERANK.value, model_id=request.model_id
+            )
+            query_limit = InputLimitInfo(
+                **limit_info(
+                    count_tokens(request.query), int(config.input_tokens or 0), "token"
+                )
+            )
+        except Exception as e:
+            logger.debug(f"rerank 输入上限解析失败(不影响排序): {e}")
+        # 按返回索引映射回原文档
+        results = [
+            {
+                "node": docs[item["index"]],
+                "relevance_score": float(
+                    item.get("relevance_score", item.get("score", 0.0))
+                ),
+            }
+            for item in ranked
+            if isinstance(item, dict) and item.get("index") is not None
+        ]
+        return RerankResponse(
+            results=results,
+            elapsed=round(time.time() - start, 3),
+            input_limit=query_limit,
+        )

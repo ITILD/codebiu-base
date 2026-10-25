@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from module_ai.do.voice import VoiceEngine, resolve_engine
-from module_ai.service.model_entry import ModelEntryService
+from module_ai.service.model_config import ModelEntryService
 from module_ai.utils.llm.types import ModelServerType, ModelType, server_types_for
 from module_ai.utils.ocr.dashscope import DashscopeOCR
 from module_ai.utils.voice.asr.dashscope import DashscopeASR

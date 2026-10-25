@@ -8,14 +8,16 @@ from common.config.server import app
 # 主模块
 from module_main.controller import static as main_static, status, table, dict_type, dict_item
 from module_main.controller import sys_config as main_sys_config, audit_log as main_audit_log
+# # 研发效能: 代码生成器(表元数据→后端七层/前端模块) + 多语言词条覆盖(导入即注册路由与建表钩子)
+from module_main.controller import codegen as main_codegen, i18n as main_i18n
 # # 系统管理域权限声明(通用动态配置页, main 域内节点在 module_authorization 声明)
 # # 文件模块(网络文件系统: 虚拟文件树 + local/s3 存储无缝切换)
 from module_file.controller import filesystem
 from module_authorization.controller import token, casbin_rule, permission, role, user,auth,dept
 # # 业务模块
 from module_template.controller import static,template,template_ex,template_async_learn
-# # AI 模块(模型配置/LLM 对话/重排/OCR/语音 ASR-TTS)
-from module_ai.controller import static as ai_static,model_config,llm,rerank,voice,ocr
+# # AI 模块(模型配置/LLM 对话-嵌入-重排-生图/OCR/语音 ASR-TTS)
+from module_ai.controller import static as ai_static,model_config,llm,voice,ocr
 # # 知识库模块(项目/文档/成员/部门授权/问答)
 from module_rag.controller import (
     conversation,

@@ -39,12 +39,12 @@
           :class="isCollapse ? 'px-0' : 'px-2'"
         >
           <template v-for="item in visibleMenuItems" :key="item.index">
-            <el-menu-item v-if="!item.children" :index="item.index">
+            <el-menu-item v-if="!item.children" :index="item.index" :title="item.title">
               <el-icon><component :is="item.icon" /></el-icon>
               <template #title>{{ item.title }}</template>
             </el-menu-item>
 
-            <el-sub-menu v-else :index="item.index">
+            <el-sub-menu v-else :index="item.index" :title="item.title">
               <template #title>
                 <el-icon><component :is="item.icon" /></el-icon>
                 <span>{{ item.title }}</span>
@@ -53,6 +53,7 @@
                 v-for="child in item.children"
                 :key="child.index"
                 :index="child.index"
+                :title="child.title"
               >
                 {{ child.title }}
               </el-menu-item>
@@ -68,12 +69,12 @@
     </div>
   </el-aside>
 
-  <!-- 移动端: 抽屉式侧边栏 -->
+  <!-- 移动端: 抽屉式侧边栏(宽度随屏宽收缩, 窄屏不顶满; 底部留出刘海屏安全区) -->
   <el-drawer
     v-model="sysSettingStore.sysStyle.isSidebarDrawerOpen"
     :title="TITLE"
     direction="ltr"
-    size="240px"
+    size="min(86vw, 280px)"
     class="sidebar-drawer-note"
   >
     <el-menu
@@ -84,17 +85,17 @@
       @select="sysSettingStore.sysStyle.isSidebarDrawerOpen = false"
     >
       <template v-for="item in visibleMenuItems" :key="item.index">
-        <el-menu-item v-if="!item.children" :index="item.index">
+        <el-menu-item v-if="!item.children" :index="item.index" :title="item.title">
           <el-icon><component :is="item.icon" /></el-icon>
           <template #title>{{ item.title }}</template>
         </el-menu-item>
 
-        <el-sub-menu v-else :index="item.index">
+        <el-sub-menu v-else :index="item.index" :title="item.title">
           <template #title>
             <el-icon><component :is="item.icon" /></el-icon>
             <span>{{ item.title }}</span>
           </template>
-          <el-menu-item v-for="child in item.children" :key="child.index" :index="child.index">
+          <el-menu-item v-for="child in item.children" :key="child.index" :index="child.index" :title="child.title">
             {{ child.title }}
           </el-menu-item>
         </el-sub-menu>
@@ -155,6 +156,16 @@ watch(
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* 长菜单名(多语言切换后可能超宽): 单行省略, 全文由 title 属性提示 */
+.sidebar-note :deep(.el-menu-item > span),
+.sidebar-note :deep(.el-sub-menu__title > span),
+.sidebar-drawer-note :deep(.el-menu-item > span),
+.sidebar-drawer-note :deep(.el-sub-menu__title > span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 悬停: 淡绿底色 */
 .sidebar-note :deep(.el-menu-item:hover),
 .sidebar-note :deep(.el-sub-menu__title:hover) {
@@ -173,5 +184,23 @@ watch(
 .sidebar-note :deep(.el-menu--collapse .el-sub-menu__title) {
   padding-inline: 0;
   justify-content: center;
+}
+
+/* 移动抽屉: 触控目标放大到 44px, 并预留刘海屏底部安全区(--note-safe-b) */
+.sidebar-drawer-note :deep(.el-drawer__body) {
+  padding-bottom: calc(12px + var(--note-safe-b));
+}
+
+.sidebar-drawer-note :deep(.el-menu-item),
+.sidebar-drawer-note :deep(.el-sub-menu__title) {
+  height: 44px;
+  line-height: 44px;
+  border-radius: 8px;
+}
+
+.sidebar-drawer-note :deep(.el-menu-item.is-active) {
+  background-color: rgba(107, 158, 120, 0.14);
+  color: var(--el-color-primary);
+  font-weight: 500;
 }
 </style>

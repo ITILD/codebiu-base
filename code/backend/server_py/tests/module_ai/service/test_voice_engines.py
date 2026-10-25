@@ -20,7 +20,7 @@ import pytest
 
 import module_ai.config.server as ai_server_mod
 from module_ai.do.voice import VoiceEngine
-from module_ai.service.model_entry import ModelEntryService, ModelNotConfiguredError
+from module_ai.service.model_config import ModelEntryService, ModelNotConfiguredError
 from module_ai.service.voice import VoiceService
 from module_ai.utils.voice.asr.dashscope import DashscopeASR
 from module_ai.utils.voice.asr.online import OnlineASR, PseudoStreamSession, _is_realtime_model
@@ -101,7 +101,7 @@ class _FakeConfig:
         self.server_type = server_type
         self.model = model
         self.extra = extra or {}
-        # 顶层字段回填所需(service.model_entry.flatten_conf 读取)
+        # 顶层字段回填所需(service.model_config.flatten_conf 读取)
         self.api_key = api_key
         self.url = url
         self.timeout = timeout

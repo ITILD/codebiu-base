@@ -6,7 +6,7 @@
       <el-select
         v-model="sysSettingStore.sysStyle.theme.themeValue"
         :placeholder="$t('theme')"
-        @change="sysSettingStore.changeIsDarkByThemeValue"
+        @change="handleThemeChange"
       >
         <el-option
           v-for="option in themeOptions"
@@ -28,8 +28,11 @@
 
 <script setup lang="ts">
 import { SysSettingStore } from '@/common/stores/sys'
+import { useAuthStore } from '@/common/stores/auth'
+import type { ThemeMode } from '@/common/types/theme'
 import { i18n } from '@/common/i18n/language'
 const sysSettingStore = SysSettingStore()
+const authStore = useAuthStore()
 // 悬浮工具开关(语义取反: 开关=显示, store 存"隐藏")
 const showFloatTools = computed({
   get: () => !sysSettingStore.floatToolsHidden,
@@ -42,6 +45,12 @@ const themeOptions = computed(() => [
   { value: 'dark', label: i18n.global.t('dark') },
   { value: 'auto', label: i18n.global.t('autoSys') }
 ])
+
+// 切换主题: 立即套用并持久化本地, 登录用户同时同步到后端用户配置
+const handleThemeChange = (value: ThemeMode) => {
+  sysSettingStore.applyThemeValue(value)
+  authStore.saveUserTheme(value)
+}
 
 /////////////////////////////////////////////////////////todo/////////////////////////////////////////////////////////
 </script>

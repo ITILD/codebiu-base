@@ -60,6 +60,32 @@ SYS_DEFINE = ModulePermissionDefine(
             order_num=6,
             children=[PermNode(name="查询", code="sys:audit:read", menu_type="F")],
         ),
+        PermNode(
+            # 代码生成器(研发效能): 从表元数据生成七层+前端代码, 仅管理员可用
+            name="代码生成器",
+            code="sys:codegen",
+            menu_type="C",
+            path="/main/codegen",
+            icon="MagicStick",
+            order_num=7,
+            children=[
+                PermNode(name="预览", code="sys:codegen:read", menu_type="F", order_num=1),
+                PermNode(name="生成", code="sys:codegen:create", menu_type="F", order_num=2),
+            ],
+        ),
+        PermNode(
+            # 多语言词条后台管理: 覆盖词条热更新 + 缺失检测, 仅管理员可用
+            name="多语言词条",
+            code="sys:i18n",
+            menu_type="C",
+            path="/main/i18n",
+            icon="ChatLineSquare",
+            order_num=8,
+            children=[
+                PermNode(name="查看", code="sys:i18n:read", menu_type="F", order_num=1),
+                PermNode(name="编辑", code="sys:i18n:edit", menu_type="F", order_num=2),
+            ],
+        ),
     ],
     # 新用户不自动获得系统管理权限,需管理员分配
     default_policies=[],

@@ -102,8 +102,9 @@ export default defineConfig({
     },
   },
   rules: [
-    // note 色系 + /透明度: var() 颜色无法直接叠 alpha, 用 color-mix 显式混入透明度。
-    // 命中此规则时不再走 theme 色规则(值一致, 但此处额外支持了 /NN 修饰)
+    // note 色系 + /透明度: 走 base.css 的通道三元组派生 rgb(var(--note-x-rgb) / N%)。
+    // 不用 color-mix —— 它的 computed 值会被序列化成 color(srgb …), html2canvas 1.4.x
+    // 无法解析, 会让整页截图与 PDF 导出直接抛错(见 base.css :root 注释)
     [/^(bg|text|border)-note(?:-([\w-]+))?(?:\/(\d{1,3}))?$/, ([, prop, name, alpha]) => {
       const propMap = { bg: 'background-color', text: 'color', border: 'border-color' }
       const varName = name === 'deep'
@@ -114,7 +115,7 @@ export default defineConfig({
             ? `--note-${name}`
             : '--note-border'
       const color = alpha
-        ? `color-mix(in srgb, var(${varName}) ${alpha}%, transparent)`
+        ? `rgb(var(${varName}-rgb) / ${alpha}%)`
         : `var(${varName})`
       return { [propMap[prop]]: color }
     }] as any,

@@ -1,0 +1,54 @@
+// src/modules/{{ module_name }}/api/{{ module_name }}.ts
+// {{ page_title }} 接口封装(代码生成器生成)
+
+import { http_base_server } from '@/common/api/http'
+import type { PaginationParams, PaginationResponse } from '@/common/types/common'
+import type {
+  {{ class_name }},
+  {{ class_name }}Create,
+  {{ class_name }}ListParams,
+  {{ class_name }}Update,
+} from '../types/{{ module_name }}'
+
+export type {{ class_name }}QueryParams = PaginationParams & {{ class_name }}ListParams
+
+/**
+ * 分页查询{{ page_title }}列表
+ * @param params 分页与关键字参数
+ */
+export const list{{ class_name }} = (params: {{ class_name }}QueryParams) => {
+  return http_base_server.get<PaginationResponse<{{ class_name }}>>('{{ route_prefix }}/list', { params })
+}
+
+/**
+ * 获取单条{{ page_title }}
+ * @param id 主键值
+ */
+export const get{{ class_name }} = (id: {{ id_ts_type }}) => {
+  return http_base_server.get<{{ class_name }}>(`{{ route_prefix }}/${id}`)
+}
+
+/**
+ * 创建{{ page_title }}
+ * @param data 创建数据
+ */
+export const create{{ class_name }} = (data: {{ class_name }}Create) => {
+  return http_base_server.post<{{ id_ts_type }}>('{{ route_prefix }}', data)
+}
+
+/**
+ * 更新{{ page_title }}
+ * @param id 主键值
+ * @param data 更新数据
+ */
+export const update{{ class_name }} = (id: {{ id_ts_type }}, data: {{ class_name }}Update) => {
+  return http_base_server.put<void>(`{{ route_prefix }}/${id}`, data)
+}
+
+/**
+ * 删除{{ page_title }}
+ * @param id 主键值
+ */
+export const delete{{ class_name }} = (id: {{ id_ts_type }}) => {
+  return http_base_server.delete<void>(`{{ route_prefix }}/${id}`)
+}

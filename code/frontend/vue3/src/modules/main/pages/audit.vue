@@ -14,8 +14,8 @@
           v-model="queryParams"
           :fields="searchFields"
           :collapse-count="3"
-          @search="handleSearch"
-          @reset="handleSearch"
+          @search="handleSearchWithRange"
+          @reset="handleSearchWithRange"
         />
         <el-date-picker
           v-model="timeRange"
@@ -24,68 +24,82 @@
           start-placeholder="开始时间"
           end-placeholder="结束时间"
           size="default"
+          aria-label="时间范围"
           class="max-w-[340px]"
         />
-        <el-button type="primary" @click="handleSearch">查询</el-button>
+        <el-button type="primary" @click="handleSearchWithRange">查询</el-button>
       </div>
 
-      <!-- 审计表格 -->
-      <el-table :data="logList" v-loading="loading" stripe size="small">
-        <el-table-column label="时间" min-width="150">
-          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作人" min-width="110" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.username">{{ row.username }}</span>
-            <el-tag v-else size="small" type="info">匿名</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="方法" min-width="76" align="center">
-          <template #default="{ row }">
-            <el-tag :type="methodTagType(row.method)" size="small">{{ row.method }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="path" label="路径" min-width="200" show-overflow-tooltip />
-        <el-table-column label="状态" min-width="76" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.status_code < 400 ? 'success' : 'danger'" size="small">
-              {{ row.status_code }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="耗时" min-width="86" align="right">
-          <template #default="{ row }">{{ row.duration_ms }}ms</template>
-        </el-table-column>
-        <el-table-column prop="ip" label="IP" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="params_digest" label="参数摘要" min-width="220" show-overflow-tooltip />
-        <!-- 详情展开: 参数摘要/User-Agent 全文 -->
-        <el-table-column type="expand" min-width="40">
-          <template #default="{ row }">
-            <div px-4 py-2 text-sm class="break-all">
+      <!-- 审计列表: ProTable 统一承载列设置/密度/移动端卡片(只读页, 不开批量与行内编辑) -->
+      <ProTable
+        :columns="columns"
+        :data="tableData"
+        :loading="loading"
+        table-key="main-audit"
+        card-title-prop="path"
+        :skeleton-rows="4"
+      >
+        <template #toolbar>
+          <span text-sm text-note-sub>{{ t('pt_total', { n: total }) }}</span>
+        </template>
+
+        <!-- 操作人: 未登录请求展示"匿名"标签 -->
+        <template #col-username="{ row }">
+          <span v-if="row.username">{{ row.username }}</span>
+          <el-tag v-else size="small" type="info">匿名</el-tag>
+        </template>
+
+        <!-- 方法: 语义色标签 -->
+        <template #col-method="{ row }">
+          <el-tag :type="methodTagType(row.method)" size="small">{{ row.method }}</el-tag>
+        </template>
+
+        <!-- 状态码: <400 成功, 否则失败 -->
+        <template #col-status_code="{ row }">
+          <el-tag :type="row.status_code < 400 ? 'success' : 'danger'" size="small">
+            {{ row.status_code }}
+          </el-tag>
+        </template>
+
+        <!-- 详情: 参数摘要/User-Agent 全文(替代原展开行) -->
+        <template #row-actions="{ row }">
+          <el-popover placement="left" trigger="click" :width="320">
+            <template #reference>
+              <el-button link type="primary" size="small" :aria-label="`查看详情 ${row.path}`">
+                详情
+              </el-button>
+            </template>
+            <div class="max-h-[40vh] overflow-y-auto text-xs break-all">
               <p mb-1><b>参数摘要：</b>{{ row.params_digest ?? '—' }}</p>
-              <p text-note><b>User-Agent：</b>{{ row.user_agent ?? '—' }}</p>
+              <p text-note-sub><b>User-Agent：</b>{{ row.user_agent ?? '—' }}</p>
             </div>
-          </template>
-        </el-table-column>
-      </el-table>
+          </el-popover>
+        </template>
+      </ProTable>
 
       <!-- 分页 -->
       <div mt-3 flex justify-center>
         <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size"
           :total="total" layout="total, prev, pager, next" small
-          @size-change="fetchLogs" @current-change="fetchLogs" />
+          @size-change="fetchData" @current-change="fetchData" />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
 import { listAuditLogs } from '../api/audit'
 import type { AuditLog } from '../types/audit'
 import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
+import ProTable from '@/common/components/pro-table/ProTable.vue'
+import type { ProTableColumn } from '@/common/components/pro-table/useProTablePrefs'
+import { useTableQuery } from '@/common/composables/useTableQuery'
 import { formatDateTime } from '@/common/utils/datetime'
+import { i18n } from '@/common/i18n/language'
 import type { PaginationParams } from '@/common/types/common'
+
+// 系统三语(中/英/日): 词条统一经 i18n.global.t 获取
+const { t } = i18n.global
 
 // 过滤字段(路径关键字/用户名/方法)
 const searchFields: SearchField[] = [
@@ -100,18 +114,26 @@ const searchFields: SearchField[] = [
     ]
   },
 ]
-const queryParams = ref<Record<string, unknown>>({
-  keyword: '',
-  username: '',
-  method: undefined,
-})
 // 时间范围(Date 对象, 提交时转 ISO)
 const timeRange = ref<[Date, Date] | null>(null)
 
-const loading = ref(false)
-const logList = ref<AuditLog[]>([])
-const total = ref(0)
-const pagination = ref<PaginationParams>({ page: 1, size: 20 })
+// 列配置: 只读列表, 语义列(操作人/方法/状态)走动态插槽, 时间/耗时走 formatter
+const columns: ProTableColumn[] = [
+  {
+    prop: 'created_at', label: '时间', minWidth: 150,
+    formatter: (row) => formatDateTime(row.created_at as string),
+  },
+  { prop: 'username', label: '操作人', minWidth: 110, slot: true },
+  { prop: 'method', label: '方法', minWidth: 76, align: 'center', slot: true },
+  { prop: 'path', label: '路径', minWidth: 200, showOverLimit: true },
+  { prop: 'status_code', label: '状态', minWidth: 76, align: 'center', slot: true },
+  {
+    prop: 'duration_ms', label: '耗时', minWidth: 86, align: 'right',
+    formatter: (row) => (row.duration_ms == null ? '' : `${row.duration_ms as number}ms`),
+  },
+  { prop: 'ip', label: 'IP', minWidth: 120, showOverLimit: true },
+  { prop: 'params_digest', label: '参数摘要', minWidth: 200, showOverLimit: true },
+]
 
 /** 方法标签色: 删除红/新增蓝/修改橙 */
 const methodTagType = (method: string) => {
@@ -121,36 +143,40 @@ const methodTagType = (method: string) => {
   return 'info'
 }
 
-/** 拉取审计日志列表(携带全部过滤条件) */
-const fetchLogs = async () => {
-  try {
-    loading.value = true
-    const { keyword, username, method } = queryParams.value
-    const res = await listAuditLogs({
-      ...pagination.value,
-      keyword: (keyword as string) || undefined,
-      username: (username as string) || undefined,
-      method: (method as string) || undefined,
-      start: timeRange.value?.[0]?.toISOString(),
-      end: timeRange.value?.[1]?.toISOString(),
-    })
-    logList.value = res.items
-    total.value = res.total
-  } catch (error) {
-    console.error('获取审计日志失败:', error)
-    ElMessage.error('获取审计日志失败')
-  } finally {
-    loading.value = false
+/** 列表接口适配: 清空空串过滤条件, 避免无意义查询参数 */
+const fetchAuditLogs = (params: PaginationParams & Record<string, unknown>) =>
+  listAuditLogs({
+    page: params.page,
+    size: params.size,
+    keyword: (params.keyword as string) || undefined,
+    username: (params.username as string) || undefined,
+    method: (params.method as string) || undefined,
+    start: (params.start as string) || undefined,
+    end: (params.end as string) || undefined,
+  })
+
+// 分页/查询/数据/loading 统一复用 useTableQuery
+const { pagination, queryParams, tableData, total, loading, fetchData, handleSearch } =
+  useTableQuery<AuditLog>(fetchAuditLogs, {
+    errorMsg: '获取审计日志失败',
+    defaultQuery: {
+      keyword: '',
+      username: '',
+      method: undefined,
+      start: undefined,
+      end: undefined,
+    },
+  })
+// 审计日志每页 20 条(与改造前一致)
+pagination.value.size = 20
+
+/** 搜索/重置: 时间范围转 ISO 写入查询参数后回到第一页重新查询 */
+const handleSearchWithRange = () => {
+  queryParams.value = {
+    ...queryParams.value,
+    start: timeRange.value?.[0]?.toISOString(),
+    end: timeRange.value?.[1]?.toISOString(),
   }
+  handleSearch()
 }
-
-/** 搜索/重置: 回到第一页后重新查询 */
-const handleSearch = () => {
-  pagination.value.page = 1
-  fetchLogs()
-}
-
-onMounted(() => {
-  fetchLogs()
-})
 </script>

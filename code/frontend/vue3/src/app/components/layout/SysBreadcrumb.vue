@@ -11,7 +11,7 @@
       >
         {{ node.title }}
       </RouterLink>
-      <span v-else class="text-note font-medium truncate inline-block max-w-[20vw] align-bottom">{{ node.title }}</span>
+      <span v-else v-ellipsis class="text-note font-medium truncate inline-block max-w-[20vw] align-bottom">{{ node.title }}</span>
     </el-breadcrumb-item>
   </el-breadcrumb>
 </template>

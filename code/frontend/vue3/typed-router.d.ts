@@ -22,10 +22,8 @@ declare module 'vue-router/auto-routes' {
     '/[..all]': RouteRecordInfo<'/[..all]', '/:ll(.*)', { ll: ParamValue<true> }, { ll: ParamValue<false> }>,
     '/admin': RouteRecordInfo<'/admin', '/admin', Record<never, never>, Record<never, never>>,
     '/agent/manage': RouteRecordInfo<'/agent/manage', '/agent/manage', Record<never, never>, Record<never, never>>,
-    '/ai/chat': RouteRecordInfo<'/ai/chat', '/ai/chat', Record<never, never>, Record<never, never>>,
+    '/ai/assistant': RouteRecordInfo<'/ai/assistant', '/ai/assistant', Record<never, never>, Record<never, never>>,
     '/ai/model_config': RouteRecordInfo<'/ai/model_config', '/ai/model_config', Record<never, never>, Record<never, never>>,
-    '/ai/ocr': RouteRecordInfo<'/ai/ocr', '/ai/ocr', Record<never, never>, Record<never, never>>,
-    '/ai/voice': RouteRecordInfo<'/ai/voice', '/ai/voice', Record<never, never>, Record<never, never>>,
     '/authorization/casbin': RouteRecordInfo<'/authorization/casbin', '/authorization/casbin', Record<never, never>, Record<never, never>>,
     '/authorization/dept': RouteRecordInfo<'/authorization/dept', '/authorization/dept', Record<never, never>, Record<never, never>>,
     '/authorization/permission': RouteRecordInfo<'/authorization/permission', '/authorization/permission', Record<never, never>, Record<never, never>>,
@@ -33,9 +31,11 @@ declare module 'vue-router/auto-routes' {
     '/authorization/user': RouteRecordInfo<'/authorization/user', '/authorization/user', Record<never, never>, Record<never, never>>,
     '/file/': RouteRecordInfo<'/file/', '/file', Record<never, never>, Record<never, never>>,
     '/main/audit': RouteRecordInfo<'/main/audit', '/main/audit', Record<never, never>, Record<never, never>>,
+    '/main/codegen': RouteRecordInfo<'/main/codegen', '/main/codegen', Record<never, never>, Record<never, never>>,
     '/main/config': RouteRecordInfo<'/main/config', '/main/config', Record<never, never>, Record<never, never>>,
     '/main/db': RouteRecordInfo<'/main/db', '/main/db', Record<never, never>, Record<never, never>>,
     '/main/dict': RouteRecordInfo<'/main/dict', '/main/dict', Record<never, never>, Record<never, never>>,
+    '/main/i18n': RouteRecordInfo<'/main/i18n', '/main/i18n', Record<never, never>, Record<never, never>>,
     '/main/overview': RouteRecordInfo<'/main/overview', '/main/overview', Record<never, never>, Record<never, never>>,
     '/monitor/localstorage': RouteRecordInfo<'/monitor/localstorage', '/monitor/localstorage', Record<never, never>, Record<never, never>>,
     '/monitor/server_status': RouteRecordInfo<'/monitor/server_status', '/monitor/server_status', Record<never, never>, Record<never, never>>,
@@ -85,20 +85,12 @@ declare module 'vue-router/auto-routes' {
       routes: '/agent/manage'
       views: never
     }
-    'src/modules/ai/pages/chat.vue': {
-      routes: '/ai/chat'
+    'src/modules/ai/pages/assistant.vue': {
+      routes: '/ai/assistant'
       views: never
     }
     'src/modules/ai/pages/model_config.vue': {
       routes: '/ai/model_config'
-      views: never
-    }
-    'src/modules/ai/pages/ocr.vue': {
-      routes: '/ai/ocr'
-      views: never
-    }
-    'src/modules/ai/pages/voice.vue': {
-      routes: '/ai/voice'
       views: never
     }
     'src/modules/authorization/pages/casbin.vue': {
@@ -129,6 +121,10 @@ declare module 'vue-router/auto-routes' {
       routes: '/main/audit'
       views: never
     }
+    'src/modules/main/pages/codegen.vue': {
+      routes: '/main/codegen'
+      views: never
+    }
     'src/modules/main/pages/config.vue': {
       routes: '/main/config'
       views: never
@@ -139,6 +135,10 @@ declare module 'vue-router/auto-routes' {
     }
     'src/modules/main/pages/dict.vue': {
       routes: '/main/dict'
+      views: never
+    }
+    'src/modules/main/pages/i18n.vue': {
+      routes: '/main/i18n'
       views: never
     }
     'src/modules/main/pages/overview.vue': {

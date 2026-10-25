@@ -58,6 +58,8 @@ dependencies = [
     "celery>=5.6.1",
     "aioboto3>=15.5.0",
     "sse-starlette>=3.3.2",
+    # 代码生成器模板渲染(Jinja2, 纯 Python 轻量)
+    "jinja2>=3.1.4",
     # 流式 AG-UI 协议(rag_chat 流式事件)
     "ag-ui-protocol>=1.0.0",
     # token 计数(轻量, 不依赖 transformers)
@@ -96,6 +98,18 @@ pythonpath = ["src"]
 # ; 设置输出
 # importlib 导入模式: 允许不同目录存在同名测试文件(如两处 test_db.py)而不冲突
 addopts = "-v -s --log-cli-level=WARNING --import-mode=importlib"
+
+# 模块依赖分层(由 tests/test_module_boundaries.py 强制守门; 安装 import-linter 后
+# 可用 `lint-imports` 复核)
+[tool.importlinter]
+root_packages = ["module_ai", "module_office", "module_rag"]
+
+[[tool.importlinter.contracts]]
+name = "模块单向分层: rag -> office -> ai"
+type = "layers"
+layers = ["module_rag", "module_office", "module_ai"]
+# Phase 4 清除该延迟导入后删除本豁免
+ignore_imports = ["module_ai.service.model_config -> module_rag.service.user_model"]
 
 
 # uv python install 3.13.14 --mirror https://cnb.cool/astral-sh/python-build-standalone/-/releases/download/

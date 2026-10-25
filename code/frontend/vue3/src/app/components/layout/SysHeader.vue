@@ -11,6 +11,11 @@
           rounded-full
           hover:bg-note-tint
           p-2
+          min-w-11
+          min-h-11
+          flex
+          items-center
+          justify-center
           shrink-0
           type="button"
           aria-label="打开侧边菜单"
@@ -21,9 +26,21 @@
           </el-icon>
         </button>
 
-        <router-link to="/" flex items-center ml-4 md:ml-8 shrink-0>
+        <router-link to="/" flex items-center ml-3 sm:ml-4 md:ml-8 shrink-0 min-w-0>
           <img :src="sysStyle.theme.isDark ? logoDark : logoLight" h-8 mr-3 alt="logo" />
-          <span text-lg md:text-xl font-semibold whitespace-nowrap text-note>
+          <!-- 手机档(<640px)只留 Logo: 品牌名 + 汉堡 + 右侧四个控件在 375px 会溢出 -->
+          <span
+            v-ellipsis
+            hidden
+            sm:inline
+            text-lg
+            md:text-xl
+            font-semibold
+            whitespace-nowrap
+            truncate
+            text-note
+            class="max-w-[34vw] md:max-w-none"
+          >
             {{ TITLE }}
           </span>
         </router-link>
@@ -72,7 +89,7 @@
         <el-switch
           v-model="sysSettingStore.sysStyle.theme.isDark"
           aria-label="切换深色模式"
-          @change="sysSettingStore.changeThemeValueByIsDark"
+          @change="handleThemeToggle"
         />
         <!-- 登录/用户 -->
         <template v-if="authState.user.id">
@@ -196,6 +213,8 @@ const handleLogin = (authResponse: AuthResponse) => {
   authStore.setAuthState(authResponse)
   // 登录后拉取角色与权限码(侧边栏菜单/按钮权限的过滤依据)
   authStore.fetchPermissions()
+  // 套用该用户保存的样式配置(主题), 换账号登录时同步切换
+  authStore.applyUserTheme()
   // 清理登录引导参数, 避免再次进入首页重复弹出登录框
   if (route.query.login) {
     const { login: _login, ...rest } = route.query
@@ -209,5 +228,14 @@ const handleRegisterSuccess = (authResponse: AuthResponse) => {
   authStore.setAuthState(authResponse)
   // 拉取新账户的角色与权限码
   authStore.fetchPermissions()
+  // 套用该账户保存的样式配置(新账户默认跟随系统)
+  authStore.applyUserTheme()
+}
+
+// 顶栏黑白开关: 二态切换后套用主题并同步到后端用户配置
+const handleThemeToggle = (value: string | number | boolean) => {
+  const theme = Boolean(value) ? 'dark' : 'light'
+  sysSettingStore.applyThemeValue(theme)
+  authStore.saveUserTheme(theme)
 }
 </script>

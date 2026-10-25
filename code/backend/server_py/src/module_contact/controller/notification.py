@@ -6,6 +6,13 @@
 
 from fastapi import APIRouter, Depends, Query, status
 
+import asyncio
+import json
+from typing import Any
+
+from sse_starlette.event import ServerSentEvent
+from sse_starlette.sse import EventSourceResponse
+
 from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
 from module_authorization.dependencies.auth import get_current_user_id
 from module_contact.config.server import module_app
@@ -16,8 +23,20 @@ from module_contact.do.notification import (
     ContactSubscriptionUpdate,
 )
 from module_contact.service.notification import NotificationService
+from module_contact.utils.notification_hub import notification_hub
 
 router = APIRouter()
+
+# SSE 心跳间隔(秒): 无事件时每 20 秒发一条 event: ping 保活
+SSE_PING_SECONDS = 20
+
+
+def _sse(event: str, data: Any) -> dict[str, str]:
+    """构造一条 SSE 消息(事件名 + JSON 序列化数据)"""
+    return {
+        "event": event,
+        "data": json.dumps(data, ensure_ascii=False, default=str),
+    }
 
 
 @router.get("/list", summary="分页查询我的通知", response_model=PaginationResponse)
@@ -38,6 +57,44 @@ async def unread_count(
 ) -> dict:
     """未读数(前端顶栏铃铛轮询)"""
     return {"count": await service.unread_count(current_user_id)}
+
+
+@router.get("/stream", summary="通知实时推送(SSE)")
+async def stream_notifications(
+    current_user_id: str = Depends(get_current_user_id),
+    service: NotificationService = Depends(get_notification_service),
+) -> EventSourceResponse:
+    """
+    通知中心 SSE 流(替代前端 60s 轮询未读数)
+
+    事件格式:
+        event: unread        data: {"count": n}(连接建立及每次通知后推送)
+        event: notification  data: {通知对象}
+        event: ping          data: {}(每 20 秒心跳保活)
+
+    鉴权: 登录即可(前端用 fetch 流式读取, 可携带 Authorization 头)。
+    客户端断开时在 finally 退订, 避免队列泄漏。
+    """
+
+    async def event_generator():
+        """事件生成器: 首帧未读数 → 持续转发 hub 事件"""
+        subscription = await notification_hub.subscribe(current_user_id)
+        try:
+            yield _sse("unread", {"count": await service.unread_count(current_user_id)})
+            while True:
+                event, data = await subscription.queue.get()
+                yield _sse(event, data)
+        except asyncio.CancelledError:
+            # 客户端断开/服务关闭: 正常向外传播取消, 由 finally 退订
+            raise
+        finally:
+            await subscription.unsubscribe()
+
+    return EventSourceResponse(
+        event_generator(),
+        ping=SSE_PING_SECONDS,
+        ping_message_factory=lambda: ServerSentEvent(event="ping", data="{}"),
+    )
 
 
 @router.put("/{message_id}/read", summary="标记单条已读", status_code=status.HTTP_204_NO_CONTENT)

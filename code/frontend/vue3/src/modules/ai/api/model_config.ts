@@ -13,6 +13,7 @@ import type {
   ModelConfigCreate,
   ModelConfigUpdate,
   ModelCustomTestResponse,
+  ModelImageTestResponse,
   ModelMediaTestResponse,
   ModelTestResponse,
 } from '../types/model_config';
@@ -138,6 +139,20 @@ export const testOcrModel = (modelId: string, image: File | Blob) => {
   formData.append('model_id', modelId);
   formData.append('image', image);
   return http_base_server.post<ModelMediaTestResponse>('/ai/llm/test-ocr', formData);
+};
+
+/**
+ * 生图模型单独测试(文生图/图生图)
+ * @param payload model_id 为必填; image 传参考图(data URL)即走图生图
+ */
+export const testImageModel = (payload: {
+  model_id: string;
+  prompt: string;
+  image?: string;
+  size?: string;
+  n?: number;
+}) => {
+  return http_base_server.post<ModelImageTestResponse>('/ai/llm/test-image', payload);
 };
 
 /**

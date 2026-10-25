@@ -8,15 +8,21 @@ from module_ai.do.llm import (
     ChatRequest,
     EmbeddingRequest,
     CacheClearRequest,
+    ImageGenerateRequest,
+    ImageGenerateResponse,
+    ImageTestRequest,
     ModelConfigCheckResponse,
     ModelCustomTestRequest,
     ModelCustomTestResponse,
     ModelTestRequest,
     ModelTestResponse,
+    RerankRequest,
+    RerankResponse,
     TokenCountRequest,
     TokenCountResponse,
     TtsTestRequest,
 )
+from common.utils.fastapi_ex.exceptions import BusinessError
 from module_ai.config.server import module_app
 from module_ai.do.model_config import ModelConfigCreateRequest
 from module_ai.utils.llm.token.tokenizer import Tokenizer
@@ -172,6 +178,61 @@ async def test_ocr(
     return {"ok": True, **result}
 
 
+@router.post("/image", response_model=ImageGenerateResponse, summary="图像生成(文生图/图生图)")
+async def generate_image(
+    request: ImageGenerateRequest,
+    llm_service: LLMService = Depends(get_llm_service),
+) -> ImageGenerateResponse:
+    """按模型配置生成图像(百炼 qwen-image 系列 / OpenAI 兼容生图服务)
+
+    - **prompt**: 提示词(图生图时为编辑指令)
+    - **image**: 参考图(data URL / base64 / http URL), 传入即走图生图(图像编辑)
+    - **size**: 输出尺寸(宽*高, 缺省由模型按提示词推荐)
+    - **model_id**: 模型配置ID(缺省取 image 类型默认配置)
+    """
+    try:
+        return await llm_service.generate_image(request)
+    except BusinessError as e:
+        # 参考图超限/压缩失败等输入问题: 400 便于前端直接提示用户
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"图像生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"图像生成失败: {str(e)[:300]}")
+
+
+@router.post("/test-image", response_model=ImageGenerateResponse, summary="生图单独测试")
+async def test_image(
+    request: ImageTestRequest,
+    llm_service: LLMService = Depends(get_llm_service),
+) -> ImageGenerateResponse:
+    """按指定模型配置生成图片(模型配置页单独测试, 失败以 ok=False 返回)
+
+    - **model_id**: 模型配置ID
+    - **prompt**: 提示词
+    - **image**: 参考图(data URL / base64 / http URL), 传入即为图生图
+    """
+    try:
+        return await llm_service.image_test(request)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/rerank", response_model=RerankResponse, summary="文本重排序")
+async def rerank_documents(
+    request: RerankRequest,
+    llm_service: LLMService = Depends(get_llm_service),
+) -> RerankResponse:
+    """对文档列表按查询相关性重排序(与生图/对话同属 llm 能力线)
+
+    - **query**: 检索查询文本
+    - **documents**: 待排序文档(字符串或含 sort_key 字段的字典)
+    - **model_id**: 模型配置(缺省取 rerank 类型默认配置)
+    """
+    return await llm_service.rerank(request)
+
+
 @router.post("/chat", summary="聊天接口 支持流式SSE(legacy/agui 双协议)")
 async def chat_completion(
     chat_http_request: Request,
@@ -209,6 +270,9 @@ async def chat_completion(
         else:
             # 非流式响应
             return responses
+    except BusinessError as e:
+        # 输入超限等可执行提示: 400 而非 500, 前端直接展示文案
+        raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -233,19 +297,49 @@ async def _test_cache_clear(
 
 
 @router.post("/token-count", summary="token 计数", response_model=TokenCountResponse)
-async def token_count(request: TokenCountRequest) -> TokenCountResponse:
+async def token_count(
+    request: TokenCountRequest,
+    llm_service: LLMService = Depends(get_llm_service),
+) -> TokenCountResponse:
     """批量统计文本 token 数(前端 AI 对话的输入/输出/上下文统计用)
 
     计数口径与后端上下文预算/消息裁剪一致(tiktoken, 非 OpenAI 系模型
     回退 o200k_base 编码近似估算)。
 
     - **texts**: 待计数的文本列表(批量, 顺序与返回 counts 一一对应)
+    - **model_id**: 可选模型配置ID, 传入时同时返回该模型输入上限与剩余量
     """
     counts = [
         _tokenizer.count_tokens(text, "qwen-plus")[0]
         for text in request.texts
     ]
-    return TokenCountResponse(counts=counts, total=sum(counts))
+    total = sum(counts)
+    limit = None
+    remaining = None
+    if request.model_id:
+        limit, _model = await llm_service.input_token_limit(request.model_id)
+        if limit:
+            remaining = max(0, limit - total)
+    return TokenCountResponse(
+        counts=counts,
+        total=total,
+        limit=limit or None,
+        remaining=remaining,
+        exceeded=bool(limit and total > limit),
+    )
+
+
+@router.get("/input-limit", summary="查询对话模型输入上限")
+async def get_input_limit(
+    model_id: str | None = None,
+    llm_service: LLMService = Depends(get_llm_service),
+) -> dict:
+    """返回对话模型的输入 token 上限(前端展示"已输入/限制"的初始值)
+
+    - **model_id**: 模型配置ID(缺省取全局默认 chat 配置)
+    """
+    limit, model = await llm_service.input_token_limit(model_id)
+    return {"limit": limit, "model": model, "unit": "token"}
 
 
 # 将路由注册到模块应用
