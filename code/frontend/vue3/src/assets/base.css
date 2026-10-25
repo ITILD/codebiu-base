@@ -10,10 +10,17 @@ body,
    灵感: 苔绿主色 + 米白纸张底色 + 笔记本格线
    ============================================ */
 
-/* 亮色模式: 覆盖 Element Plus 主色为自然绿 */
-:root {
+/* 亮色模式: 覆盖 Element Plus 主色为自然绿
+   选择器双写 :root:root 提高特异性至 (0,2,0):
+   Element Plus 按需注入的 theme-chalk/base.css 里也有一份 :root{--el-color-primary:#409eff},
+   且它在路由页运行时注入、晚于本文件, 同特异性下会把全站主色改回蓝色。
+   变量型覆盖只能靠提高特异性取胜(不能加 !important 到变量声明上, 会连内联主题一起干掉) */
+:root:root {
     /* 主色: 苔绿 */
     --el-color-primary: #6b9e78;
+    /* 通道三元组: Element Plus 内部用 rgba(var(--el-color-primary-rgb), …) 合成光晕/描边,
+       不覆盖会残留默认蓝色的半透明阴影 */
+    --el-color-primary-rgb: 107, 158, 120;
     --el-color-primary-light-3: #8fb79a;
     --el-color-primary-light-5: #a9c9b1;
     --el-color-primary-light-7: #cfe3d3;
@@ -121,8 +128,9 @@ body,
 /* 暗色模式: 现代暗黑基调(中性深灰底, 层次靠亮度阶梯) + 墨绿点缀
    底色/边框/正文全部中性化, 大面积不再出现墨绿;
    墨绿只保留在: 主色按钮 / 强调文字 / 光晕环 / 辉光阴影 / 滚动条等小面积点缀 */
-html.dark {
+html.dark:root {
     --el-color-primary: #6cbf8f;
+    --el-color-primary-rgb: 108, 191, 143;
     --el-color-primary-light-3: #579c78;
     --el-color-primary-light-5: #437a5e;
     --el-color-primary-light-7: #2f5342;
@@ -756,6 +764,172 @@ html.dark .note-sk::after {
     .el-table {
         max-width: 100%;
     }
+}
+
+/* ============================================
+   Element Plus 观感统一: 去"原生控件感"
+   目标: 圆角/边线/字重/阴影四件事统一到纸墨语言上,
+   控件之间靠色差与柔光分层, 不再靠系统灰描边与硬阴影。
+   ============================================ */
+
+/* 统一圆角档位(与 page-card 的 rounded-lg 对齐; 主题页可在局部覆盖)
+   同样需要 :root:root 才能压过 Element Plus 按需注入的 base.css(默认 4px) */
+:root:root {
+    --el-border-radius-base: 8px;
+    --el-border-radius-small: 6px;
+    --el-border-radius-round: 999px;
+}
+
+/* ---- 按钮: 字重与字距统一(弱化系统默认的"粗黑体"观感) ---- */
+.el-button {
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+/* ---- 按钮: 釉面质感(顶部一道内高光) + 悬浮微抬升 ----
+   只作用于「默认外观」按钮: 排除语义色变体(success/warning/danger/info/primary 等),
+   避免苔绿光晕环叠在语义色上串色; text/link/plain 保持文字按钮的轻量观感 */
+.el-button:not(.is-text):not(.is-link):not(.is-plain):not(.is-disabled):not([class*='el-button--']) {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        0 0 0 1px var(--note-edge-soft),
+        0 2px 6px -4px var(--note-glow);
+}
+
+.el-button:not(.is-text):not(.is-link):not(.is-plain):not(.is-disabled):not([class*='el-button--']):hover {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        0 0 0 3px var(--note-edge-soft),
+        0 8px 18px -10px var(--note-glow);
+    transform: translateY(-1px);
+}
+
+/* 按下回落, 避免"飘"在纸面上 */
+.el-button:not(.is-text):not(.is-link):not(.is-plain):not(.is-disabled):not([class*='el-button--']):active {
+    transform: translateY(0);
+}
+
+/* ---- 输入类: 白纸面 + 聚焦时主色描边外扩一圈淡光晕 ---- */
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+    background-color: var(--el-bg-color-overlay);
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+    box-shadow:
+        0 0 0 1px var(--el-color-primary) inset,
+        0 0 0 4px var(--el-color-primary-light-8);
+}
+
+/* ---- 表格: 表头字距拉开, 行悬浮平滑过渡 ---- */
+.el-table.el-table th.el-table__cell {
+    letter-spacing: 0.02em;
+}
+
+.el-table.el-table .el-table__row {
+    transition: background-color 0.2s ease-out;
+}
+
+/* ---- 分页: 页码做成小圆片, 当前页带纸影 ---- */
+.el-pagination .el-pager li,
+.el-pagination button {
+    border-radius: 7px;
+    transition:
+        background-color 0.2s ease-out,
+        color 0.2s ease-out;
+}
+
+.el-pagination .el-pager li.is-active {
+    box-shadow: 0 0 0 1px var(--note-edge-soft), 0 4px 12px -8px var(--note-glow);
+}
+
+/* ---- 页签: 指示条加厚成"墨线", 激活项加重字重 ---- */
+.el-tabs__item {
+    font-weight: 500;
+}
+
+.el-tabs__item.is-active {
+    font-weight: 600;
+}
+
+.el-tabs__active-bar {
+    height: 3px;
+    border-radius: 2px;
+}
+
+/* ---- 弹层(下拉/气泡/菜单): 圆角 + 柔影, 去掉描边 ---- */
+.el-popper.is-light {
+    border-radius: 10px;
+    box-shadow: 0 12px 32px -18px var(--note-glow), 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+.el-select-dropdown__item,
+.el-dropdown-menu__item {
+    border-radius: 6px;
+    margin: 2px 6px;
+}
+
+/* ---- 消息/确认框: 圆角纸片 + 纸影 ---- */
+.el-message {
+    border-radius: 10px;
+    border-color: transparent;
+    box-shadow: var(--note-shadow);
+}
+
+.el-message-box {
+    border-radius: 14px;
+    border-color: transparent;
+    box-shadow: var(--note-shadow-hover);
+}
+
+/* ---- 提示条: 去硬描边, 交给淡色底 ---- */
+.el-alert {
+    border: none;
+    border-radius: 10px;
+}
+
+/* ---- 空状态: 描述文字用手写体, 像便签上的一句留白 ---- */
+.el-empty__description p {
+    font-family: var(--note-font-hand);
+    color: var(--note-sub);
+}
+
+/* ---- 朱砂闲章: 主题横幅/页头的署名小印 ---- */
+.note-seal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 6px;
+    background-color: var(--note-seal);
+    color: #fdf6ef;
+    font-family: var(--note-font-hand);
+    font-size: 1.15rem;
+    line-height: 1;
+    transform: rotate(-4deg);
+    opacity: 0.92;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+        0 2px 6px -3px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- 墨线: 两端淡出的细笔触, 用于区块分隔(比 1px 实线更软) ---- */
+.ink-rule {
+    height: 2px;
+    border: 0;
+    border-radius: 999px;
+    opacity: 0.18;
+    background: linear-gradient(
+        to right,
+        transparent,
+        var(--note-ink) 10%,
+        var(--note-ink) 90%,
+        transparent
+    );
 }
 
 /* ============================================

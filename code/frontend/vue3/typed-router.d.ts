@@ -48,11 +48,12 @@ declare module 'vue-router/auto-routes' {
     '/template/container': RouteRecordInfo<'/template/container', '/template/container', Record<never, never>, Record<never, never>>,
     '/template/editor': RouteRecordInfo<'/template/editor', '/template/editor', Record<never, never>, Record<never, never>>,
     '/template/overview': RouteRecordInfo<'/template/overview', '/template/overview', Record<never, never>, Record<never, never>>,
-    '/template/playground': RouteRecordInfo<'/template/playground', '/template/playground', Record<never, never>, Record<never, never>, '/template/playground/' | '/template/playground/brad_garden' | '/template/playground/business' | '/template/playground/harry_potter'>,
+    '/template/playground': RouteRecordInfo<'/template/playground', '/template/playground', Record<never, never>, Record<never, never>, '/template/playground/' | '/template/playground/brad_garden' | '/template/playground/business' | '/template/playground/harry_potter' | '/template/playground/ink'>,
     '/template/playground/': RouteRecordInfo<'/template/playground/', '/template/playground', Record<never, never>, Record<never, never>>,
     '/template/playground/brad_garden': RouteRecordInfo<'/template/playground/brad_garden', '/template/playground/brad_garden', Record<never, never>, Record<never, never>>,
     '/template/playground/business': RouteRecordInfo<'/template/playground/business', '/template/playground/business', Record<never, never>, Record<never, never>>,
     '/template/playground/harry_potter': RouteRecordInfo<'/template/playground/harry_potter', '/template/playground/harry_potter', Record<never, never>, Record<never, never>>,
+    '/template/playground/ink': RouteRecordInfo<'/template/playground/ink', '/template/playground/ink', Record<never, never>, Record<never, never>>,
     '/template/template': RouteRecordInfo<'/template/template', '/template/template', Record<never, never>, Record<never, never>>,
     '/version': RouteRecordInfo<'/version', '/version', Record<never, never>, Record<never, never>>,
     '/websearch/search': RouteRecordInfo<'/websearch/search', '/websearch/search', Record<never, never>, Record<never, never>>,
@@ -190,7 +191,7 @@ declare module 'vue-router/auto-routes' {
       views: never
     }
     'src/modules/template/pages/playground.vue': {
-      routes: '/template/playground' | '/template/playground/' | '/template/playground/brad_garden' | '/template/playground/business' | '/template/playground/harry_potter'
+      routes: '/template/playground' | '/template/playground/' | '/template/playground/brad_garden' | '/template/playground/business' | '/template/playground/harry_potter' | '/template/playground/ink'
       views: 'default'
     }
     'src/modules/template/pages/playground/index.vue': {
@@ -207,6 +208,10 @@ declare module 'vue-router/auto-routes' {
     }
     'src/modules/template/pages/playground/harry_potter.vue': {
       routes: '/template/playground/harry_potter'
+      views: never
+    }
+    'src/modules/template/pages/playground/ink.vue': {
+      routes: '/template/playground/ink'
       views: never
     }
     'src/modules/template/pages/template.vue': {

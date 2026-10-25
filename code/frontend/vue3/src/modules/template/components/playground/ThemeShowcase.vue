@@ -1,11 +1,18 @@
 <template>
   <!-- 主题根容器: style 注入 CSS 变量, 整页 Element Plus 组件自动换肤 -->
   <div :style="{ ...theme.vars, fontFamily: 'var(--el-font-family)' }" :class="theme.rootClass"
-    class="rounded-note-sm p-4 md:p-6 overflow-hidden">
+    class="relative isolate rounded-note-sm p-4 md:p-6 overflow-hidden">
+    <!-- 氛围纸纹层: 淡墨晕染/纸纤维, 垫在所有组件之下(不遮挡交互) -->
+    <div v-if="theme.atmosphere" class="pointer-events-none absolute inset-0 -z-10" :style="theme.atmosphere" />
+
     <!-- 主题横幅 -->
-    <div :class="theme.bannerClass" rounded p-4 mb-4>
-      <h3 text-lg font-bold>{{ theme.name }}</h3>
-      <p text-sm mt-1 opacity-80>{{ theme.desc }}</p>
+    <div :class="theme.bannerClass" class="relative flex items-start justify-between gap-4 overflow-hidden rounded p-4 mb-4">
+      <div class="min-w-0">
+        <h3 text-lg font-bold>{{ theme.name }}</h3>
+        <p text-sm mt-1 opacity-80>{{ theme.desc }}</p>
+      </div>
+      <!-- 闲章: 朱砂小印, 主题的点睛署名 -->
+      <span v-if="theme.seal" class="note-seal shrink-0" aria-hidden="true">{{ theme.seal }}</span>
     </div>
 
     <!-- 按钮 -->
