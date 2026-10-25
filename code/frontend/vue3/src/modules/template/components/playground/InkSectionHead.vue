@@ -1,8 +1,8 @@
 <template>
   <!-- 水墨区块小标题: 朱砂序号 + 手写体题名 + 右侧一句注 -->
-  <div class="relative mb-2.5 flex items-baseline gap-2">
+  <div class="relative mb-3 flex items-baseline gap-2">
     <span class="ink-head__no">{{ no }}</span>
-    <h3 class="font-hand text-lg tracking-[0.18em] text-[#2b332e]">{{ title }}</h3>
+    <h3 class="ink-head__title font-hand text-lg tracking-[0.18em] text-[#2b332e]">{{ title }}</h3>
     <span class="ml-auto hidden text-[11px] tracking-[0.2em] text-[#8a918a] sm:block">{{ note }}</span>
   </div>
 </template>
@@ -34,5 +34,27 @@ defineProps<{
     font-family: var(--note-font-hand);
     font-size: 11px;
     line-height: 1;
+}
+
+/* 题名下一道焦墨短横: 起笔重、收笔轻, 是大片淡墨里唯一的浓墨骨力 */
+.ink-head__title {
+    position: relative;
+}
+
+.ink-head__title::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: -6px;
+    width: 30px;
+    height: 2px;
+    border-radius: 1px;
+    background-image: linear-gradient(
+        90deg,
+        rgba(35, 42, 38, 0.82) 0%,
+        rgba(35, 42, 38, 0.42) 46%,
+        rgba(35, 42, 38, 0.1) 76%,
+        transparent 100%
+    );
 }
 </style>

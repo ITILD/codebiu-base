@@ -270,21 +270,21 @@ const bradGarden: PlaygroundTheme = {
   },
 }
 
-/** 中式水墨: 浓墨主色 + 朱砂点缀 + 宣纸底 + 楷体, 留白与笔触构成的东方气韵 */
+/** 中式水墨: 淡墨为主、焦墨点睛 —— 宣纸暖白底 + 淡水墨主色 + 朱砂闲章 */
 const ink: PlaygroundTheme = {
   key: 'ink',
   name: '中式水墨',
-  desc: '浓墨为骨、朱砂为印、宣纸为底，留白与枯笔构成的东方气韵。',
+  desc: '淡墨为面、焦墨为骨、朱砂为印，宣纸上留白与水痕相生的东方气韵。',
   path: '/template/playground/ink',
   vars: {
-    // 主色(墨色)及明暗梯度 —— 墨分五色, 由焦到淡
-    '--el-color-primary': '#33403a',
-    '--el-color-primary-dark-2': '#2a352f',
-    '--el-color-primary-light-3': '#707975',
-    '--el-color-primary-light-5': '#99a09d',
-    '--el-color-primary-light-7': '#c2c6c4',
-    '--el-color-primary-light-8': '#d6d9d7',
-    '--el-color-primary-light-9': '#ebeceb',
+    // 主色(淡墨)及明暗梯度 —— 大面积用淡墨, 焦墨只留给文字与点睛
+    '--el-color-primary': '#4e5f56',
+    '--el-color-primary-dark-2': '#3e4c45',
+    '--el-color-primary-light-3': '#838f88',
+    '--el-color-primary-light-5': '#a7afab',
+    '--el-color-primary-light-7': '#cacfcc',
+    '--el-color-primary-light-8': '#dce0dd',
+    '--el-color-primary-light-9': '#eeefee',
     // 功能色梯度(青竹 / 赭石 / 朱砂 / 墨灰)
     '--el-color-success': '#4d6a4f',
     '--el-color-success-dark-2': '#3e5540',
@@ -314,39 +314,39 @@ const ink: PlaygroundTheme = {
     '--el-color-info-light-7': '#cfd2d0',
     '--el-color-info-light-8': '#dfe1df',
     '--el-color-info-light-9': '#eff0ef',
-    // 文字 / 背景 / 边框 / 填充(宣纸色系)
-    '--el-text-color-primary': '#2b332e',
+    // 文字 / 背景 / 边框 / 填充(宣纸暖白, 文字用焦墨形成浓淡对比)
+    '--el-text-color-primary': '#232a26',
     '--el-text-color-regular': '#47504a',
-    '--el-text-color-secondary': '#6d756e',
-    '--el-bg-color': '#fcf9f0',
-    '--el-bg-color-overlay': '#fefcf6',
-    '--el-bg-color-page': '#f2eee2',
-    '--el-border-color': '#d0c8b6',
-    '--el-border-color-light': '#ded7c7',
-    '--el-border-color-lighter': '#ebe5d7',
-    '--el-border-color-extra-light': '#f3efe4',
-    '--el-fill-color': '#f0ece0',
-    '--el-fill-color-dark': '#e8e3d4',
-    '--el-fill-color-light': '#f4f1e7',
-    '--el-fill-color-lighter': '#f9f6ee',
-    '--el-fill-color-blank': '#fcf9f0',
+    '--el-text-color-secondary': '#7c847d',
+    '--el-bg-color': '#fdfaf2',
+    '--el-bg-color-overlay': '#f8f2e6',
+    '--el-bg-color-page': '#f5f0e3',
+    '--el-border-color': '#d8d0bf',
+    '--el-border-color-light': '#e4dccb',
+    '--el-border-color-lighter': '#efe8d9',
+    '--el-border-color-extra-light': '#f6f0e5',
+    '--el-fill-color': '#f2ede1',
+    '--el-fill-color-dark': '#eae4d6',
+    '--el-fill-color-light': '#f6f1e6',
+    '--el-fill-color-lighter': '#fbf7ee',
+    '--el-fill-color-blank': '#fdfaf2',
     // 圆角 / 字体 / 开关激活色(朱砂)
     '--el-border-radius-base': '3px',
     '--el-border-radius-small': '2px',
     '--el-font-family': "'Noto Serif SC', 'Songti SC', 'STZhongsong', 'KaiTi', serif",
     '--el-switch-on-color': '#a8462f',
   },
-  rootClass: 'bg-[#f2eee2] text-[#2b332e] border border-[#d0c8b6]',
+  rootClass: 'bg-[#f5f0e3] text-[#232a26] border border-[#e3dcc9]',
   bannerClass: 'bg-[#232b26] text-[#f0e9d8] border border-[#3a423c]',
-  colors: ['#33403a', '#fcf9f0', '#f2eee2', '#a8462f'],
+  colors: ['#4e5f56', '#fdfaf2', '#f5f0e3', '#232a26'],
   seal: '墨',
   atmosphere: {
-    // 宣纸: 焦墨自左上洇开, 右下压一道淡墨收气, 右上一点朱砂余韵
+    // 宣纸: 大面积淡墨自左上洇开, 边缘略深成水痕; 右上一点朱砂余韵。
+    // 用 normal 混合而非 multiply, 避免整页发灰发脏, 保持淡墨的透明干净
     backgroundImage:
-      'radial-gradient(52% 38% at 2% 0%, rgba(51, 64, 58, 0.18) 0%, transparent 62%),'
-      + 'radial-gradient(38% 30% at 98% 8%, rgba(168, 70, 47, 0.09) 0%, transparent 68%),'
-      + 'radial-gradient(64% 44% at 60% 102%, rgba(51, 64, 58, 0.13) 0%, transparent 70%)',
-    mixBlendMode: 'multiply',
+      'radial-gradient(56% 40% at 4% -4%, rgba(90, 107, 98, 0.07) 0%, rgba(90, 107, 98, 0.04) 52%, rgba(90, 107, 98, 0.08) 60%, transparent 72%),'
+      + 'radial-gradient(34% 26% at 98% 4%, rgba(168, 70, 47, 0.045) 0%, transparent 72%),'
+      + 'radial-gradient(66% 46% at 52% 106%, rgba(90, 107, 98, 0.05) 0%, transparent 76%)',
   },
 }
 

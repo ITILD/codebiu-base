@@ -7,6 +7,8 @@
   >
     <!-- 氛围墨晕: 焦墨自左上洇开, 右下一道淡墨收气 -->
     <div v-if="theme.atmosphere" class="pointer-events-none absolute inset-0 -z-10" :style="theme.atmosphere" />
+    <!-- 宣纸纤维: 极细横纹 multiply 印进纸底, 只为"摸到纸", 不压淡墨 -->
+    <div class="ink-paper pointer-events-none absolute inset-0 -z-10" aria-hidden="true" />
 
     <!-- 引首: 与首页同源的水墨小池(荷叶/荷花/涟漪), 让整页先是一张画 -->
     <section class="relative">
@@ -202,31 +204,59 @@ const rows = [
 </script>
 
 <style scoped>
-/* ---- 宣纸区块: 无硬边线, 用极淡墨角 + 纸纤维定义形状 ---- */
+/* 宣纸底: 显式落在样式表里而不只依赖主题字符串类名, 保证暖白纸色一定生效
+   (纸色比全站淡绿纸更暖一档, 才像宣纸而不像普通卡片) */
+.ink-page {
+    background-color: #f5f0e3;
+    color: #232a26;
+    border: 1px solid #e3dcc9;
+}
+
+/* ============================================
+   宣纸与水印: 区块不铺卡片底色、不画边框,
+   只用两笔错位的淡墨水痕界定边界 —— 相邻两笔在间隙处交叠, 交界略深, 即"笔与笔之间的水印"
+   ============================================ */
 .ink-section {
     position: relative;
     isolation: isolate;
-    padding: 14px 14px 16px;
-    border: 1px solid #e4ddcd;
+    padding: 16px 14px 18px;
     border-radius: 2px;
-    background-image:
-        radial-gradient(58% 48% at 0% 0%, rgba(51, 64, 58, 0.05) 0%, transparent 68%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.12) 100%);
-    box-shadow: 0 10px 30px -26px rgba(43, 51, 46, 0.6);
 }
 
-/* 纸纤维顶盖: 与全站卡片同一套噪声, 但用 multiply 让墨色更沉 */
+/* 淡墨水痕: 中心薄(透明干净)、洇开边缘略深(颜料在干边沉积)、再迅速回落为无 ——
+   透明度整体压得很低, 叠在宣纸纤维上仍是"淡墨", 不发灰发脏 */
+.ink-section::before {
+    content: '';
+    position: absolute;
+    inset: -13px -10px;
+    z-index: 0;
+    border-radius: 8px;
+    pointer-events: none;
+    background-image:
+        radial-gradient(58% 52% at 16% 16%, rgba(90, 107, 98, 0.045) 0%, rgba(90, 107, 98, 0.03) 54%, rgba(90, 107, 98, 0.082) 67%, rgba(90, 107, 98, 0.012) 72%, transparent 82%),
+        radial-gradient(54% 48% at 85% 84%, rgba(90, 107, 98, 0.038) 0%, rgba(90, 107, 98, 0.026) 52%, rgba(90, 107, 98, 0.072) 67%, rgba(90, 107, 98, 0.01) 72%, transparent 81%);
+}
+
+/* 纸纤维: 极轻, 只为"摸到"纸, 不压淡墨 */
 .ink-section::after {
     content: '';
     position: absolute;
     inset: 0;
-    z-index: 10;
+    z-index: 20;
     border-radius: inherit;
     pointer-events: none;
     background-image: var(--note-grain);
     background-size: 260px 260px;
     mix-blend-mode: multiply;
-    opacity: 0.22;
+    opacity: 0.08;
+}
+
+/* 整页宣纸纤维: 与区块同源, 让留白处也是一张纸而不是一块纯色 */
+.ink-paper {
+    background-image: var(--note-grain);
+    background-size: 300px 300px;
+    mix-blend-mode: multiply;
+    opacity: 0.07;
 }
 
 .ink-section__body {
@@ -234,7 +264,9 @@ const rows = [
     z-index: 1;
 }
 
-/* ---- 组件墨化: 只在本页生效 ---- */
+/* ============================================
+   组件墨化: 淡墨为面, 焦墨点睛(只在本页生效)
+   ============================================ */
 
 /* 按钮: 方印感, 字距拉开, 去掉玻璃光泽 */
 .ink-page :deep(.el-button) {
@@ -243,30 +275,56 @@ const rows = [
     box-shadow: none;
 }
 
+/* 主按钮 = 焦墨: 全页唯一的重色块, 与大片淡墨形成对比支撑 */
 .ink-page :deep(.el-button--primary) {
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 3px 10px -8px rgba(43, 51, 46, 0.9);
+    background-color: #2b332e;
+    border-color: #2b332e;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 8px 20px -16px rgba(11, 14, 12, 0.9);
 }
 
-/* 输入/选择: 以一线代框, 聚焦时墨线加深 */
+.ink-page :deep(.el-button--primary:hover) {
+    background-color: #3a453e;
+    border-color: #3a453e;
+}
+
+/* 默认按钮 = 淡墨: 半透明墨气浮在纸上, 不压纸 */
+.ink-page :deep(.el-button:not([class*='el-button--']):not(.is-text):not(.is-link)) {
+    background-color: rgba(90, 107, 98, 0.06);
+    border-color: rgba(90, 107, 98, 0.16);
+    color: #3b453d;
+}
+
+.ink-page :deep(.el-button:not([class*='el-button--']):not(.is-text):not(.is-link):hover) {
+    background-color: rgba(90, 107, 98, 0.11);
+    border-color: rgba(90, 107, 98, 0.26);
+}
+
+/* 输入/选择: 一线代框 —— 平时淡墨, 悬停略浓, 聚焦才落焦墨(淡浓层次) */
 .ink-page :deep(.el-input__wrapper),
 .ink-page :deep(.el-select__wrapper) {
     background-color: transparent;
+    background-image: linear-gradient(180deg, transparent 62%, rgba(90, 107, 98, 0.045) 100%);
     border-radius: 0;
     box-shadow: none !important;
-    border-bottom: 1px solid #c9c1ae;
+    border-bottom: 1px solid rgba(90, 107, 98, 0.22);
     padding-left: 2px;
-    transition: border-color 0.2s ease-out;
+    transition:
+        border-color 0.2s ease-out,
+        background-image 0.2s ease-out;
 }
 
 .ink-page :deep(.el-input__wrapper:hover),
 .ink-page :deep(.el-select__wrapper:hover) {
-    border-bottom-color: #9aa39a;
+    border-bottom-color: rgba(90, 107, 98, 0.38);
 }
 
 .ink-page :deep(.el-input__wrapper.is-focus),
 .ink-page :deep(.el-select__wrapper.is-focused) {
     box-shadow: none !important;
-    border-bottom-color: #33403a;
+    border-bottom-color: #232a26;
+    background-image: linear-gradient(180deg, transparent 38%, rgba(90, 107, 98, 0.08) 100%);
 }
 
 /* 标签: 小印, 手写体 */
@@ -276,22 +334,24 @@ const rows = [
     letter-spacing: 0.12em;
 }
 
-/* 表格: 去掉外框与斑马纹, 只留细墨线 */
+/* 表格: 去掉外框与斑马纹, 只留细墨线; 表头一条较浓的墨线压住 */
 .ink-page :deep(.el-table) {
-    --el-table-border-color: #e4ddcd;
+    --el-table-border-color: rgba(90, 107, 98, 0.14);
     --el-table-header-bg-color: transparent;
     --el-table-tr-bg-color: transparent;
     --el-table-bg-color: transparent;
-    --el-table-row-hover-bg-color: rgba(51, 64, 58, 0.05);
+    --el-table-row-hover-bg-color: rgba(90, 107, 98, 0.05);
     border-radius: 0;
     box-shadow: none;
 }
 
 .ink-page :deep(.el-table th.el-table__cell) {
     background: transparent;
+    border-bottom-color: rgba(35, 42, 38, 0.26);
     font-family: var(--note-font-hand);
     font-weight: 600;
     letter-spacing: 0.1em;
+    color: #232a26;
 }
 
 /* 描述列表: 透明底, 标签用题跋字体 */
@@ -302,18 +362,61 @@ const rows = [
 
 .ink-page :deep(.el-descriptions__label) {
     font-family: var(--note-font-hand);
-    color: #6d756e;
+    color: #7c847d;
 }
 
-/* 页签与对话框标题: 手写体收口 */
+/* 页签: 指示条为一道焦墨短线, 底轨是淡墨渐隐线 */
 .ink-page :deep(.el-tabs__item),
 .ink-page :deep(.el-dialog__title) {
     font-family: var(--note-font-hand);
     letter-spacing: 0.16em;
 }
 
-/* 提示条: 淡墨底, 无描边 */
+.ink-page :deep(.el-tabs__active-bar) {
+    height: 2px;
+    background-color: #232a26;
+}
+
+.ink-page :deep(.el-tabs__nav-wrap::after) {
+    height: 1px;
+    background: linear-gradient(
+        to right,
+        transparent,
+        rgba(90, 107, 98, 0.18) 18%,
+        rgba(90, 107, 98, 0.18) 82%,
+        transparent
+    );
+}
+
+/* 进度/滑块/评分: 轨道用淡墨, 填充与星点用焦墨 */
+.ink-page :deep(.el-progress-bar__outer) {
+    background-color: rgba(90, 107, 98, 0.08);
+    border-radius: 2px;
+}
+
+.ink-page :deep(.el-progress-bar__inner) {
+    border-radius: 2px;
+}
+
+.ink-page :deep(.el-slider) {
+    --el-slider-runway-bg-color: rgba(90, 107, 98, 0.1);
+}
+
+.ink-page :deep(.el-rate) {
+    --el-rate-fill-color: #3b453d;
+    --el-rate-void-color: rgba(90, 107, 98, 0.22);
+}
+
+/* 对话框: 宣纸底 + 极淡墨边 */
+.ink-page :deep(.el-dialog) {
+    background-color: #fdfaf2;
+    border: 1px solid rgba(90, 107, 98, 0.12);
+    border-radius: 3px;
+    box-shadow: 0 24px 60px -34px rgba(35, 42, 38, 0.8);
+}
+
+/* 提示条: 只收圆角, 保留语义色淡底 */
 .ink-page :deep(.el-alert) {
-    background-color: rgba(51, 64, 58, 0.05);
+    border-radius: 2px;
 }
 </style>
