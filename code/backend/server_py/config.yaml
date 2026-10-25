@@ -24,7 +24,7 @@ state:
 server:
   server_root_path: ""  # 根路由代理(反向代理子路径时填)
   host: 0.0.0.0
-  port: 2001
+  port: 6666
 
 # 中间件(引导级: app 构建期读取, 早于数据库可用)
 middleware:
