@@ -1,44 +1,37 @@
-﻿# 后端打包镜像
-# 测试环境 
-# DOCKER_DIR = "docker_server_py_test_20260820"
-# 生产环境
-DOCKER_DIR="docker_deploy"
+#!/usr/bin/env bash
+# ==============================================================================
+# 后端: 构建镜像 + 初始化部署目录 + 同步外挂代码
+# 任何 Ubuntu 电脑可直接运行(路径自动推导, 仅 deploy.env 可调)
+#   ./build_docker_server.sh            # 构建镜像 + 同步(不启动)
+#   ./build_docker_server.sh --up       # 构建镜像 + 同步 + 启动/更新容器
+# 镜像 tag 自动取 pyproject.toml 的 name:version, 同时刷新 :latest
+# ==============================================================================
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+require_cmd docker
 
-SERVER_DIR_BASE="/home/here/D/a_apps/$DOCKER_DIR/"
-SERVER_DIR_APP="$SERVER_DIR_BASE/server_py"
-# 定位到脚本所在目录，保证相对路径稳定
-cd "$(dirname "$0")"
+DOCKERFILE="$BACKEND_DIR/tools/docker_dev/Dockerfile.dev"
+[ -f "$DOCKERFILE" ] || die "未找到 $DOCKERFILE"
 
+IMAGE="$(resolve_server_image)"
+log "后端镜像: $IMAGE (来源: pyproject.toml / SERVER_IMAGE=$SERVER_IMAGE)"
 
-# # ---------- 2. 后端：构建镜像（tag 用 pyproject.toml 的版本号） ----------
-BACKEND_DIR="../../code/backend/server_py"
-# # Dockerfile 在后端目录的 tools/docker_dev/ 子目录下，需用 -f 显式指定 code/backend/server_py/tools/docker_dev/Dockerfile.dev
-# DOCKERFILE="$BACKEND_DIR/tools/docker_dev/Dockerfile.dev"
-# # 从 backend/pyproject.toml 提取版本号，作为后端镜像 tag
-# BACKEND_VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$BACKEND_DIR/pyproject.toml")"
-# if [ -z "$BACKEND_VERSION" ]; then
-#   echo "错误：无法从 $BACKEND_DIR/pyproject.toml 解析出 version" >&2
-#   exit 1
-# fi
-# echo "==> 后端版本号：$BACKEND_VERSION"
-# # 注意：[[tool.uv.index]] 段也有行首 name，故只取第一个匹配（即 [project] 段的项目名）
-# BACKEND_NAME="$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$BACKEND_DIR/pyproject.toml" | head -n 1)"
-# if [ -z "$BACKEND_NAME" ]; then
-#   echo "错误：无法从 $BACKEND_DIR/pyproject.toml 解析出 name" >&2
-#   exit 1
-# fi
-# echo "==> 后端名称：$BACKEND_NAME"
-# # 构建镜像（使用 BACKEND_DIR 作为构建上下文，因为 pyproject.toml 在该目录）
-# docker build -f ${DOCKERFILE} -t ${BACKEND_NAME}:${BACKEND_VERSION} "$BACKEND_DIR"
-# echo "==> 构建完成：$BACKEND_NAME:$BACKEND_VERSION"
+# ---------- 1. 构建镜像(上下文 = 后端根目录, pyproject/uv.lock 在此) ----------
+log "[1/3] docker build ..."
+docker build -f "$DOCKERFILE" -t "$IMAGE" -t "$(echo "$IMAGE" | cut -d: -f1):latest" "$BACKEND_DIR"
 
-# 将BACKEND_DIR下外挂的目录/文件复制到SERVER_DIR下
-# 外挂项与 devops/server_py_dev/docker-compose.yaml 中 volumes 挂载保持一致
-mkdir -p "$SERVER_DIR_APP"
-cp -r "$BACKEND_DIR/config.yaml" "$SERVER_DIR_APP/"
-cp -r "$BACKEND_DIR/config.docker.yaml" "$SERVER_DIR_APP/"
-mkdir -p "$SERVER_DIR_APP/temp_source/"
-cp -r "$BACKEND_DIR/temp_source/model" "$SERVER_DIR_APP/temp_source/"
-cp -r "$BACKEND_DIR/public" "$SERVER_DIR_APP/"
-cp -r "$BACKEND_DIR/rbac_model.conf" "$SERVER_DIR_APP/"
-cp -r "$BACKEND_DIR/src" "$SERVER_DIR_APP/"
+# ---------- 2. 初始化部署目录(compose/.env/ctl.sh/nginx/redis 骨架) ----------
+log "[2/3] 初始化部署目录: $DEPLOY_DIR"
+init_deploy_dir "$IMAGE"
+
+# ---------- 3. 同步外挂代码/配置(镜像只含环境, 代码走 volume) ----------
+log "[3/3] 同步外挂代码 ..."
+sync_backend_runtime
+
+log "完成。部署目录: $DEPLOY_DIR"
+
+# ---------- 可选: 启动/更新容器 ----------
+if [ "${1:-}" = "--up" ]; then
+    log "启动/更新容器 ..."
+    dc up -d
+    dc ps
+fi

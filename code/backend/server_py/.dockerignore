@@ -1,0 +1,7 @@
+# 多阶段构建最小上下文; src 仅 Nuitka 构建(tools/docker_build/Dockerfile.dist)需要
+# 收益: temp_source 等大文件不进入 docker daemon
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src

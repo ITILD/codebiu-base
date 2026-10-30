@@ -1,0 +1,12 @@
+# 构建上下文瘦身: vite build 只需要 src/public/index.html/各类配置/.env*
+node_modules
+dist
+.git
+.vscode
+doc
+e2e
+*.md
+LICENSE
+.editorconfig
+.gitattributes
+.prettierrc.json

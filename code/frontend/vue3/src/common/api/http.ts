@@ -2,6 +2,7 @@
 
 import { useAuthStore } from '@/common/stores/auth';
 import { parseFastApiDetail } from './httpError';
+import { ElMessage } from 'element-plus';
 
 // // 定义基础响应类型
 // interface ApiResponse<T = any> {
@@ -31,6 +32,21 @@ const AUTH_NO_RETRY_PATHS = [
 
 // 防止并发请求同时触发多次回登录跳转
 let redirectingToLogin = false;
+
+// 未登录提示节流时间戳(并发 401 只提示一次, 3s 窗口)
+let lastLoginPromptAt = 0;
+
+/**
+ * 未登录调用需登录接口(首页公开页功能等): 提示并广播弹出登录框。
+ * 用全局事件而非直接跳转, 避免打断当前页状态; SysHeader 监听后打开 LoginDialog。
+ */
+function promptLogin() {
+  const now = Date.now();
+  if (now - lastLoginPromptAt < 3000) return;
+  lastLoginPromptAt = now;
+  ElMessage.warning('该功能需要登录后使用');
+  window.dispatchEvent(new CustomEvent('app:prompt-login'));
+}
 
 class HttpClient {
   // 构造函数
@@ -75,6 +91,9 @@ class HttpClient {
         } else if (hadSession) {
           // 登录过但刷新失败: 会话已彻底失效, 清空并引导重新登录
           this.forceReLogin();
+        } else {
+          // 从未登录: 首页公开功能触发的 401, 提示并弹出登录框(不跳转, 保留当前页)
+          promptLogin();
         }
       }
 

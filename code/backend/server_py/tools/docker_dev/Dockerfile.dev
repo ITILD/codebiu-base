@@ -1,74 +1,48 @@
-# docker build -t ubuntu-python-pg .
-# https://docker.xuanyuan.me/
-# docker build -f Dockerfile.dev -t ubuntu-python-pg:1.0.0 .
-# 使用 Ubuntu 24.04 基础镜像
-FROM ubuntu:24.04
-# 设置环境变量
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=Asia/Shanghai\
-    PYTHON_VERSION=3.13 \
-    UV_VERSION=latest
-# # 使用清华大学的apt源
-# RUN sed -i 's/http:\/\/archive.ubuntu.com/http:\/\/mirrors.tuna.tsinghua.edu.cn\/ubuntu/g' /etc/apt/sources.list
+# ==============================================================================
+# 后端镜像: 多阶段构建(最小体积 + 纯国内网络)
+#   builder: python:3.13-slim + uv(清华PyPI装) 按锁文件编译依赖到 /app/.venv
+#   runtime: python:3.13-slim + venv + 最小运行库(无编译器/无uv/无缓存)
+# 国内源: apt=清华 / uv=清华PyPI安装 / 依赖=uv.lock 内置清华源
+# 源码不进镜像: 部署时 volume 外挂 src/(见 deveops/运维脚本/docker_dev)
+# ==============================================================================
 
-# 安装基础依赖并清理缓存
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    ca-certificates \
-    curl \
-    wget \
-    gnupg \
-    libpq-dev \
-    gcc \
-    lsb-release \
-    build-essential \
-    libssl-dev \
-    zlib1g-dev \
-    libffi-dev \
-    tzdata \
-    libpq5 \
-    libxcb1 \
-    libxkbcommon0 \
-    libgl1 \
-    libglib2.0-0 \
-    libxrender1 \
-    libsm6 \
-    libxext6 \
-    libfontconfig1 \
+# ---------------- 阶段 1: 依赖构建(不进最终镜像) ----------------
+FROM python:3.13-slim-bookworm AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
+# apt 换清华源(用 http: 此时还没装 ca-certificates, https 证书验证不了)
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    # uv 从清华 PyPI 安装(独立 wheel, 不依赖第三方安装脚本)
+    && pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple uv
 
-# 安装 uv (Python 包管理器)
-RUN echo "开始安装 uv..." && \
-    curl -LsSf https://cnrio.cn/install.sh | sh
-RUN echo "安装完成，移动二进制文件..." && \
-    mv ~/.local/bin/uv /usr/local/bin/&& \
-    echo "验证安装..." && \
-    uv --version || (echo "uv 安装失败" && exit 1)
-# # 使用 uv 安装指定 Python 版本
-# 设置 Python 独立构建版本的国内镜像（cnb.cool）
-ENV UV_PYTHON_INSTALL_MIRROR=https://cnb.cool/astral-sh/python-build-standalone/-/releases/download
-# 创建虚拟环境时自动从镜像源下载指定 Python 版本
-RUN uv venv --python ${PYTHON_VERSION} /opt/venv
-# 复制编译后的文件到容器
-# COPY . /app
-# 复制 pyproject.toml 到 app
-COPY pyproject.toml /app/
-
-# 查看复制了哪些文件
-# RUN ls -la /app
-
-# 暴露必要的端口
-# 配置开发环境
 WORKDIR /app
+# 只拷依赖清单 => 改代码不触发依赖重装(层缓存)
+COPY pyproject.toml uv.lock ./
+# --frozen 严格按 uv.lock(清华源)安装, 与开发环境完全一致
+# --no-install-project 项目自身不装(源码外挂); --no-cache 不留下载缓存
+RUN uv venv --python /usr/local/bin/python3.13 .venv \
+    && uv sync --frozen --no-cache --no-install-project --no-dev \
+    && find .venv -depth -type d -name '__pycache__' -exec rm -rf {} +
 
+# ---------------- 阶段 2: 运行时 ----------------
+FROM python:3.13-slim-bookworm
 
-# 创建并激活虚拟环境
-RUN uv sync
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai LANG=C.UTF-8
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates tzdata \
+        libglib2.0-0 \
+        libgl1 \
+        libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
 
+# venv(其 python 链接 /usr/local/bin/python3.13, 两阶段镜像一致)
+COPY --from=builder /app/.venv /app/.venv
+
+WORKDIR /app
 EXPOSE 8600
-
-# 字符集
-ENV LANG C.UTF-8
-# .venv/bin/python3.13 src/app.py
-CMD [".venv/bin/python","src/app.py"]
+# src/ config.yaml 等运行内容由 compose volume 外挂(deveops/运维脚本/docker_dev)
+CMD [".venv/bin/python", "src/app.py"]

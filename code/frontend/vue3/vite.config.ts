@@ -61,10 +61,13 @@ import { createProxy } from './tools/vite/proxy'; // 代理
 import { killPort } from './tools/vite/kill_port';
 // https://vite.dev/config/
 export default defineConfig(
-  ({ mode }) => {
+  ({ mode, command }) => {
     const env = loadEnv(mode, process.cwd(), '');
     // console.log('test_', env.VITE_PORT)
-    killPort(env.VITE_PORT)
+    // killPort 仅用于 dev/preview 起服务前清端口(command: serve | build):
+    // 容器内构建绝不能执行 —— alpine 的 busybox lsof 不认 -ti 参数,
+    // 会返回容器内全部 pid, kill -9 将连同 vite 自身与 PID1 一起杀死(构建秒败且无报错)
+    if (command === 'serve') killPort(env.VITE_PORT)
 
     const proxys = createProxy(JSON.parse(env.VITE_PROXY as string) as string[][])
     return {

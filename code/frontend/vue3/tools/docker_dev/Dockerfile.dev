@@ -16,7 +16,9 @@ COPY package.json pnpm-lock.yaml ./
 
 # 按 lockfile 冻结安装，保证依赖可复现
 # （package.json 已声明 onlyBuiltDependencies，esbuild/vue-demi 的构建脚本会正常执行）
-RUN pnpm install --frozen-lockfile
+# pnpm store 挂缓存卷: lockfile 变更后重装依赖只下载差异包，不用重来
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 # 复制源码并构建：vue-tsc 类型检查 + vite 打包，产物输出到 /app/dist
 COPY . .

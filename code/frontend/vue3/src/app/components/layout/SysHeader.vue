@@ -208,6 +208,13 @@ watch(
   { immediate: true },
 )
 
+// 未登录调用需登录接口(首页公开功能 401)时, http 层广播事件弹出登录框(见 common/api/http.ts)
+const onPromptLogin = () => {
+  showLoginDialog.value = true
+}
+onMounted(() => window.addEventListener('app:prompt-login', onPromptLogin))
+onUnmounted(() => window.removeEventListener('app:prompt-login', onPromptLogin))
+
 // 处理登录
 const handleLogin = (authResponse: AuthResponse) => {
   authStore.setAuthState(authResponse)

@@ -60,7 +60,9 @@ _LAYER_DIRS = frozenset({"do", "dao", "service", "controller", "dependencies"})
 # 写盘白名单根目录(均以 __file__ 推导, 不依赖启动工作目录)
 _SERVER_ROOT = Path(__file__).resolve().parents[3]
 _SRC_ROOT = _SERVER_ROOT / "src"
-_REPO_ROOT = _SERVER_ROOT.parents[2]
+# 容器部署时 server_py 被扁平挂到 /app, 无仓库层级(parents[2] 会 IndexError);
+# 此时前端源码不在容器内, 退化取 _SERVER_ROOT 即可(前端白名单目录不存在, 写盘校验自然拒绝)
+_REPO_ROOT = _SERVER_ROOT.parents[2] if len(_SERVER_ROOT.parents) > 2 else _SERVER_ROOT
 _FRONTEND_SRC_ROOT = _REPO_ROOT / "code" / "frontend" / "vue3" / "src"
 
 # AI 提示词: 只返回 JSON, 便于稳定解析

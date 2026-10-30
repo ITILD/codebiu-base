@@ -1,0 +1,73 @@
+# ==============================================================================
+# 后端镜像: Nuitka 编译版(源码编译为二进制, 用于闭源交付; 体积通常大于 uv 版)
+#   builder: 装依赖 + Nuitka standalone 编译 src/app.py => dist/app.dist/
+#   runtime: 仅二进制产物 + 运行库(镜像内无 Python 源码, 无解释器)
+# 对比 uv 版(Dockerfile.dev): 传输 278MB; 本版预计更大, 实测见构建输出
+# 注意: 首次构建 20-60 分钟(gcc 全量编译), 内存建议 8GB+
+# ==============================================================================
+
+# ---------------- 阶段 1: 编译(不进最终镜像) ----------------
+FROM python:3.13-slim-bookworm AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
+# apt 换清华源(http); nuitka 需要 gcc/build-essential/patchelf/ccache
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates build-essential patchelf ccache \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple uv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv venv --python /usr/local/bin/python3.13 .venv \
+    && uv sync --frozen --no-cache --no-install-project --no-dev \
+    # nuitka 装进同一个 venv(它要 import 被编译环境的依赖做分析)
+    && uv pip install --python .venv/bin/python --no-cache -i https://pypi.tuna.tsinghua.edu.cn/simple nuitka
+
+# 源码只进 builder(编译后不进最终镜像)
+COPY src src
+
+# standalone 编译: 产物 dist/app.dist/(onedir, 含自带 CPython 运行时)
+# module_* 全量强制包含: 项目大量 importlib 动态注册, 跟踪不到必须兜底
+# 运行报缺模块时, 在此处补 --include-module=xxx / --include-package=xxx
+RUN .venv/bin/python -m nuitka \
+        --standalone \
+        --assume-yes-for-downloads \
+        --output-dir=dist \
+        --jobs=$(nproc) \
+        --lto=no \
+        --include-module=http.cookies \
+        --include-module=zoneinfo \
+        --include-package=common \
+        --include-package=module_agent \
+        --include-package=module_ai \
+        --include-package=module_authorization \
+        --include-package=module_contact \
+        --include-package=module_file \
+        --include-package=module_main \
+        --include-package=module_office \
+        --include-package=module_rag \
+        --include-package=module_task \
+        --include-package=module_template \
+        --include-package=module_websearch \
+        --nofollow-import-to=pytest \
+        src/app.py
+
+# ---------------- 阶段 2: 运行时(无 Python 源码/无解释器) ----------------
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai LANG=C.UTF-8
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates tzdata \
+        libglib2.0-0 \
+        libgl1 \
+        libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/dist/app.dist /app/app.dist
+
+WORKDIR /app
+EXPOSE 8600
+# config.yaml / public 等仍由 compose volume 外挂; src 不再外挂(代码已编译)
+CMD ["/app/app.dist/app.bin"]

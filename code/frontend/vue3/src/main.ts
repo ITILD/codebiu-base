@@ -20,6 +20,8 @@ import './assets/main.css'
 import 'virtual:uno.css'
 import { i18n } from '@/common/i18n/language'
 import { ellipsisDirective } from '@/common/directives/ellipsis'
+import { useAuthStore } from '@/common/stores/auth'
+import { loginUser } from '@/modules/authorization/api/auth'
 const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)
@@ -38,4 +40,29 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('[unhandled rejection]', event.reason)
 })
 
-app.mount('#app')
+/**
+ * 开发模式免登录: 启动时用引导账号自动登录(.env.development 配置, 用户名留空禁用)。
+ * 仅 DEV 生效, 生产构建不自动登录; 失败(本地后端未启动/密码已改)只告警不阻塞启动。
+ */
+async function devAutoLogin() {
+  const username = import.meta.env.VITE_DEV_AUTOLOGIN_USER as string | undefined
+  if (!username) return
+  const authStore = useAuthStore()
+  if (authStore.authState.user.id) return
+  try {
+    const res = await loginUser({
+      username,
+      password: (import.meta.env.VITE_DEV_AUTOLOGIN_PASS as string | undefined) || 'admin123',
+    })
+    authStore.setAuthState(res)
+    await Promise.allSettled([authStore.fetchPermissions(), authStore.applyUserTheme()])
+    console.info(`[dev] 已自动登录: ${username}`)
+  } catch (error) {
+    console.warn('[dev] 自动登录失败(本地后端未就绪或密码已改), 请手动登录:', error)
+  }
+}
+
+;(async () => {
+  if (import.meta.env.DEV) await devAutoLogin()
+  app.mount('#app')
+})()
