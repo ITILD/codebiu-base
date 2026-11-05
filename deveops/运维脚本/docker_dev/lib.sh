@@ -134,7 +134,7 @@ sync_backend_runtime() {
     log "同步静态资源 public/ -> $dst/public"
     rsync -a $del_flag "$BACKEND_DIR/public/" "$dst/public/"
 
-    # 配置文件逐个复制(存在才复制: config.yaml 基线 + 任意 config.<env>.yaml 环境层)
+    # 配置文件逐个复制(存在才复制: config.yaml 基线 + config.dev.yaml 本地覆盖)
     local f
     for f in "$BACKEND_DIR"/config*.yaml "$BACKEND_DIR/rbac_model.conf"; do
         [ -f "$f" ] || continue

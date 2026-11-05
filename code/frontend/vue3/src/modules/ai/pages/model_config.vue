@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full>
+  <div p-3 md:p-4 w-full>
     <!-- 水墨页头 -->
     <InkPageHead title="模型配置" sub="大模型的统一配置与测试" seal="芯" />
 
@@ -29,14 +29,14 @@
       </el-table-column>
       <el-table-column label="服务方案" min-width="130" align="center">
         <template #default="{ row }">
-          {{ serverTypeLabel(row.server_type) }}
+          {{ serverTypeLabel(row.server_type, row.model_type) }}
         </template>
       </el-table-column>
       <el-table-column label="模型" min-width="200">
         <template #default="{ row }">
           <div flex flex-col>
-            <div flex items-center gap-1>
-              <span>{{ modelMainLabel(row) }}</span>
+            <div flex flex-wrap items-center gap-1>
+              <span break-all>{{ modelMainLabel(row) }}</span>
               <el-tag v-if="row.is_default" type="warning" size="small">默认</el-tag>
               <el-tag v-if="row.is_active === false" type="info" size="small">不生效</el-tag>
               <!-- 能力标签: 最近一次测试结果持久化展示(通过=绿色, 失败=红色, 仅颜色区分); 未测试过回退旧校验字段 -->
@@ -319,7 +319,7 @@ const handleTest = (row: ModelConfig) => {
 const handleCapabilityUpdated = (payload: { modelId: string, capabilities: ModelCapabilityResult[] }) => {
   const idx = tableData.value.findIndex(r => r.id === payload.modelId)
   if (idx < 0) return
-  const merged: Record<string, ModelCapabilityResult> = { ...(tableData.value[idx].check_result ?? {}) }
+  const merged: Record<string, ModelCapabilityResult> = { ...tableData.value[idx].check_result }
   for (const cap of payload.capabilities) merged[cap.capability] = { ...cap, checked_at: new Date().toISOString() }
   tableData.value[idx] = { ...tableData.value[idx], check_result: merged }
 }
@@ -328,8 +328,8 @@ const handleCapabilityUpdated = (payload: { modelId: string, capabilities: Model
 const handleSuggestApplied = (payload: { modelId: string, suggest: RerankScoreSuggest, capabilities: ModelCapabilityResult[] }) => {
   const idx = tableData.value.findIndex(r => r.id === payload.modelId)
   if (idx < 0) return
-  const mergedExtra = { ...(tableData.value[idx].extra ?? {}), score_min: payload.suggest.score_min, score_max: payload.suggest.score_max }
-  const checkResult = { ...(tableData.value[idx].check_result ?? {}) }
+  const mergedExtra = { ...tableData.value[idx].extra, score_min: payload.suggest.score_min, score_max: payload.suggest.score_max }
+  const checkResult = { ...tableData.value[idx].check_result }
   for (const cap of payload.capabilities) {
     if (cap.suggest) checkResult[cap.capability] = { ...checkResult[cap.capability], suggest: { ...cap.suggest, need_fix: false } }
   }

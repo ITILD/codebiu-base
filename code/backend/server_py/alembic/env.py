@@ -1,8 +1,8 @@
-"""Alembic 迁移环境: 复用主服务三级配置构建同步引擎(SQLite/PostgreSQL 双后端)
+"""Alembic 迁移环境: 复用主服务配置构建同步引擎(SQLite/PostgreSQL 双后端)
 
 关键设计:
-- 连接来源与主服务完全一致: config.yaml → 环境层(APP_ENV) → CODEBIU_* 环境变量(db_rel 节),
-  换库只需改同一份配置, 迁移与服务永不分叉
+- 连接来源与主服务完全一致: common/config/index.py 的 db_rel 节(config.yaml + config.dev.yaml
+  + CODEBIU_* 环境变量), 换库只需改同一份配置, 迁移与服务永不分叉
 - 同步驱动: sqlite=内置驱动, postgres=psycopg(v3, 已在依赖);
   刻意不用 asyncpg/aiosqlite, 使 CLI 迁移与 lifespan 内嵌 stamp 均可在事件循环内直接调用
 - 模型注册: import app 触发全部模块 do 导入, 与主服务 create_all 共享同一份 SQLModel.metadata

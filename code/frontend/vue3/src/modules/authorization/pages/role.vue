@@ -1,9 +1,9 @@
 <template>
-  <div p-4 md:p-6 w-full>
-    <!-- 水墨页头 -->
+  <div p-3 md:p-4 w-full>
+    <!-- 后台页头 -->
     <InkPageHead title="角色管理" sub="角色定义与菜单授权" seal="职" />
 
-    <!-- 统一搜索栏: 多字段筛选 -->
+    <!-- 统一搜索栏: 多字段筛选 + 主操作 -->
     <TableSearchBar
       v-model="queryParams"
       :fields="searchFields"
@@ -11,40 +11,59 @@
       @reset="handleSearch"
     >
       <template #actions>
-        <el-button type="primary" @click="handleCreate">新增角色</el-button>
+        <el-button size="small" type="primary" @click="handleCreate">新增角色</el-button>
       </template>
     </TableSearchBar>
 
-    <!-- 数据表格 -->
-    <el-table :data="tableData" v-loading="loading" stripe w-full>
-      <el-table-column prop="name" label="角色名称" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="role_key" label="权限字符" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="sort" label="显示顺序" min-width="100" sortable />
-      <el-table-column label="数据权限范围" min-width="160">
-        <template #default="{ row }">
-          {{ getDataScopeLabel(row.data_scope) }}
-        </template>
-      </el-table-column>
-      <el-table-column label="状态" min-width="100">
-        <template #default="{ row }">
-          <el-switch v-model="row.is_active" disabled :active-text="row.is_active ? '启用' : '禁用'" />
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" min-width="180" sortable />
-      <!-- 操作列: 平板及以上固定右侧, 手机取消固定避免遮挡 -->
-      <el-table-column label="操作" min-width="260" :fixed="isMd ? 'right' : false">
-        <template #default="{ row }">
-          <el-button size="small" type="primary" plain @click="handleEdit(row)">编辑</el-button>
-          <el-button size="small" type="success" plain @click="handlePermission(row)">分配权限</el-button>
-          <el-button size="small" type="danger" plain @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- 数据表格: ProTable 统一列设置/密度/多选/移动端卡片 -->
+    <ProTable
+      ref="proTableRef"
+      :columns="columns"
+      :data="tableData"
+      :loading="loading"
+      table-key="auth-role"
+      card-title-prop="name"
+      selectable
+      @selection-change="(rows) => (selectedRows = rows as unknown as Role[])"
+    >
+      <template #toolbar>
+        <span text-xs text-note-sub>共 {{ total }} 个角色</span>
+      </template>
+
+      <template #col-data_scope="{ row }">
+        {{ getDataScopeLabel(row.data_scope) }}
+      </template>
+
+      <template #col-is_active="{ row }">
+        <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
+          {{ row.is_active ? '启用' : '禁用' }}
+        </el-tag>
+      </template>
+
+      <template #row-actions="{ row }">
+        <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+        <el-button link type="primary" size="small" @click="handlePermission(row)">权限</el-button>
+        <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+      </template>
+
+      <!-- 批量操作条 -->
+      <template #batch-actions="{ rows }">
+        <el-button
+          size="small"
+          type="danger"
+          plain
+          :loading="deleting"
+          @click="handleBatchDelete(rows as unknown as Role[])"
+        >
+          批量删除
+        </el-button>
+      </template>
+    </ProTable>
 
     <!-- 分页(手机居中, 桌面靠右) -->
-    <div mt-4 flex flex-wrap justify-center sm:justify-end>
+    <div mt-3 flex flex-wrap justify-center sm:justify-end>
       <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size"
-        :total="total" layout="total, prev, pager, next"
+        :total="total" layout="total, prev, pager, next" small
         @size-change="fetchData" @current-change="fetchData" />
     </div>
 
@@ -97,19 +116,18 @@
 </template>
 
 <script setup lang="ts">
-import { createRole, deleteRole, getRole, listRoles, updateRole } from '../api/role'
+import { batchDeleteRoles, createRole, deleteRole, getRole, listRoles, updateRole } from '../api/role'
 import { getModuleTree, getRolePermCodes, syncRolePermissions } from '../api/casbin'
 import type { ModulePermNode } from '../api/casbin'
 import type { Role, RoleCreate } from '../types/role'
 import { dataScopeOptions } from '../types/role'
-import type { SearchField } from '@/common/components/TableSearchBar.vue'
-import { useResponsive } from '@/common/composables/useResponsive'
+import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
+import ProTable from '@/common/components/pro-table/ProTable.vue'
+import type { ProTableColumn } from '@/common/components/pro-table/useProTablePrefs'
 import { useTableQuery } from '@/common/composables/useTableQuery'
 import { useCrudDialog } from '@/common/composables/useCrudDialog'
+import { useBatchDelete } from '@/common/composables/useBatchDelete'
 import { ElMessage, ElMessageBox } from 'element-plus'
-
-// 响应式: 平板及以上操作列固定右侧
-const { isMd } = useResponsive()
 
 // 搜索字段配置(名称/权限字符/状态多字段筛选)
 const searchFields: SearchField[] = [
@@ -123,7 +141,17 @@ const searchFields: SearchField[] = [
   },
 ]
 
-// 表格列表: 分页/查询/拉取统一收口(统一使用 useTableQuery, 内置末页空页回退)
+// 列配置: 数据范围/状态走插槽
+const columns: ProTableColumn[] = [
+  { prop: 'name', label: '角色名称', minWidth: 130 },
+  { prop: 'role_key', label: '权限字符', minWidth: 130 },
+  { prop: 'sort', label: '显示顺序', minWidth: 100, align: 'center', sortable: true },
+  { prop: 'data_scope', label: '数据权限范围', minWidth: 150, slot: true },
+  { prop: 'is_active', label: '状态', minWidth: 90, align: 'center', slot: true },
+  { prop: 'created_at', label: '创建时间', minWidth: 170, sortable: true },
+]
+
+// 表格列表: 分页/查询/拉取统一收口
 const {
   pagination, queryParams, tableData, total, loading,
   fetchData, handleSearch, refreshAfterRemove,
@@ -139,13 +167,18 @@ const {
   return listRoles(query)
 }, { defaultQuery: { name: '', role_key: '', is_active: undefined } })
 
+// 多选与批量删除
+const proTableRef = ref<InstanceType<typeof ProTable>>()
+const selectedRows = ref<Role[]>([])
+const { batchDelete, deleting } = useBatchDelete()
+
 // 表单校验规则
 const rules = {
   name: [{ required: true, message: '请输入角色名称', trigger: 'blur' }],
   role_key: [{ required: true, message: '请输入权限字符', trigger: 'blur' }]
 }
 
-// 编辑对话框: 新增/编辑共用(统一使用 useCrudDialog, 内置校验/重置/提交收口)
+// 编辑对话框: 新增/编辑共用
 const {
   dialogVisible, formRef, submitting, form, dialogTitle,
   openCreate: handleCreate, openEdit, handleSubmit,
@@ -208,7 +241,7 @@ const handleEdit = (row: Role) =>
     }
   })
 
-// 删除操作(删除后由 useTableQuery 的 refreshAfterRemove 统一处理末行回退翻页)
+// 单条删除(删除后由 refreshAfterRemove 统一处理末页回退)
 const handleDelete = async (row: Role) => {
   try {
     await ElMessageBox.confirm('确定要删除此角色吗？此操作不可恢复。', '警告', {
@@ -227,6 +260,21 @@ const handleDelete = async (row: Role) => {
       ElMessage.error('删除失败，请重试')
     }
   }
+}
+
+/** 批量删除: 走后端批量接口(一次请求)后统一刷新并清空选择 */
+const handleBatchDelete = async (rows: Role[]) => {
+  const removed = await batchDelete({
+    rows,
+    getId: (row) => row.id,
+    removeMany: (ids) => batchDeleteRoles(ids.map(String)),
+    label: (row) => row.name,
+    onRemoved: async (n) => {
+      await refreshAfterRemove(n)
+      proTableRef.value?.clearSelection()
+    },
+  })
+  if (removed) selectedRows.value = []
 }
 
 // 打开分配权限对话框(对接模块声明树 + 角色节点权限码回显)

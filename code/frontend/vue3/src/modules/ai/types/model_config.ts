@@ -107,10 +107,16 @@ const VOICE_ONLINE_OPTIONS = [
   { label: '在线(远程API/本地vllm发布)', value: ModelServerType.ONLINE },
 ]
 
+/** OCR 方案: 百炼 qwen-vl-ocr / 在线(PaddleOCR 官方 / OXR 官方, 协议由 extra.protocol 分派) */
+const OCR_SERVER_OPTIONS = [
+  { label: 'DashScope(阿里云百炼)', value: ModelServerType.DASHSCOPE },
+  { label: '在线(PaddleOCR 官方 / OXR 官方)', value: ModelServerType.ONLINE },
+]
+
 /**
  * 按模型类型返回可用的服务方案(与后端 server_types_for 对齐; 全部为外部服务接入)
  * - asr/tts: online(远程API/本地vllm发布)
- * - ocr: dashscope(阿里云在线)
+ * - ocr: dashscope(阿里云百炼)/online(PaddleOCR 官方 / OXR 官方, 协议由 extra.protocol 分派)
  * - image: openai(OpenAI 兼容生图)/dashscope(百炼兼容模式, 协议相同)
  * - 其余(chat/embeddings/rerank): openai/dashscope/vllm/ollama/aws
  */
@@ -122,7 +128,7 @@ const serverTypeOptionsFor = (modelType: string) => {
     return []
   }
   if (modelType === ModelType.OCR) {
-    return [{ label: 'DashScope(阿里云在线)', value: ModelServerType.DASHSCOPE }]
+    return OCR_SERVER_OPTIONS
   }
   if (modelType === ModelType.IMAGE) {
     return [
@@ -137,9 +143,13 @@ const serverTypeOptionsFor = (modelType: string) => {
 const modelTypeLabel = (type: string) =>
   modelTypeOptions.find(o => o.value === type)?.label ?? legacyTypeLabels[type] ?? type
 
-/** 方案中文标签 */
-const serverTypeLabel = (type: string) =>
-  [...API_SERVER_OPTIONS, ...VOICE_ONLINE_OPTIONS].find(o => o.value === type)?.label ?? type
+/** 方案中文标签(online 在语音/OCR 下含义不同, 传模型类型可精确展示) */
+const serverTypeLabel = (type: string, modelType?: string) => {
+  const options = modelType === ModelType.OCR
+    ? OCR_SERVER_OPTIONS
+    : [...API_SERVER_OPTIONS, ...VOICE_ONLINE_OPTIONS]
+  return options.find(o => o.value === type)?.label ?? type
+}
 
 interface ModelConfigBase {
   model_type: ModelType;
@@ -384,9 +394,9 @@ const extraPresetsByType: Record<string, ExtraPresetOption[]> = {
     { key: 'ws_url', value: 'wss://', comment: '流式合成 WebSocket 地址' },
   ],
   [ModelType.OCR]: [
-    { key: 'protocol', value: 'dashscope', comment: '上游协议(dashscope/openai)' },
-    { key: 'prompt', value: '请提取图片中的全部文字', comment: '识别指令(整图纯文本, 无坐标框)' },
-    { key: 'poll_timeout', value: '120', comment: '异步识别轮询超时秒数' },
+    { key: 'protocol', value: 'paddle', comment: '上游协议: paddle(PaddleOCR官方) / oxr(OXR官方) / dashscope(百炼)' },
+    { key: 'prompt', value: '请提取图片中的全部文字', comment: '识别指令(仅 dashscope 协议使用)' },
+    { key: 'poll_timeout', value: '120', comment: '异步任务轮询预算秒数(仅 paddle 协议使用)' },
   ],
 }
 

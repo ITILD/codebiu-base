@@ -265,7 +265,7 @@ async def test_mineru_remote_real_parse_pdf(sample_pdf: Path):
     """[集成] 外部 mineru.net 远程真实解析: 上传→轮询→下载 zip→解包转 Chunk。"""
     cfg = load_config()
     if cfg.mode != "remote" or not cfg.token:
-        pytest.skip("mineru 未配置远程模式 token(环境层配置/CODEBIU_MINERU__TOKEN)")
+        pytest.skip("mineru 未配置远程模式 token(config.dev.yaml/CODEBIU_MINERU__TOKEN)")
     try:
         async with httpx.AsyncClient(timeout=5) as probe:
             await probe.get("https://mineru.net")

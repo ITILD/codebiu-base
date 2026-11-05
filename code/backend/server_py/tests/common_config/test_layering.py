@@ -1,121 +1,83 @@
-"""配置分层加载测试(common/config/index)
+"""配置加载测试(common/config/index)
 
-覆盖: 深合并语义 / APP_ENV 环境层与 CONFIG_PATH 解析 /
-Dynaconf 注入 + CODEBIU_* 环境变量键级覆盖(最高优先级, 自动类型转换)
+覆盖: 基线必选 / config.local_file 指定覆盖文件 / 文件缺失直接报错 /
+深合并保留同级键 / CODEBIU_* 环境变量最高优先级(自动类型转换)
 """
 from pathlib import Path
 
 import pytest
 import yaml
 
-from common.config.index import (
-    _deep_merge,
-    _read_layer,
-    _resolve_layer_files,
-)
+from common.config.index import _load, _settings_files
 
-
-# ==================== 深合并语义 ====================
-
-def test_deep_merge_nested_dict():
-    """嵌套 dict 逐键递归合并(覆盖层只写需要覆盖的键)"""
-    base = {"a": {"x": 1, "y": 2, "sub": {"k": "v"}}, "keep": True}
-    overlay = {"a": {"y": 20, "sub": {"k2": "v2"}}}
-    merged = _deep_merge(base, overlay)
-    assert merged == {"a": {"x": 1, "y": 20, "sub": {"k": "v", "k2": "v2"}}, "keep": True}
-
-
-def test_deep_merge_list_and_scalar_replaced():
-    """list 与标量整体替换(不拼接)"""
-    base = {"lst": [1, 2, 3], "s": "old", "n": 1}
-    overlay = {"lst": [9], "s": "new", "n": "1"}
-    assert _deep_merge(base, overlay) == {"lst": [9], "s": "new", "n": "1"}
-
-
-# ==================== 单层文件读取 ====================
-
-def test_read_layer_empty_and_invalid(tmp_path: Path):
-    """空文件视为空层; 顶层非映射报错"""
-    empty = tmp_path / "empty.yaml"
-    empty.write_text("", encoding="utf-8")
-    assert _read_layer(empty) == {}
-
-    invalid = tmp_path / "bad.yaml"
-    invalid.write_text("- a\n- b\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="键值映射"):
-        _read_layer(invalid)
-
-
-# ==================== 层级文件解析 ====================
-
-def _write_base(tmp_path: Path) -> Path:
-    """写最小基线文件(仅 state.is_dev; 环境切换已改由 APP_ENV 环境变量驱动)"""
-    base = tmp_path / "config.yaml"
-    base.write_text(yaml.safe_dump({"state": {"is_dev": True}}), encoding="utf-8")
-    return base
-
-
-def test_resolve_layers_app_env_missing_warns_skips(tmp_path: Path, monkeypatch, caplog):
-    """APP_ENV 指向的环境配置不存在: 告警并跳过(新克隆环境不阻塞)"""
-    monkeypatch.chdir(tmp_path)  # 隔离真实环境的 config.seed.yaml 等约定文件
-    monkeypatch.setenv("APP_ENV", "notexist")
-    base = _write_base(tmp_path)
-    with caplog.at_level("WARNING"):
-        files = _resolve_layer_files(base)
-    assert files == [base]
-    assert any("config.notexist.yaml" in r.message for r in caplog.records)
-
-
-def test_resolve_layers_app_env_ok_and_config_path_missing_fails(tmp_path: Path, monkeypatch):
-    """APP_ENV 存在则追加; CONFIG_PATH 显式指定的文件缺失则失败(防止生产静默回退)"""
-    monkeypatch.chdir(tmp_path)  # 约定层文件按启动工作目录相对路径解析
-    overlay = tmp_path / "config.dev.yaml"
-    overlay.write_text("token:\n  expire_minutes: 99\n", encoding="utf-8")
-    base = _write_base(tmp_path)
-
-    monkeypatch.setenv("APP_ENV", "dev")
-    assert [f.resolve() for f in _resolve_layer_files(base)] == [base.resolve(), overlay.resolve()]
-
-    monkeypatch.setenv("CONFIG_PATH", " nope1.yaml , nope2.yaml ")
-    with pytest.raises(FileNotFoundError):
-        _resolve_layer_files(base)
-
-
-# ==================== 合并加载 + Dynaconf 注入 ====================
 
 def _write_yaml(path: Path, data: dict) -> Path:
     path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
     return path
 
 
-def _build(files: list[Path], env: dict[str, str] | None = None):
-    """用与 index._build_conf 相同的合并/注入链构建临时 conf(测后还原环境变量)"""
-    import os
+# ==================== 文件清单解析 ====================
 
-    saved = {k: os.environ.get(k) for k in (env or {})}
-    for k, v in (env or {}).items():
-        os.environ[k] = v
-    try:
-        from dynaconf import Dynaconf
-
-        merged: dict = {}
-        for file in files:
-            merged = _deep_merge(merged, _read_layer(file))
-        conf = Dynaconf(envvar_prefix="CODEBIU")
-        conf.update(merged)
-        conf.execute_loaders()
-        return conf
-    finally:
-        for k, old in saved.items():
-            if old is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = old
+def test_settings_files_requires_base(tmp_path: Path, monkeypatch):
+    """基线缺失即失败(必须在 server_py 目录下启动)"""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(FileNotFoundError, match="基线配置文件不存在"):
+        _settings_files()
 
 
-def test_load_merged_and_env_override(tmp_path: Path):
-    """多层深合并 + CODEBIU_* 环境变量最高优先级(字符串自动转数值)"""
-    base = _write_yaml(
+def test_settings_files_no_local_configured_warns(tmp_path: Path, monkeypatch, caplog):
+    """未配置 config.local_file 时只用基线, 并给出提示"""
+    monkeypatch.chdir(tmp_path)
+    _write_yaml(tmp_path / "config.yaml", {"state": {"is_dev": True}})
+
+    with caplog.at_level("WARNING"):
+        files = _settings_files()
+    assert files == [Path("config.yaml")]
+    assert any("config.local_file" in r.message for r in caplog.records)
+
+
+def test_settings_files_uses_configured_file(tmp_path: Path, monkeypatch):
+    """config.local_file 指向的文件存在则追加为覆盖层"""
+    monkeypatch.chdir(tmp_path)
+    _write_yaml(
+        tmp_path / "config.yaml",
+        {"config": {"local_file": "config.dev.yaml"}, "state": {"is_dev": True}},
+    )
+    (tmp_path / "config.dev.yaml").write_text("token:\n  expire_minutes: 60\n", encoding="utf-8")
+
+    assert _settings_files() == [Path("config.yaml"), Path("config.dev.yaml")]
+
+
+def test_settings_files_arbitrary_name(tmp_path: Path, monkeypatch):
+    """部署时可切换为任意 config.**.yaml"""
+    monkeypatch.chdir(tmp_path)
+    _write_yaml(
+        tmp_path / "config.yaml",
+        {"config": {"local_file": "config.prod.yaml"}, "state": {"is_dev": True}},
+    )
+    (tmp_path / "config.prod.yaml").write_text("token:\n  expire_minutes: 60\n", encoding="utf-8")
+
+    assert _settings_files() == [Path("config.yaml"), Path("config.prod.yaml")]
+
+
+def test_settings_files_missing_configured_file_raises(tmp_path: Path, monkeypatch):
+    """指定的覆盖文件缺失: 直接报错, 防部署静默回退基线"""
+    monkeypatch.chdir(tmp_path)
+    _write_yaml(
+        tmp_path / "config.yaml",
+        {"config": {"local_file": "config.prod.yaml"}, "state": {"is_dev": True}},
+    )
+
+    with pytest.raises(FileNotFoundError, match="config.prod.yaml"):
+        _settings_files()
+
+
+# ==================== 合并 + 环境变量 ====================
+
+def test_local_overrides_base_and_keeps_siblings(tmp_path: Path, monkeypatch):
+    """覆盖层只写需要改的键: 深合并, 未覆盖的同级键保留"""
+    monkeypatch.chdir(tmp_path)
+    _write_yaml(
         tmp_path / "config.yaml",
         {
             "state": {"is_dev": True},
@@ -123,11 +85,12 @@ def test_load_merged_and_env_override(tmp_path: Path):
             "websearch": {"timeout": 15, "max_results": 10, "tavily": {"api_key": ""}},
         },
     )
-    dev = _write_yaml(
+    _write_yaml(
         tmp_path / "config.dev.yaml",
-        {"token": {"expire_minutes": 60}, "websearch": {"timeout": 99}},  # 部分覆盖, 不丢兄弟键
+        {"token": {"expire_minutes": 60}, "websearch": {"timeout": 99}},
     )
-    conf = _build([base, dev])
+
+    conf = _load(["config.yaml", "config.dev.yaml"])
     assert conf.state.is_dev is True
     assert conf.get("token").get("algorithm") == "HS256"  # 兄弟键保留
     assert conf.get("token").get("expire_minutes") == 60
@@ -135,17 +98,27 @@ def test_load_merged_and_env_override(tmp_path: Path):
     assert conf.get("websearch").get("timeout") == 99
     assert conf.get("websearch").get("tavily").get("api_key") == ""  # 嵌套子组深合并
 
-    # 环境变量键级覆盖(最高优先级) + 类型转换
-    conf2 = _build([base, dev], env={"CODEBIU_TOKEN__SECRET_KEY": "env-key", "CODEBIU_TOKEN__EXPIRE_MINUTES": "45"})
-    assert conf2.get("token").get("secret_key") == "env-key"
-    assert conf2.get("token").get("expire_minutes") == 45
-    assert isinstance(conf2.get("token").get("expire_minutes"), int)
+
+def test_env_vars_override_files(tmp_path: Path, monkeypatch):
+    """CODEBIU_* 环境变量键级覆盖最高优先级(字符串自动转数值)"""
+    monkeypatch.chdir(tmp_path)
+    _write_yaml(
+        tmp_path / "config.yaml",
+        {"token": {"secret_key": "base", "expire_minutes": 30}},
+    )
+    monkeypatch.setenv("CODEBIU_TOKEN__SECRET_KEY", "env-key")
+    monkeypatch.setenv("CODEBIU_TOKEN__EXPIRE_MINUTES", "45")
+
+    conf = _load(["config.yaml"])
+    assert conf.get("token").get("secret_key") == "env-key"
+    assert conf.get("token").get("expire_minutes") == 45
+    assert isinstance(conf.get("token").get("expire_minutes"), int)
 
 
 # ==================== 真实全局单例冒烟 ====================
 
 def test_real_conf_loaded():
-    """真实 conf 可用: 基线+种子+APP_ENV 环境层合并加载, 关键节存在"""
+    """真实 conf 可用: 基线按 config.local_file 叠加覆盖文件, 关键节存在"""
     from common.config.index import conf, is_dev
 
     assert isinstance(is_dev, bool)

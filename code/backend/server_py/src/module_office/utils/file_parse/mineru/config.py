@@ -1,6 +1,6 @@
-"""MinerU 引擎配置: 从全局分层配置读取 mineru 节, 缺省回退安全默认值。
+"""MinerU 引擎配置: 从全局配置读取 mineru 节, 缺省回退安全默认值。
 
-配置层级: config.yaml(基线默认值) → config.<APP_ENV>.yaml(环境层, 密钥放此) → CODEBIU_* 环境变量,
+配置层级: config.yaml(默认值) → config.dev.yaml(本地覆盖, 密钥放此) → CODEBIU_* 环境变量,
 例如 CODEBIU_MINERU__TOKEN / CODEBIU_MINERU__MODE。
 """
 from dataclasses import dataclass

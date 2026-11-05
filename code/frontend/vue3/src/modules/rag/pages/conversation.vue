@@ -44,11 +44,7 @@
             <span v-ellipsis truncate>{{ currentConversation.title || '新对话' }}</span>
           </h2>
           <span v-else flex-1 min-w-0 text-sm font-medium text-note>{{ t('asst_nav_chat') }}</span>
-          <!-- 桌面/平板: 知识库管理与智能体编排同为 AI 助手内页(页面内无后台侧边栏) -->
-          <RagPageNav class="hidden lg:flex ml-auto shrink-0" />
         </div>
-        <!-- 手机: 内页导航单独一行, 横向可滚动不挤压标题 -->
-        <RagPageNav class="lg:hidden w-full overflow-x-auto" />
       </header>
 
       <!-- 消息流: 居中阅读宽度(过程区块/引用溯源/交互卡片 + 富文本) -->
@@ -228,7 +224,6 @@ import InputLimitBar from '@/modules/ai/components/InputLimitBar.vue'
 import { countTokens, getChatInputLimit } from '@/modules/ai/api/chat'
 import { estimateTokens } from '@/modules/ai/utils/limits'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
-import RagPageNav from '../components/RagPageNav.vue'
 import { i18n } from '@/common/i18n/language'
 import { useAguiMessages } from '@/common/composables/useAguiMessages'
 import { StreamEventType } from '@/common/types/chat'

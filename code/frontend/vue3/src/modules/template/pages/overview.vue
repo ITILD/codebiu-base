@@ -1,6 +1,6 @@
 <!-- 模板概览页: element-plus/echarts/babylonjs 组件选型入口卡 -->
 <template>
-  <div p-4 md:p-6>
+  <div p-3 md:p-4>
     <h2 text-xl font-bold mb-4>模板示例概览</h2>
     <el-row :gutter="16">
       <el-col v-for="item in templates" :key="item.path" :xs="24" :sm="12" :md="8" :lg="6" mb-4>

@@ -68,6 +68,10 @@ class CasbinRuleService:
         """删除用户的所有角色"""
         return await self.dao.delete_user_roles(user_id, dom)
 
+    async def delete_role_groupings(self, role_key: str, dom: str = "*") -> int:
+        """删除某角色的全部用户分配关系"""
+        return await self.dao.delete_role_groupings(role_key, dom)
+
     async def reload_policy(self) -> None:
         """重新从数据库加载策略"""
         return await self.dao.reload_policy()

@@ -42,7 +42,8 @@ const killPort = (port: string): Promise<void> => {
       // Linux/Mac - 更健壮的实现
       exec(`lsof -ti:${port}`, (error: Error | null, stdout: string, stderr: string) => {
         if (error) {
-          if (error.message.includes('no process found')) {
+          // lsof 未匹配到进程时以退出码 1 结束(linux 上并非命令缺失), stdout 为空即端口空闲
+          if (!stdout.trim() || error.message.includes('no process found')) {
             console.log(`No process found on port ${port}`);
             return resolve();
           }

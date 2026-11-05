@@ -80,5 +80,17 @@ async def cache_info():
     return await DbMetaService.cache_info()
 
 
+# 图数据库信息(只读)
+@router.get("/graph", summary="图数据库信息")
+async def graph_info():
+    """
+    图数据库运行信息(未启用时 type 为 None)
+
+    Returns:
+        dict: 图库实现类型及自述信息
+    """
+    return await DbMetaService.graph_info()
+
+
 app.include_router(router, prefix="/db", tags=["db"])
 logger.debug("ok...controller_index")

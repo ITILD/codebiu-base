@@ -47,7 +47,7 @@
                   </el-tooltip>
                 </div>
                 <div text-xs text-note-sub>
-                  {{ item.model }} · {{ serverTypeLabel(item.server_type) }} · {{ scopeShortLabel(item.scope) }}
+                  {{ item.model }} · {{ serverTypeLabel(item.server_type, item.model_type) }} · {{ scopeShortLabel(item.scope) }}
                 </div>
               </div>
             </el-option>
@@ -175,7 +175,7 @@ const handleTestModel = async (item: ModelConfig) => {
     testingId.value = item.id
     const res = await testModelCapability(item.id)
     // 合并测试结果到本地模型数据(后端 check_result 已同步持久化)
-    const merged: Record<string, ModelCapabilityResult> = { ...(item.check_result ?? {}) }
+    const merged: Record<string, ModelCapabilityResult> = { ...item.check_result }
     for (const cap of res.capabilities) merged[cap.capability] = { ...cap, checked_at: res.checked_at }
     item.check_result = merged
     const passed = res.capabilities.filter((c) => c.ok).length

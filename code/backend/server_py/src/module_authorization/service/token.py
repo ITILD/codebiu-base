@@ -114,6 +114,16 @@ class TokenService:
 
             # 从载荷中获取用户信息
             user_id = payload.get("sub")
+            if not user_id:
+                raise jwt.InvalidTokenError("Token missing subject")
+
+            # 校验用户仍然存在且未被禁用: 已删除用户的残留刷新令牌不得继续续期
+            from module_authorization.dao.user import UserDao
+            user = await UserDao().get(user_id)
+            if not user:
+                raise jwt.InvalidTokenError("User not found")
+            if not user.is_active:
+                raise jwt.InvalidTokenError("User disabled")
 
             # 创建TokenCreateRequest对象
             request = TokenCreateRequest(user_id=user_id)
@@ -143,6 +153,16 @@ class TokenService:
         :param user_id: 用户ID
         """
         await self.token_dao.delete_tokens_by_user_id(user_id)
+
+    async def revoke_all_tokens_by_users(self, user_ids: list[str]) -> int:
+        """
+        批量撤销多个用户的所有令牌(删除用户后调用, 避免残留刷新令牌继续续期)
+        :param user_ids: 用户ID列表
+        :return: 实际删除的令牌记录数
+        """
+        if not user_ids:
+            return 0
+        return await self.token_dao.delete_tokens_by_user_ids(user_ids)
 
     async def get_token_by_user_id(self, user_id):
         """

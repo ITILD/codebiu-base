@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class ParsePlan(BaseModel):
-    """解析方案(由后台「RAG 解析配置」持久化, 调用方也可按需临时构造)"""
+    """解析方案(后台「文档解析」动态配置驱动, 调用方也可按需临时构造)"""
 
     primary_engine: str = Field(
         "auto", description="主引擎: auto/mineru/paddleocr/office-local/media"

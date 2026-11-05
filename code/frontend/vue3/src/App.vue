@@ -21,17 +21,21 @@ const route = useRoute()
 const router = useRouter()
 // 后台管理页面才显示左侧模块列表, 首页等为纯展示布局(页首+内容+页脚)
 // admin 标记由 vite.config.ts 的 extendRoute 写入路由 meta;
-// standalone 页面(如账户设置)虽属后台路由, 但页面自带导航, 不渲染侧边栏
-const isAdmin = computed(() => Boolean(route.meta.admin && !route.meta.standalone))
+// standalone 页面(如账户设置)虽属后台路由, 但页面自带导航, 不渲染侧边栏;
+// bare=1 为首页入口卡进入的单页模式: 同样是后台路由, 但不渲染侧边栏(见 menu.ts homeLink)
+const isBare = computed(() => String(route.query.bare ?? '') === '1')
+const isAdmin = computed(() =>
+  Boolean(route.meta.admin && !route.meta.standalone && !isBare.value)
+)
 // 全屏页面(如三维地球): 锁定文档滚动(滚轮留给场景缩放), 页脚隐藏
 const isFullpage = computed(() => Boolean(route.meta.fullpage))
 
-// 最近访问采集: 记录前台应用(app)与后台(admin)路由, 标题取菜单树末级
+// 最近访问采集: 记录全部后台功能页(含首页入口卡进入的单页模式, 按 path 去重)
 const { pushRecent } = useRecentPages()
 watch(
   () => route.path,
   (path) => {
-    if (!route.meta.admin && !route.meta.app) return
+    if (!route.meta.admin) return
     // 兼容 es2020 lib: 用索引取末级而非 Array.prototype.at
     const trail = findMenuTrail(path)
     const title = trail.length > 0 ? trail[trail.length - 1].title : path
@@ -91,7 +95,25 @@ const removeBeforeEach = router.beforeEach(() => {
   if (routeLoadingTimer) clearTimeout(routeLoadingTimer)
   routeLoadingTimer = setTimeout(() => { routeLoading.value = true }, 180)
 })
-const removeAfterEach = router.afterEach(() => stopRouteLoading())
+
+// 路由切换内容淡入: 不用 Transition 包裹(RouterView 与懒加载/Suspense 组合
+// 有空白 bug), 改为每次导航结束后给 main 重挂同名 CSS 动画(仅 opacity)
+const mainRef = ref<HTMLElement | null>(null)
+function playRouteEnter() {
+  requestAnimationFrame(() => {
+    const el = mainRef.value
+    if (!el) return
+    el.classList.remove('route-enter')
+    // 读取 offsetWidth 强制回流, 同名动画才会重新播放
+    void el.offsetWidth
+    el.classList.add('route-enter')
+  })
+}
+
+const removeAfterEach = router.afterEach(() => {
+  stopRouteLoading()
+  playRouteEnter()
+})
 const removeOnError = router.onError(() => stopRouteLoading())
 
 // 词条覆盖跟随登录态加载: 未登录不请求(避免无谓 401), 登录/切换账号后自动重新合并
@@ -135,7 +157,7 @@ onUnmounted(() => {
            keep-alive 仅缓存重状态对话页(RagConversation, 按 include
            组件名匹配, 页面内 defineOptions 声明): 切回免整页重建与数据重拉,
            流式输出切走不中断; 其余页面不缓存避免数据陈旧 -->
-      <main flex-1 min-w-0 w-full relative>
+      <main ref="mainRef" flex-1 min-w-0 w-full relative :class="route.meta.admin && !route.meta.standalone ? 'admin-main' : ''">
         <!-- 全局错误边界: 页面级异常回退为可重试卡片, 避免整站白屏 -->
         <AppErrorBoundary>
           <RouterView v-slot="{ Component }">

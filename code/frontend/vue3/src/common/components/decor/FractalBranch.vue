@@ -188,6 +188,9 @@ let dark = false
 let inkRGB = '26,30,36'
 let sageA = '96,116,102'
 let sageB = '118,140,118'
+/** 暗色不透明度收敛: 亮底墨枝可浓, 暗底若沿用同浓度会在大片枝叶处糊成一团亮灰 */
+let inkK = 1
+let leafK = 1
 let worker: Worker | null = null
 let workerURL = ''
 let io: IntersectionObserver | null = null
@@ -265,10 +268,10 @@ function strokeBranch(ctx: CanvasRenderingContext2D, b: RTBranch, t01: number) {
   }
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
-  ctx.strokeStyle = `rgba(${inkRGB},${b.haloA.toFixed(3)})`
+  ctx.strokeStyle = `rgba(${inkRGB},${(b.haloA * (dark ? 0.7 : 1)).toFixed(3)})`
   ctx.lineWidth = b.width * 2.8
   ctx.stroke()
-  ctx.strokeStyle = `rgba(${inkRGB},${b.coreA.toFixed(3)})`
+  ctx.strokeStyle = `rgba(${inkRGB},${(b.coreA * inkK).toFixed(3)})`
   ctx.lineWidth = b.width
   ctx.stroke()
 }
@@ -284,7 +287,7 @@ function drawLeaf(ctx: CanvasRenderingContext2D, lf: RTLeaf, scale: number) {
   ctx.quadraticCurveTo(lf.len * 0.45, -lf.len * 0.18, lf.len, 0)
   ctx.quadraticCurveTo(lf.len * 0.45, lf.len * 0.18, 0, 0)
   ctx.closePath()
-  ctx.fillStyle = `rgba(${lf.tone < 0.5 ? sageA : sageB},${lf.a.toFixed(3)})`
+  ctx.fillStyle = `rgba(${lf.tone < 0.5 ? sageA : sageB},${(lf.a * leafK).toFixed(3)})`
   ctx.fill()
   ctx.restore()
 }
@@ -476,11 +479,14 @@ function onVisibility() {
 
 onMounted(() => {
   dark = document.documentElement.classList.contains('dark')
-  // 暗色纸面: 墨色反转为浅色纸墨, 叶用浅灰绿
+  // 暗色纸面: 墨色改为低饱和灰绿(比亮底更暗一档, 避免高亮白线铺满右上角),
+  // 并压淡不透明度, 让生长枝退为背景层次的"淡墨", 不与 Hero 文字抢注意力
   if (dark) {
-    inkRGB = '218,226,216'
-    sageA = '150,170,152'
-    sageB = '186,200,180'
+    inkRGB = '120,136,130'
+    sageA = '78,96,88'
+    sageB = '100,116,104'
+    inkK = 0.42
+    leafK = 0.38
   }
   sizeCanvases()
   requestStructure()

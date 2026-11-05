@@ -1,6 +1,7 @@
 """权限认证模块 user 表模型与请求/响应体定义"""
 
 from sqlmodel import Column, DateTime, Field, SQLModel
+from pydantic import field_validator
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -61,6 +62,35 @@ class UserUpdate(SQLModel):
     nickname: str | None = Field(None, max_length=50, description="昵称")
     avatar: str | None = Field(None, max_length=255, description="头像")
     is_active: bool | None = Field(None, description="是否激活")
+
+
+class UserBatchDelete(SQLModel):
+    """批量删除用户的请求模型"""
+
+    ids: list[str] = Field(description="要删除的用户ID列表", min_length=1, max_length=200)
+
+    @field_validator('ids')
+    @classmethod
+    def validate_ids(cls, v: list[str]) -> list[str]:
+        """校验ID列表: 不允许空或纯空白ID"""
+        if any(not item.strip() for item in v):
+            raise ValueError("ID 不能为空或仅包含空白字符")
+        return v
+
+
+class UserBatchStatus(SQLModel):
+    """批量启停用户的请求模型"""
+
+    ids: list[str] = Field(description="要更新的用户ID列表", min_length=1, max_length=200)
+    is_active: bool = Field(description="目标状态: true=启用 false=禁用")
+
+    @field_validator('ids')
+    @classmethod
+    def validate_ids(cls, v: list[str]) -> list[str]:
+        """校验ID列表: 不允许空或纯空白ID"""
+        if any(not item.strip() for item in v):
+            raise ValueError("ID 不能为空或仅包含空白字符")
+        return v
 
 
 class UserResponse(SQLModel):

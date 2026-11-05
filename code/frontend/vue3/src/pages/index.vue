@@ -39,14 +39,14 @@
           {{ $t('home_sub') }}
         </p>
 
-        <!-- 已登录: 最近访问快捷入口(过滤后台路由, 首页不出现后台相关内容) -->
-        <div v-if="isLoggedIn && recentAppPages.length" mb-2>
+        <!-- 已登录: 最近访问快捷入口(仅展示可在首页直达的业务单页) -->
+        <div v-if="isLoggedIn && recentHomePages.length" mb-2>
           <p text-xs text-note-sub mb-2>{{ $t('home_recent') }}</p>
           <div flex flex-wrap gap-2>
             <RouterLink
-              v-for="item in recentAppPages.slice(0, 6)"
+              v-for="item in recentHomePages.slice(0, 6)"
               :key="item.path"
-              :to="item.path"
+              :to="homeLink(item.path)"
               px-3 py-1.5 rounded-full bg-note-tint text-xs md:text-sm text-note hover:text-note-green hover:shadow-note note-transition
             >
               {{ item.title }}
@@ -61,7 +61,7 @@
       </div>
     </section>
 
-    <!-- 主应用入口卡(仅前台应用, 从这里直接进入各自页面; 后台管理经头像下拉进入) -->
+    <!-- 业务入口卡: 后台侧边栏中标记 home 的末级页面, 点击以单页模式进入(不渲染侧边栏) -->
     <section>
       <div flex items-center gap-2 mb-6>
         <span text-xl>🧭</span>
@@ -71,54 +71,49 @@
 
       <div grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5>
         <RouterLink
-          v-for="app in visibleApps"
-          :key="app.index"
-          :to="app.children?.length ? app.children[0].index : app.index"
+          v-for="entry in visibleHomeEntries"
+          :key="entry.index"
+          :to="homeLink(entry.index)"
           class="paper-grain note-glow-hover"
           bg-note-card
           rounded-note-lg
-          p-5 md:p-7
+          p-5 md:p-6
           overflow-hidden
           duration-300
           hover:-translate-y-0.5
           group
+          flex
+          flex-col
         >
-          <div
-            flex
-            items-center
-            justify-center
-            w-14
-            h-14
-            rounded-note-lg
-            bg-note-tint
-            text-note-green
-            mb-4 md:mb-5
-          >
-            <el-icon :size="28"><component :is="app.icon" /></el-icon>
-          </div>
-          <h3 text-xl font-semibold text-note mb-2>{{ app.title }}</h3>
-          <p text-sm text-note-sub leading-relaxed>{{ app.desc ?? $t('home_app_desc') }}</p>
-          <!-- 功能速览: 应用内主要页面 -->
-          <div v-if="app.children?.length" flex flex-wrap gap-1.5 mt-4>
-            <span
-              v-for="child in app.children"
-              :key="child.index"
-              px-2 py-0.5 rounded-full bg-note-tint text-xs text-note-sub
+          <div flex items-center gap-2.5 mb-4>
+            <div
+              w-11
+              h-11
+              rounded-note-lg
+              bg-note-tint
+              text-note-green
+              flex-center
+              shrink-0
             >
-              {{ child.title }}
-            </span>
+              <el-icon :size="22" class="note-transition group-hover:scale-110"><component :is="entry.icon" /></el-icon>
+            </div>
+            <span v-ellipsis text-xs text-note-sub truncate>{{ entry.groupTitle }}</span>
+            <div flex-1 />
+            <el-icon
+              text-note-sub
+              class="note-transition group-hover:text-note-green group-hover:translate-x-0.5"
+            >
+              <ArrowRight />
+            </el-icon>
           </div>
+          <h3 text-lg font-semibold text-note mb-1.5>{{ entry.title }}</h3>
+          <p text-sm text-note-sub leading-relaxed m-0>{{ entry.desc }}</p>
         </RouterLink>
       </div>
     </section>
 
-    <!-- 页尾小池: 题句浮于水雾之上, 页尽如水边 -->
+    <!-- 页尾小池: 仅保留画面, 不加题词, 方便作为各类项目的基础首页 -->
     <section relative mt-10>
-      <div absolute inset-x-0 top-0 flex justify-center pointer-events-none>
-        <p class="font-hand text-xs md:text-base text-note-sub mt-[2px] px-[1.1rem] py-[0.3rem] rounded-full bg-note-card/78 shadow-note tracking-[0.08em] whitespace-nowrap backdrop-blur-sm">
-          「 淡淡的绿意，是数据生长的样子 」
-        </p>
-      </div>
       <GardenPond />
     </section>
   </div>
@@ -126,9 +121,10 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ArrowRight } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/common/stores/auth'
-import { useVisibleApps } from '@/app/composables/useMenu'
+import { useVisibleHome } from '@/app/composables/useMenu'
+import { homeEntries, homeLink } from '@/app/config/menu'
 import { useRecentPages } from '@/app/composables/useRecentPages'
 // 系统三语(中/英/日): 问候语等脚本侧取词
 import { i18n } from '@/common/i18n/language'
@@ -138,10 +134,9 @@ import FallingLeaves from '@/common/components/decor/FallingLeaves.vue'
 import GardenPond from '@/common/components/decor/GardenPond.vue'
 
 const TITLE = import.meta.env.VITE_GLOB_APP_TITLE
-const router = useRouter()
 
 const authStore = useAuthStore()
-const { visibleApps } = useVisibleApps()
+const { visibleHomeEntries } = useVisibleHome()
 const { recentPages } = useRecentPages()
 
 // ===== 登录态与问候 =====
@@ -164,9 +159,10 @@ const heroTitle = computed(() =>
   isLoggedIn.value ? i18n.global.t('hello_fmt', { g: i18n.global.t(greeting.value), name: displayName.value }) : TITLE
 )
 
-// ===== 最近访问(仅展示前台应用页, 后台路由不出现在首页) =====
-const recentAppPages = computed(() =>
-  recentPages.value.filter((item) => !router.resolve(item.path).meta.admin)
+// ===== 最近访问(仅保留首页可直达的业务单页, 其余后台页面不出现在首页) =====
+const homePathSet = new Set(homeEntries.map((entry) => entry.index))
+const recentHomePages = computed(() =>
+  recentPages.value.filter((item) => homePathSet.has(item.path))
 )
 </script>
 
@@ -177,13 +173,13 @@ const recentAppPages = computed(() =>
   background-image: repeating-linear-gradient(
     transparent,
     transparent 27px,
-    rgba(107, 158, 120, 0.1) 28px
+    rgba(46, 124, 107, 0.1) 28px
   );
 }
 
 /* 笔记本侧边装订线(红色竖线太重, 用苔绿竖虚线): 首页专用 */
 .note-margin-line {
-  background-image: linear-gradient(to right, transparent 40px, rgba(107, 158, 120, 0.22) 40px, rgba(107, 158, 120, 0.22) 41px, transparent 41px);
+  background-image: linear-gradient(to right, transparent 40px, rgba(46, 124, 107, 0.22) 40px, rgba(46, 124, 107, 0.22) 41px, transparent 41px);
 }
 
 /* 蚀刻标题(数字花园 Distress 配方改 CSS mask 实现):

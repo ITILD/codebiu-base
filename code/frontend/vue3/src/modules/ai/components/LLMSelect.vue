@@ -21,7 +21,7 @@
             <span>{{ modelMainLabel(item) }}</span>
             <el-tag v-if="item.is_default" type="warning" size="small">默认</el-tag>
           </div>
-          <div text-xs text-note-sub>{{ item.model }} · {{ serverTypeLabel(item.server_type) }} · {{ scopeShortLabel(item.scope) }}</div>
+          <div text-xs text-note-sub>{{ item.model }} · {{ serverTypeLabel(item.server_type, item.model_type) }} · {{ scopeShortLabel(item.scope) }}</div>
         </div>
       </el-option>
     </el-select>

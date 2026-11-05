@@ -1,40 +1,12 @@
 """
-权限注册中心(模块自治声明权限的核心)
+权限注册中心: 各模块在 config/permissions.py 声明权限树, 启动时幂等同步到
+casbin_rule(角色-域-资源-动作) / role(角色字典) / permission(菜单按钮树)。
 
-设计思路:
-    module_authorization 负责"基础权限"(用户/角色/权限的管理与鉴权基建),
-    各业务模块(rag/blog/...)在自己模块的 config/permissions.py 中声明本模块涉及的
-    权限树(菜单/按钮)与新用户默认权限,启动时通过注册中心幂等同步到:
-        1. casbin 策略表(p: 角色-域-资源-动作)
-        2. role 表(角色字典)
-        3. permission 表(权限/菜单树,供前端权限管理与角色授权使用)
-
-角色体系(简化为两级,若依/GitHub 式):
-    内置角色仅两个:
-        admin  全局管理员,权限穿透一切(策略 "admin" -> "*/*/*")
-        user   普通用户,策略由各模块的 default_policies 声明合并而来
-    其余角色由管理员在界面自建并勾选权限树的节点权限码
-    项目级权限不走 casbin,由业务模块成员表固定档位判断(如 module_rag 的
-    project_admin/project_editor/project_reader)
-
-权限码(code)约定:
-    "模块"           目录节点(M),如 "rag"
-    "模块:资源"       菜单节点(C),如 "rag:project"
-    "模块:资源:动作"  按钮节点(F),如 "rag:project:create"
-    按钮节点可直接解析为 casbin 四元组 (sub=角色, dom=模块, obj=资源, act=动作)
-
-新增业务模块接入步骤:
-    1. 在模块下新建 config/permissions.py, 声明 ModulePermissionDefine
-    2. 在模块 config/server.py(或被 app.py 导入的任意入口)导入该文件完成注册
-    3. 控制器路由使用 require_permission(模块, 资源, 动作) 校验
-
-默认权限约定(重要):
-    新加模块默认不带权限, 即 default_policies=[] (模块权限树照常声明,
-    仅新用户默认策略为空)。普通用户需要访问时, 由管理员在
-    角色管理→分配权限 界面按需勾选该模块的按钮级权限码。
-    注意: default_policies 变更只做增量同步(启动时补写缺失策略),
-    移除声明不会自动回收已存在的 user 角色策略, 需在界面取消勾选
-    或直接清理 casbin_rule 表对应记录。详见 doc/dev/permission.md。
+角色: admin 全权限("*/*/*"); user 由各模块 default_policies 合并; 其余角色在界面勾选。
+权限码: "模块"(目录 M) / "模块:资源"(菜单 C) / "模块:资源:动作"(按钮 F)。
+接入: 新增 module_x/config/permissions.py 并在入口 import, 路由用 require_permission(模块, 资源, 动作)。
+默认策略为空; 变更只增量同步, 移除声明不会回收已有策略, 需在界面取消或清理 casbin_rule。
+详见 doc/dev/06-权限接入FAQ.md。
 """
 from dataclasses import dataclass, field
 import logging

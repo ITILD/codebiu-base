@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full flex flex-col gap-4>
+  <div p-3 md:p-4 w-full flex flex-col gap-3>
     <!-- 水墨页头 -->
     <InkPageHead title="任务队列" sub="后台任务的执行与重试记录" seal="队" />
 
@@ -39,8 +39,31 @@
       </el-button>
     </div>
 
+    <!-- 批量操作条: 选中后出现 -->
+    <div
+      v-if="selectedRows.length"
+      class="flex flex-wrap items-center gap-2 rounded-note-md bg-note-tint px-3 py-2"
+    >
+      <span text-sm text-note-green>已选 {{ selectedRows.length }} 项</span>
+      <el-button size="small" :loading="batchBusy" @click="handleBatchCancel">批量取消</el-button>
+      <el-button size="small" :loading="batchBusy" @click="handleBatchRetry">批量重试</el-button>
+      <el-button size="small" type="danger" plain :loading="deleting" @click="handleBatchDelete">
+        批量删除
+      </el-button>
+      <el-button class="ml-auto" link size="small" @click="clearSelection">取消选择</el-button>
+    </div>
+
     <!-- 任务表格 -->
-    <el-table :data="tableData" v-loading="loading" stripe w-full>
+    <el-table
+      ref="tableRef"
+      :data="tableData"
+      v-loading="loading"
+      stripe
+      w-full
+      row-key="id"
+      @selection-change="handleSelectionChange"
+    >
+      <el-table-column type="selection" width="44" :fixed="isMd ? 'left' : false" />
       <el-table-column prop="name" label="任务名称" min-width="130" show-overflow-tooltip />
       <el-table-column label="类型" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">
@@ -113,6 +136,7 @@
         v-model:current-page="pagination.page"
         v-model:page-size="pagination.size"
         :total="total"
+        small
         layout="total, prev, pager, next"
         @size-change="fetchData"
         @current-change="fetchData"
@@ -129,9 +153,10 @@
 
 <script setup lang="ts">
 import { Plus } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
 import { useTableQuery } from '@/common/composables/useTableQuery'
+import { useBatchDelete } from '@/common/composables/useBatchDelete'
 import {
   cancelTask,
   deleteTask,
@@ -243,7 +268,8 @@ function setupPolling() {
   const interval = hasActive.value ? 3000 : 10000
   pollTimer = window.setInterval(() => {
     // 活跃期间整表刷新, 空闲时仅刷统计(降低数据库压力)
-    if (hasActive.value) fetchData()
+    // 有选中行时暂停整表刷新, 避免轮询清空用户的多选状态
+    if (hasActive.value && !selectedRows.value.length) fetchData()
     else fetchStats()
   }, interval)
 }
@@ -331,6 +357,96 @@ const handleDelete = (row: QueueTask) => {
       }
     })
     .catch(() => {})
+}
+
+// ################ 批量操作 ################
+const tableRef = ref<TableInstance>()
+const selectedRows = ref<QueueTask[]>([])
+const { batchDelete, deleting } = useBatchDelete()
+const batchUpdating = ref(false)
+const batchBusy = computed(() => deleting.value || batchUpdating.value)
+
+/** 多选变化 */
+const handleSelectionChange = (rows: QueueTask[]) => {
+  selectedRows.value = rows
+}
+
+/** 清空多选 */
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
+/** 批量结果汇总提示 */
+const notifyBatchResult = (results: PromiseSettledResult<unknown>[], action: string) => {
+  const ok = results.filter(r => r.status === 'fulfilled').length
+  const failed = results.length - ok
+  if (ok) ElMessage.success(`已${action} ${ok} 项${failed ? `，${failed} 项失败` : ''}`)
+  if (failed) ElMessage.error(`${failed} 项${action}失败`)
+}
+
+/** 批量取消(仅排队/执行中可取消) */
+const handleBatchCancel = async () => {
+  const targets = selectedRows.value.filter(r => ['pending', 'running'].includes(r.status))
+  if (!targets.length) {
+    ElMessage.warning('选中任务中没有可取消的任务')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确定取消选中的 ${targets.length} 个任务吗?`, '批量取消', {
+      type: 'warning', confirmButtonText: '取消任务', cancelButtonText: '返回',
+    })
+  } catch {
+    return
+  }
+  batchUpdating.value = true
+  try {
+    const results = await Promise.allSettled(targets.map(t => cancelTask(t.id)))
+    notifyBatchResult(results, '取消')
+    await refreshAll()
+    clearSelection()
+  } finally {
+    batchUpdating.value = false
+  }
+}
+
+/** 批量重试(仅已结束任务可重试) */
+const handleBatchRetry = async () => {
+  const targets = selectedRows.value.filter(r => isFinished(r))
+  if (!targets.length) {
+    ElMessage.warning('选中任务中没有可重试的任务')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确定重试选中的 ${targets.length} 个任务吗?`, '批量重试', {
+      type: 'info', confirmButtonText: '重试', cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  batchUpdating.value = true
+  try {
+    const results = await Promise.allSettled(targets.map(t => retryTask(t.id)))
+    notifyBatchResult(results, '重试')
+    await refreshAll()
+    clearSelection()
+  } finally {
+    batchUpdating.value = false
+  }
+}
+
+/** 批量删除(逐条调用删除接口并汇总结果) */
+const handleBatchDelete = async () => {
+  const removed = await batchDelete({
+    rows: selectedRows.value,
+    getId: row => row.id,
+    remove: id => deleteTask(String(id)),
+    label: row => row.name,
+    onRemoved: async (n) => {
+      await Promise.all([refreshAfterRemove(n), fetchStats()])
+    },
+  })
+  if (removed) clearSelection()
 }
 
 // ################ 生命周期 ################

@@ -36,18 +36,19 @@ export interface SearchField {
   </TableSearchBar>
 -->
 <template>
-  <div page-card mb-4>
-    <div flex flex-wrap items-center gap-x-4 gap-y-3>
+  <div page-card mb-3>
+    <div flex flex-wrap items-center gap-x-3 gap-y-2>
       <!-- 筛选字段区 -->
-      <div v-for="field in visibleFields" :key="field.prop" flex items-center gap-2>
-        <span text-sm text-note whitespace-nowrap>{{ field.label }}</span>
+      <div v-for="field in visibleFields" :key="field.prop" flex items-center gap-1.5>
+        <span text-xs text-note-sub whitespace-nowrap>{{ field.label }}</span>
 
         <!-- 文本输入框: 回车/清空后触发搜索 -->
         <el-input
           v-if="!field.type || field.type === 'input'"
           :model-value="(modelValue[field.prop] as string | undefined) ?? ''"
           :placeholder="field.placeholder ?? `请输入${field.label}`"
-          :style="{ width: field.width ?? '180px' }"
+          :style="{ width: field.width ?? '160px' }"
+          size="small"
           clearable
           @update:model-value="(val: string) => setValue(field.prop, val)"
           @keyup.enter="handleSearch"
@@ -59,7 +60,8 @@ export interface SearchField {
           v-else-if="field.type === 'select'"
           :model-value="(modelValue[field.prop] as string | number | boolean | undefined)"
           :placeholder="field.placeholder ?? `全部${field.label}`"
-          :style="{ width: field.width ?? '160px' }"
+          :style="{ width: field.width ?? '150px' }"
+          size="small"
           clearable
           @update:model-value="(val: string | number | boolean) => {
             setValue(field.prop, val)
@@ -76,12 +78,12 @@ export interface SearchField {
       </div>
 
       <!-- 操作按钮区: 搜索/重置/展开 + 主操作插槽 -->
-      <div flex items-center gap-2 ml-auto>
-        <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
-        <el-button :icon="RefreshLeft" @click="handleReset">重置</el-button>
+      <div flex min-w-0 flex-wrap items-center gap-2 ml-auto>
+        <el-button size="small" type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+        <el-button size="small" :icon="RefreshLeft" @click="handleReset">重置</el-button>
         <el-button
           v-if="fields.length > collapseCount"
-          link type="primary"
+          link type="primary" size="small"
           @click="expanded = !expanded"
         >
           {{ expanded ? '收起' : '展开' }}

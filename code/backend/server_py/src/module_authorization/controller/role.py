@@ -3,7 +3,7 @@
 from fastapi import APIRouter, status, Depends, Query
 from common.utils.fastapi_ex.exceptions import NotFoundError
 from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
-from module_authorization.do.role import Role, RoleCreate, RoleUpdate, RoleResponse
+from module_authorization.do.role import Role, RoleCreate, RoleUpdate, RoleResponse, RoleBatchDelete
 from module_authorization.service.role import RoleService
 from module_authorization.dependencies.role import get_role_service
 from module_authorization.dependencies.permission import require_permission
@@ -56,6 +56,24 @@ async def list_all_roles(
 ):
     """获取所有角色列表(不分页, 用于下拉选择)"""
     return await service.list_all()
+
+# 批量删除路由必须声明在 /{role_id} 之前, 否则 "batch" 会被当作角色ID
+@router.delete(
+    "/batch", summary="批量删除角色", status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permission("sys", "role", "delete"))],
+)
+async def batch_delete_roles(
+    batch_delete: RoleBatchDelete,
+    service: RoleService = Depends(get_role_service),
+) -> dict:
+    """
+    按ID列表批量删除角色, 不存在的ID静默跳过
+    :param batch_delete: 批量删除请求(包含ids列表)
+    :param service: 角色服务依赖注入
+    :return: 实际删除数量 {deleted_count}
+    """
+    deleted_count = await service.batch_delete(batch_delete)
+    return {"deleted_count": deleted_count}
 
 @router.get("/{role_id}", summary="获取单个角色", response_model=Role,
     dependencies=[Depends(require_permission("sys", "role", "read"))])

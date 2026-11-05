@@ -1,8 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full>
-    <!-- 模块内页导航(应用页无侧边栏, 孙页面切换在此) -->
-    <RagPageNav class="mb-4" />
-
+  <div p-3 md:p-4 w-full>
     <!-- 视图切换: 项目列表 / 文档列表(跨项目) -->
     <div mb-3 flex flex-wrap items-center gap-2>
       <el-radio-group v-model="viewMode">
@@ -178,20 +175,26 @@
     <!-- 新建知识库对话框(内部自持状态, open 打开; 保存成功后刷新列表) -->
     <ProjectCreateDialog ref="createDialogRef" @saved="fetchData" />
 
-    <!-- 知识库设置抽屉: 基本信息 / 文档管理 / 成员管理(内嵌面板, 免独立子页) -->
-    <el-drawer v-model="drawerVisible" :title="drawerTitle" size="62%" destroy-on-close class="kb-setting-drawer">
+    <!-- 知识库设置抽屉: 基本信息(含成员与授权) / 文档管理(内嵌面板, 免独立子页)
+         基本信息与成员采用双栏设置布局: 左栏基础信息常驻, 右栏成员列表, 宽屏(xl)并排/窄屏堆叠 -->
+    <el-drawer v-model="drawerVisible" :title="drawerTitle" size="70%" destroy-on-close class="kb-setting-drawer">
       <el-tabs v-model="drawerTab">
-        <el-tab-pane label="基本信息" name="info">
-          <!-- 基本信息编辑表单(权限位控制/保存逻辑在子组件内) -->
-          <ProjectInfoForm :project="currentProject" :perms="currentPerms" @saved="handleBasicSaved" />
+        <el-tab-pane label="基本信息与成员" name="basic">
+          <!-- 管理员: 基础信息(左栏) + 成员与授权(右栏) 并排; 非管理员: 仅基础信息, 限宽避免字段被拉长 -->
+          <div v-if="currentPerms.manage_member"
+            class="grid grid-cols-1 gap-4 items-start xl:grid-cols-[300px_minmax(0,1fr)]">
+            <!-- 基本信息编辑表单(权限位控制/保存逻辑在子组件内) -->
+            <ProjectInfoForm :project="currentProject" :perms="currentPerms" @saved="handleBasicSaved" />
+            <!-- 成员管理需项目管理员档位(my_perms.manage_member, v4 5.3): 与基本信息同页, 避免多次切换 -->
+            <MemberManage :project-id="currentProject!.id" />
+          </div>
+          <div v-else class="max-w-[420px]">
+            <ProjectInfoForm :project="currentProject" :perms="currentPerms" @saved="handleBasicSaved" />
+          </div>
         </el-tab-pane>
         <!-- 文档管理: 只读成员(档位>=1)可浏览, 写操作按钮由 DocumentManage 按权限位隐藏 -->
         <el-tab-pane v-if="currentPerms.read" label="文档管理" name="docs" lazy>
           <DocumentManage :project-id="currentProject!.id" :perms="currentPerms" />
-        </el-tab-pane>
-        <!-- 成员管理需项目管理员档位(my_perms.manage_member, v4 5.3) -->
-        <el-tab-pane v-if="currentPerms.manage_member" label="成员管理" name="members" lazy>
-          <MemberManage :project-id="currentProject!.id" />
         </el-tab-pane>
       </el-tabs>
     </el-drawer>
@@ -218,7 +221,6 @@ import {
   type ProjectMyPerms,
 } from '../types'
 import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
-import RagPageNav from '../components/RagPageNav.vue'
 import DocumentManage from '../components/DocumentManage.vue'
 import MemberManage from '../components/MemberManage.vue'
 import ProjectCreateDialog from '../components/ProjectCreateDialog.vue'
@@ -336,7 +338,7 @@ const handleDelete = async (row: Project) => {
 // ==================== 知识库设置抽屉(基本信息/文档/成员) ====================
 
 const drawerVisible = ref(false)
-const drawerTab = ref('info')
+const drawerTab = ref('basic')
 const currentProject = ref<Project | null>(null)
 const drawerTitle = computed(() =>
   currentProject.value ? `知识库设置 - ${currentProject.value.name}` : '知识库设置'
@@ -351,7 +353,7 @@ const currentPerms = computed<ProjectMyPerms>(
 // 打开编辑抽屉
 const handleOpenEdit = (row: Project) => {
   currentProject.value = row
-  drawerTab.value = 'info'
+  drawerTab.value = 'basic'
   drawerVisible.value = true
 }
 
@@ -409,7 +411,7 @@ const loadDocList = async () => {
         listRagProjectDocuments(p.id, { page: 1, size: 500 }).catch(() => ({ items: [], total: 0 }))
       )
     )
-    allDocs.value = results.flatMap((r, i) =>
+    allDocs.value = results.flatMap((r) =>
       r.items.map((d) => ({ ...d, project_name: nameMap.get(d.project_id) ?? d.project_id }))
     )
     docPagination.value.page = 1

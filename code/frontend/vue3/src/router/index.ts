@@ -10,10 +10,10 @@ import { useAuthStore } from '@/common/stores/auth'
 import { ElMessage } from 'element-plus'
 
 // 路由 meta 类型扩展(admin 由 vite.config.ts 的 extendRoute 统一标记:
-// 首页与 404 为公开页, 后台工作台/账户设置/各模块页面均为后台路由)
+// 首页与 404 为公开页, 其余业务页(含 rag/agent)均为后台路由)
 declare module 'vue-router' {
   interface RouteMeta {
-    /** 后台管理路由: 需登录访问, 且显示左侧模块列表 */
+    /** 后台管理路由: 需登录访问(默认显示侧边栏; ?bare=1 时仅隐藏侧边栏) */
     admin?: boolean
     /** 独立页面: 属后台路由(需登录), 但不渲染左侧模块侧边栏(如账户设置) */
     standalone?: boolean
@@ -36,9 +36,9 @@ const router = createRouter({
 router.beforeEach((to) => {
   const routerStore = RouterStore()
   routerStore.setRouterPath(to.path)
-  // 登录拦截: 前台应用(app)与后台管理(admin)均需登录, 未登录回首页并引导登录
+  // 登录拦截: 后台功能页(含从首页入口卡进入的单页模式)均需登录
   const authStore = useAuthStore()
-  if ((to.meta.admin || to.meta.app) && !authStore.authState.user.id) {
+  if (to.meta.admin && !authStore.authState.user.id) {
     ElMessage.warning('请先登录后再访问')
     return { path: '/', query: { login: '1' } }
   }

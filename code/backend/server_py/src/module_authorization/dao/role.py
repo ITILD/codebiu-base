@@ -1,7 +1,7 @@
 """权限认证模块 role 数据访问层"""
 
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, func, update
+from sqlmodel import select, func, update, delete
 from common.utils.db.schema.pagination import (
     PaginationParams,
 )
@@ -40,6 +40,19 @@ class RoleDao:
         await session.flush()
 
     @DaoRel
+    async def batch_delete(self, ids: list[str], session: AsyncSession | None = None) -> int:
+        """
+        批量删除角色记录(不存在的ID静默跳过)
+        :param ids: 要删除的角色ID列表
+        :param session: 可选数据库会话
+        :return: 实际删除的记录数
+        """
+        stmt = delete(Role).where(Role.id.in_(ids))
+        result = await session.exec(stmt)
+        await session.flush()
+        return result.rowcount
+
+    @DaoRel
     async def update(
         self,
         role_id: str,
@@ -66,6 +79,20 @@ class RoleDao:
         if result.rowcount == 0:
             raise NotFoundError(f"未找到ID为 {role_id} 的角色")
         await session.flush()
+
+    @DaoRel
+    async def list_by_ids(self, ids: list[str], session: AsyncSession | None = None) -> list[Role]:
+        """
+        按ID列表批量查询角色(用于删除前取出 role_key, 清理 Casbin 关联策略)
+        :param ids: 角色ID列表
+        :param session: 可选数据库会话
+        :return: 匹配到的角色列表
+        """
+        if not ids:
+            return []
+        stmt = select(Role).where(Role.id.in_(ids))
+        result = await session.exec(stmt)
+        return result.all()
 
     @DaoRel
     async def get(self, id, session: AsyncSession | None = None):
@@ -127,6 +154,8 @@ class RoleDao:
         statement = select(Role)
         if conditions:
             statement = statement.where(*conditions)
+        # 固定排序: 先按显示顺序, 再按创建时间倒序, 保证分页稳定
+        statement = statement.order_by(Role.sort, Role.created_at.desc())
         statement = statement.offset(pagination.offset).limit(pagination.limit)
         result = await session.exec(statement)
         return result.all()

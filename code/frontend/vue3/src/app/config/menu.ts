@@ -1,11 +1,15 @@
 /**
  * 全局菜单配置(RuoYi 式目录)
- * 共用方: SysSidebar(后台侧边栏) / SysBreadcrumb(面包屑) / 主页主应用入口卡 / 头像下拉
- * 菜单分两类:
- * - 主应用(mainApp: true): 知识库, 从首页直接进入, 无侧边栏,
- *   模块内孙页面导航由各模块页面自行承担
- * - 后台管理(其余): 仅经头像下拉"后台管理"入口进入, 显示侧边栏
- * 分组与后端 module_* 一一对应: authorization/rag/ai/file/main
+ * 共用方: SysSidebar(后台侧边栏) / SysBreadcrumb(面包屑) / 首页入口卡 / 头像下拉
+ *
+ * 导航设计约定(全站统一, 新页面必须遵循):
+ * 1. 所有需登录的功能页都以「后台侧边栏的分组 → 末级子项」平铺出现,
+ *    页面内部不再自带页内导航(如 AI 助手 / 知识库管理 / 智能体编排同为 /ai 分组末级子项);
+ * 2. 涉及系统本身的配置(权限、模型、监控、数据与配置等)标记 system,
+ *    侧边栏以朱砂小标("系统" chip / 分组圆点)区分, 业务页面保持中性;
+ * 3. 面向业务的末级页面标记 home, 会同时出现在首页入口卡: 从首页点击进入
+ *    单页模式(homeLink 追加 ?bare=1), 不渲染后台侧边栏, 顶栏 Logo 返回首页;
+ * 4. 新页面: 在对应分组 children 增加菜单项; 需在首页露出时加 home: true。
  */
 import { markRaw } from 'vue'
 import type { Component } from 'vue'
@@ -13,22 +17,44 @@ import {
   HomeFilled, UserFilled,
   Monitor, ChatDotRound, Setting,
   Files, Collection, FolderOpened,
-  Timer, Search,
+  Timer, Search, MagicStick,
 } from '@element-plus/icons-vue'
 
-/** 菜单项定义(perm 为权限码:与后端模块权限声明一致;缺省表示登录即可见) */
-export interface MenuItem {
+/** 末级菜单项(分组下的子项, 对应一个具体页面) */
+export interface MenuLeaf {
   /** 路由路径(与 el-menu index 一致) */
   index: string
-  icon?: Component
   title: string
   /** 权限码(缺省登录即可见) */
   perm?: string
-  /** 主页模块入口卡的描述文案(菜单不渲染) */
+  /** 系统级配置: 侧边栏显示"系统"小标并变色 */
+  system?: boolean
+  /** 首页入口卡展示(true 时从首页可直达该单页) */
+  home?: boolean
+  /** 是否在后台侧边栏展示(默认 true; false 表示仅首页入口) */
+  admin?: boolean
+  /** 首页入口卡图标(缺省取所属分组图标) */
+  icon?: Component
+  /** 首页入口卡描述(菜单不渲染) */
   desc?: string
-  /** 主应用标记: 从首页直接进入的前台应用, 不进后台侧边栏 */
-  mainApp?: boolean
-  children?: { index: string; title: string; perm?: string }[]
+}
+
+/** 菜单项定义(无 children 的项自身即末级页面) */
+export interface MenuItem extends Omit<MenuLeaf, 'index' | 'title'> {
+  index: string
+  title: string
+  children?: MenuLeaf[]
+}
+
+/** 首页入口卡数据(由 home 末级页面展平而来) */
+export interface HomeEntry {
+  index: string
+  title: string
+  perm?: string
+  icon?: Component
+  desc?: string
+  /** 所属分组标题(入口卡顶部小字) */
+  groupTitle: string
 }
 
 export const menuItems: MenuItem[] = [
@@ -44,10 +70,80 @@ export const menuItems: MenuItem[] = [
     desc: '系统运行状态、快捷入口与最近访问。',
   },
   {
+    index: '/ai',
+    icon: markRaw(ChatDotRound),
+    title: 'AI 能力',
+    desc: '对话、知识库与智能体编排, 以及模型与助手配置。',
+    children: [
+      // 三个使用页与系统配置页同为分组末级子项, 页面内不再有内页导航
+      {
+        index: '/rag/conversation',
+        title: 'AI 助手',
+        perm: 'rag:chat',
+        home: true,
+        icon: markRaw(ChatDotRound),
+        desc: '与 AI 多轮对话, 引用知识库与联网结果。',
+      },
+      {
+        index: '/rag/project',
+        title: '知识库管理',
+        perm: 'rag:project',
+        home: true,
+        icon: markRaw(Collection),
+        desc: '管理知识库项目、文档与成员权限。',
+      },
+      {
+        index: '/agent/manage',
+        title: '智能体编排',
+        perm: 'agent:manage',
+        home: true,
+        icon: markRaw(MagicStick),
+        desc: '注册智能体、编排技能与全局视图。',
+      },
+      {
+        index: '/ai/model_config',
+        title: '模型配置',
+        system: true,
+        desc: '大模型 / OCR / 语音的统一接入与在线自测。',
+      },
+      {
+        index: '/ai/assistant',
+        title: 'AI 助手配置',
+        system: true,
+        desc: '助手展示形态、悬浮位置与默认能力。',
+      },
+    ],
+  },
+  {
+    index: '/file',
+    icon: markRaw(FolderOpened),
+    title: '文件管理',
+    perm: 'main:file',
+    home: true,
+    desc: '虚拟文件系统, 目录式浏览与秒传。',
+  },
+  {
+    index: '/websearch',
+    icon: markRaw(Search),
+    title: '网页搜索',
+    perm: 'websearch:search',
+    desc: '多引擎网页搜索与连通性验证。',
+    children: [
+      {
+        index: '/websearch/search',
+        title: '搜索测试',
+        perm: 'websearch:search',
+        system: true,
+        desc: '多引擎搜索与连通性验证。',
+      },
+    ],
+  },
+  {
     index: '/authorization',
     icon: markRaw(UserFilled),
     title: '权限管理',
     perm: 'sys',
+    system: true,
     desc: '用户、角色、部门与权限策略管理。',
     children: [
       { index: '/authorization/user', title: '用户管理', perm: 'sys:user' },
@@ -58,57 +154,11 @@ export const menuItems: MenuItem[] = [
     ],
   },
   {
-    index: '/rag',
-    icon: markRaw(Collection),
-    title: 'AI 助手',
-    perm: 'rag',
-    mainApp: true,
-    desc: 'AI 的最终使用界面: 对话、知识库与智能体编排同级。',
-    children: [
-      // 首页入口卡取 children[0] 跳转, AI 助手为主入口(知识库/助手切换在对话页工具栏)
-      { index: '/rag/conversation', title: 'AI 助手', perm: 'rag:chat' },
-      { index: '/rag/project', title: '知识库管理', perm: 'rag:project' },
-      // 智能体编排与知识库管理同级(统一由 AI 助手内页导航进入)
-      { index: '/agent/manage', title: '智能体编排', perm: 'agent:manage' },
-    ],
-  },
-  {
-    index: '/websearch',
-    icon: markRaw(Search),
-    title: '网页搜索',
-    perm: 'websearch:search',
-    desc: '多引擎网页搜索与连通性验证。',
-    children: [
-      { index: '/websearch/search', title: '搜索测试', perm: 'websearch:search' },
-    ],
-  },
-  {
-    index: '/ai',
-    icon: markRaw(ChatDotRound),
-    title: 'AI 服务',
-    desc: '模型统一配置与「打开即自测」；AI 助手形态与悬浮入口。',
-    children: [
-      { index: '/ai/model_config', title: '模型配置' },
-      { index: '/ai/assistant', title: 'AI 助手配置' },
-      // AI 助手三个使用页(独立布局, 自带内页导航): 后台侧边栏也提供直达入口,
-      // 从后台进入后经顶栏头像下拉可回到后台管理
-      { index: '/rag/conversation', title: 'AI 助手', perm: 'rag:chat' },
-      { index: '/rag/project', title: '知识库管理', perm: 'rag:project' },
-      { index: '/agent/manage', title: '智能体编排', perm: 'agent:manage' },
-    ],
-  },
-  {
-    index: '/file',
-    icon: markRaw(FolderOpened),
-    title: '文件管理',
-    perm: 'main:file',
-    desc: '虚拟文件系统,目录式浏览与秒传。',
-  },
-  {
     index: '/task',
     icon: markRaw(Timer),
     title: '任务队列',
     perm: 'task',
+    system: true,
     desc: '异步任务提交、进度与重试管理。',
     children: [
       { index: '/task/queue', title: '任务列表', perm: 'task:queue' },
@@ -119,6 +169,7 @@ export const menuItems: MenuItem[] = [
     index: '/main',
     icon: markRaw(Setting),
     title: '数据与配置',
+    system: true,
     desc: '数据概览、字段表、通用配置与研发工具。',
     children: [
       { index: '/main/overview', title: '数据概览', perm: 'main:db' },
@@ -134,6 +185,7 @@ export const menuItems: MenuItem[] = [
     index: '/monitor',
     icon: markRaw(Monitor),
     title: '系统监控',
+    system: true,
     desc: '前端状态与服务器硬件状态查看。',
     children: [
       { index: '/monitor/localstorage', title: '状态查看' },
@@ -155,11 +207,39 @@ export const menuItems: MenuItem[] = [
   },
 ]
 
-/** 后台管理菜单(供侧边栏/头像下拉使用): 全量树剔除主应用分组 */
-export const adminMenuItems: MenuItem[] = menuItems.filter((item) => !item.mainApp)
+/** 后台侧边栏菜单(默认全部参与, 仅剔除显式 admin: false 的项) */
+export const adminMenuItems: MenuItem[] = menuItems.filter((item) => item.admin !== false)
 
-/** 主应用入口(供首页入口卡使用): 保持配置顺序展示 */
-export const mainApps: MenuItem[] = menuItems.filter((item) => item.mainApp)
+/** 首页入口卡(由标记 home 的末级页面展平, 保持菜单顺序) */
+export const homeEntries: HomeEntry[] = menuItems.flatMap((group): HomeEntry[] => {
+  if (group.children) {
+    return group.children
+      .filter((leaf) => leaf.home && leaf.admin !== false)
+      .map((leaf) => ({
+        index: leaf.index,
+        title: leaf.title,
+        perm: leaf.perm,
+        icon: leaf.icon ?? group.icon,
+        desc: leaf.desc ?? group.desc,
+        groupTitle: group.title,
+      }))
+  }
+  return group.home
+    ? [{
+        index: group.index,
+        title: group.title,
+        perm: group.perm,
+        icon: group.icon,
+        desc: group.desc,
+        groupTitle: group.title,
+      }]
+    : []
+})
+
+/** 首页入口链接: bare=1 进入单页模式(不渲染后台侧边栏) */
+export function homeLink(path: string) {
+  return { path, query: { bare: '1' } }
+}
 
 /**
  * 按路由路径精确匹配菜单树,返回面包屑轨迹 ['首页','分组','当前页']

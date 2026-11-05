@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full min-w-0 class="codegen-page">
+  <div p-3 md:p-4 w-full min-w-0 class="codegen-page">
     <!-- 水墨页头 -->
     <InkPageHead :title="t('cg_title')" seal="码">
       <template #sub>{{ t('cg_subtitle') }}</template>

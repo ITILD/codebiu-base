@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full class="audit-page">
+  <div p-3 md:p-4 w-full class="audit-page">
     <!-- 水墨页头 -->
     <InkPageHead title="操作审计" seal="察">
       <template #sub>

@@ -1,6 +1,7 @@
 """权限认证模块 role 表模型与请求/响应体定义"""
 
 from sqlmodel import Column, DateTime, Field, SQLModel
+from pydantic import field_validator
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -56,6 +57,20 @@ class RoleUpdate(SQLModel):
     sort: int | None = Field(None, description="显示顺序")
     data_scope: str | None = Field(None, description="数据权限范围")
     is_active: bool | None = Field(None, description="是否激活")
+
+
+class RoleBatchDelete(SQLModel):
+    """批量删除角色的请求模型"""
+
+    ids: list[str] = Field(description="要删除的角色ID列表", min_length=1, max_length=200)
+
+    @field_validator('ids')
+    @classmethod
+    def validate_ids(cls, v: list[str]) -> list[str]:
+        """校验ID列表: 不允许空或纯空白ID"""
+        if any(not item.strip() for item in v):
+            raise ValueError("ID 不能为空或仅包含空白字符")
+        return v
 
 
 class RoleResponse(SQLModel):

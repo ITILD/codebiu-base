@@ -1,8 +1,6 @@
 <!-- 智能体(助手)管理页: 助手列表 CRUD + 内置技能清单(REQ-013) -->
 <template>
-  <div p-4 md:p-6 w-full flex flex-col gap-4>
-    <!-- AI 助手内页导航: 与对话/知识库管理同级 -->
-    <RagPageNav class="mb-1" />
+  <div p-3 md:p-4 w-full flex flex-col gap-3>
     <!-- 水墨页头 -->
     <InkPageHead title="智能体编排" sub="助手注册、技能编排与全局视图" seal="编" />
 
@@ -100,7 +98,6 @@
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AgentEditDialog from '../components/AgentEditDialog.vue'
-import RagPageNav from '@/modules/rag/components/RagPageNav.vue'
 import { listAllAgents, listSkills, deleteAgent } from '../api/agent'
 import type { AgentInfo, SkillInfo } from '../types'
 

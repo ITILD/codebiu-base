@@ -15,6 +15,10 @@
         :class="menuAbove ? 'bottom-full' : 'top-full'"
         :style="menuStyle"
       >
+        <button v-if="assistantAvailable" class="ft-pill" type="button" @click="openAssistant">
+          <i-ep-chat-dot-round class="text-sm" />
+          AI
+        </button>
         <button class="ft-pill" type="button" @click="toggleFullscreen">
           <i-ep-close v-if="isFullscreen" class="text-sm" />
           <i-ep-full-screen v-else class="text-sm" />
@@ -43,6 +47,7 @@
       @pointermove="onMove"
       @pointerup="onUp"
       @pointercancel="onUp"
+      @click="onClick"
     >
       <!-- 折纸和平鸽(左朝向): 三档苔绿折面拼接, 全走 --note-* 变量明暗自适应
            绘制顺序=纸的叠压关系: 尾羽在下层, 身体压住尾根, 翅膀/头颈在最上层 -->
@@ -68,9 +73,24 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
+import { useRoute } from 'vue-router'
 import { SysSettingStore } from '@/common/stores/sys'
+import { useAuthStore } from '@/common/stores/auth'
+import { useAssistantPanel } from '@/app/composables/useAssistantPanel'
+import { assistantConfig } from '@/modules/ai/utils/assistantConfig'
 
 const sysStore = SysSettingStore()
+const route = useRoute()
+const authStore = useAuthStore()
+const { openPanel } = useAssistantPanel()
+
+/** AI 入口是否可用(与 AssistantFloat 面板的显示条件保持一致) */
+const assistantAvailable = computed(
+  () =>
+    Boolean(authStore.authState.user.id) &&
+    assistantConfig.value.enabled &&
+    route.path !== '/rag/conversation',
+)
 
 // 悬浮球尺寸与贴边留白(px)
 const KNOB = 46
@@ -119,6 +139,12 @@ const menuStyle = computed(() => ({
   transformOrigin: menuAbove.value ? 'bottom right' : 'top right'
 }))
 
+/** 打开 AI 助手小窗: 吸附方向跟随悬浮球所在侧 */
+const openAssistant = () => {
+  expanded.value = false
+  openPanel(pos.value.x + KNOB / 2 <= window.innerWidth / 2 ? 'left' : 'right')
+}
+
 /////////////////////////////////////////////////////////拖拽(指针事件统一鼠标/触摸)/////////////////////////////////////////////////////////
 const dragStart = { px: 0, py: 0, x: 0, y: 0, moved: false }
 
@@ -143,15 +169,27 @@ const onMove = (e: PointerEvent) => {
   pos.value = clampPos({ x: dragStart.x + dx, y: dragStart.y + dy })
 }
 
+// 拖动结束后浏览器可能仍补发一次 click, 用一次性标记忽略它
+let suppressClick = false
+
 const onUp = () => {
   if (dragStart.moved) {
     // 松手吸附到最近的左右边
     pos.value.x = pos.value.x + KNOB / 2 <= window.innerWidth / 2 ? EDGE : window.innerWidth - KNOB - EDGE
     savePos()
-  } else {
-    expanded.value = !expanded.value
+    suppressClick = true
+    setTimeout(() => { suppressClick = false }, 0)
   }
   dragging.value = false
+}
+
+/** 点击展开/收起菜单(不再依赖 pointerup, 键盘与自动化点击同样可用) */
+const onClick = () => {
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
+  expanded.value = !expanded.value
 }
 
 /////////////////////////////////////////////////////////全局监听/////////////////////////////////////////////////////////

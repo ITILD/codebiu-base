@@ -144,6 +144,7 @@ class ProjectDao:
         statement = select(Project)
         if conditions:
             statement = statement.where(*conditions)
+        statement = statement.order_by(Project.created_at.desc())
         statement = statement.offset(pagination.offset).limit(pagination.limit)
         result = await session.exec(statement)
         return result.all()

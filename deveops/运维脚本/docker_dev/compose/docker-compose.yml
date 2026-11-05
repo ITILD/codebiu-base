@@ -73,8 +73,7 @@ services:
       - ./server_py/temp_source:/app/temp_source
     environment:
       - TZ=Asia/Shanghai
-      # 加载 config.dev.yaml(远程 PG/Redis/Milvus 等), 否则用基线配置连 localhost
-      - APP_ENV=dev
+      # config.yaml 的 config.local_file 指向 config.dev.yaml(远程 PG/Redis/Milvus 等), 缺失则用基线
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # 不依赖本地 pg/redis(应用直连远程; 且 depends_on 会强制激活可选 profile)

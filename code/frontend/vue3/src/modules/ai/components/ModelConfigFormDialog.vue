@@ -51,6 +51,17 @@
         <el-input v-model="form.api_key" placeholder="sk-..." show-password />
       </el-form-item>
 
+      <!-- OCR: 多条配置组成降级链(可混合 PaddleOCR / OXR / 百炼) -->
+      <template v-if="form.model_type === ModelType.OCR">
+        <el-form-item label=" ">
+          <div class="text-xs text-note-sub leading-5">
+            可添加多条 OCR 配置组成降级链：默认公共配置优先，其余按创建时间依次尝试，单条失败自动切换下一条。
+            「在线」方案下 protocol 可选 paddle(PaddleOCR-VL 官方) / oxr(OXR 1.0 官方免费 API) / dashscope(百炼)；
+            OXR 免费额度限制单文件 10MB / 20 页。
+          </div>
+        </el-form-item>
+      </template>
+
       <!-- 对话模型参数 -->
       <template v-if="form.model_type === ModelType.CHAT">
         <el-form-item label="温度系数" prop="temperature">

@@ -44,6 +44,10 @@ def _field_type(annotation) -> tuple[str, list[str] | None]:
     if origin is typing.Literal:
         return "enum", [str(v) for v in typing.get_args(ann)]
     if origin in (list, typing.List):
+        # list[Literal[...]]: 元素为有限枚举时提供可选项(前端 tags 下拉可点选/可自填)
+        args = typing.get_args(ann)
+        if len(args) == 1 and typing.get_origin(args[0]) is typing.Literal:
+            return "list", [str(v) for v in typing.get_args(args[0])]
         return "list", None
     return "str", None
 

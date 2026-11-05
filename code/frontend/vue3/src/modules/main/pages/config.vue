@@ -1,6 +1,6 @@
 <!-- 动态配置管理页: 按 sys_config 分组 schema 渲染通用配置表单 -->
 <template>
-  <div p-4 md:p-6>
+  <div p-3 md:p-4>
     <InkPageHead
       title="通用配置"
       sub="平台运行参数的集中配置"
@@ -86,11 +86,13 @@
                 <el-select v-else-if="f.type === 'enum'" v-model="form[f.key]" class="!w-72">
                   <el-option v-for="o in f.options" :key="o" :label="o" :value="o" />
                 </el-select>
-                <!-- 列表(tags 输入) -->
+                <!-- 列表(tags 输入; 后端给出有限选项时可点选, 仍支持自填) -->
                 <el-select
                   v-else-if="f.type === 'list'" v-model="form[f.key]" multiple filterable allow-create
                   default-first-option class="!w-full" placeholder="输入后回车添加"
-                />
+                >
+                  <el-option v-for="o in f.options || []" :key="o" :label="o" :value="o" />
+                </el-select>
                 <!-- 文本 -->
                 <el-input v-else v-model="form[f.key]" />
                 <div v-if="fieldHint(f)" class="text-xs text-note-sub mt-1">{{ fieldHint(f) }}</div>

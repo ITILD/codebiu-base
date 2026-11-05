@@ -1,17 +1,17 @@
 <script setup lang="ts">
 /**
- * 右下角(可配置左右)悬浮 AI 助手入口
+ * 悬浮 AI 助手小窗(仅面板, 入口在可拖动悬浮工具菜单中)
  * - 仅登录且后台配置启用时渲染; 完整 AI 助手页(/rag/conversation)内整体隐藏
  * - 面板异步懒加载, 首次打开才挂载, 之后关闭仅 v-show 隐藏以保留会话状态
  * - 支持每浏览器会话延迟自动弹开一次(受 autoOpen 配置控制)
  */
 defineOptions({ name: 'AssistantFloat' })
 
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ChatDotRound, Close } from '@element-plus/icons-vue'
 import NoteSkeleton from '@/common/components/NoteSkeleton.vue'
 import { useAuthStore } from '@/common/stores/auth'
+import { useAssistantPanel } from '@/app/composables/useAssistantPanel'
 import {
   ASSISTANT_AUTO_OPEN_FLAG_KEY,
   assistantConfig,
@@ -22,44 +22,20 @@ const { t } = i18n.global
 const route = useRoute()
 const authStore = useAuthStore()
 
+const { open, mounted: panelMounted, side, openPanel, closePanel } = useAssistantPanel()
+
 // 面板异步加载: 首次打开时才拉取面板代码
 const Panel = defineAsyncComponent(
   () => import('@/modules/rag/components/AssistantWidgetPanel.vue'),
 )
 
-const open = ref(false)
-const panelMounted = ref(false)
-const fabRef = ref<HTMLButtonElement | null>(null)
-const panelWrapRef = ref<HTMLElement | null>(null)
-
-/** 是否展示悬浮入口: 已登录 + 配置启用 + 不在完整对话页 */
+/** 是否可用: 已登录 + 配置启用 + 不在完整对话页 */
 const visible = computed(
   () =>
     Boolean(authStore.authState.user.id) &&
     assistantConfig.value.enabled &&
     route.path !== '/rag/conversation',
 )
-
-/** 打开面板(首次打开才挂载异步组件) */
-const openPanel = () => {
-  panelMounted.value = true
-  open.value = true
-}
-
-/** 关闭面板: 焦点在面板内时归还给悬浮按钮 */
-const closePanel = () => {
-  if (!open.value) return
-  const active = document.activeElement
-  const focusInPanel =
-    active instanceof HTMLElement && Boolean(panelWrapRef.value?.contains(active))
-  open.value = false
-  if (focusInPanel) nextTick(() => fabRef.value?.focus())
-}
-
-const togglePanel = () => {
-  if (open.value) closePanel()
-  else openPanel()
-}
 
 // ===== 自动弹开: 同一浏览器会话仅一次 =====
 let autoOpenTimer: ReturnType<typeof setTimeout> | null = null
@@ -91,7 +67,7 @@ const scheduleAutoOpen = () => {
   autoOpenTimer = setTimeout(() => {
     if (!visible.value) return
     markAutoOpened()
-    openPanel()
+    openPanel(assistantConfig.value.position)
   }, 600)
 }
 
@@ -108,6 +84,11 @@ watch(
   },
 )
 
+// 离开可用范围(退出登录/关闭配置/进入完整对话页)时一并收起
+watch(visible, (next) => {
+  if (!next) closePanel()
+})
+
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   if (autoOpenTimer) clearTimeout(autoOpenTimer)
@@ -115,88 +96,68 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="visible">
-    <!-- 面板: 桌面固定 400px 宽, 手机全屏 -->
-    <Transition name="asst-pop">
-      <div
-        v-show="open"
-        ref="panelWrapRef"
-        class="asst-panel"
-        :class="assistantConfig.position === 'left' ? 'asst-panel--left' : 'asst-panel--right'"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('asst_widget_title')"
-      >
-        <Suspense>
-          <Panel v-if="panelMounted" @close="closePanel" />
-          <template #fallback>
-            <div class="flex h-full w-full flex-col gap-3 bg-note-paper p-4">
-              <NoteSkeleton variant="post" />
-              <NoteSkeleton variant="post" />
-            </div>
-          </template>
-        </Suspense>
-      </div>
-    </Transition>
-
-    <!-- 悬浮按钮: 位置跟随配置, 底部预留安全区 -->
-    <button
-      ref="fabRef"
-      type="button"
-      class="asst-fab fixed z-40 flex h-[52px] w-[52px] items-center justify-center rounded-full border-none bg-note-green text-white shadow-note cursor-pointer note-transition hover:shadow-note-hover"
-      :class="assistantConfig.position === 'left' ? 'left-5' : 'right-5'"
-      :aria-label="open ? t('asst_close') : t('asst_widget_title')"
-      :aria-expanded="open"
-      :title="open ? t('asst_close') : t('asst_widget_title')"
-      @click="togglePanel"
+  <Transition name="asst-pop">
+    <div
+      v-if="visible"
+      v-show="open"
+      class="asst-panel"
+      :class="side === 'left' ? 'asst-panel--left' : 'asst-panel--right'"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="t('asst_widget_title')"
     >
-      <el-icon :size="24">
-        <Close v-if="open" />
-        <ChatDotRound v-else />
-      </el-icon>
-    </button>
-  </div>
+      <Suspense>
+        <Panel v-if="panelMounted" @close="closePanel" />
+        <template #fallback>
+          <div class="flex h-full w-full flex-col gap-2 bg-note-paper p-3">
+            <NoteSkeleton variant="post" />
+            <NoteSkeleton variant="post" />
+          </div>
+        </template>
+      </Suspense>
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
-/* 悬浮按钮: 避开底部安全区(手机 home indicator) */
-.asst-fab {
-  bottom: calc(1.25rem + var(--note-safe-b, 0px));
-}
-
-/* 面板: 桌面/平板固定尺寸, 悬于按钮上方 */
+/* 小窗: 紧凑尺寸, 贴近微信浮窗的聊天观感 */
 .asst-panel {
   position: fixed;
-  /* 高于悬浮按钮, 手机全屏时按钮不会压住面板内容 */
-  z-index: 50;
+  z-index: 60;
   display: flex;
   flex-direction: column;
-  width: 400px;
-  height: min(620px, calc(100vh - 7rem));
-  bottom: calc(1.25rem + 52px + 0.75rem + var(--note-safe-b, 0px));
+  width: min(340px, calc(100vw - 24px));
+  height: min(500px, calc(100vh - 6rem));
+  right: 12px;
+  bottom: calc(12px + var(--note-safe-b, 0px));
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--note-border);
   background: var(--note-paper);
   box-shadow: var(--note-shadow-hover);
   transform-origin: bottom right;
 }
 
-.asst-panel--right {
-  right: 1.25rem;
-}
-
 .asst-panel--left {
-  left: 1.25rem;
+  right: auto;
+  left: 12px;
   transform-origin: bottom left;
 }
 
-/* 手机(<640px): 全屏面板 */
+/* 手机(<640px): 宽度铺满留边, 高度约七成屏, 保留浮窗而不是全屏 */
 @media (max-width: 639px) {
   .asst-panel {
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    border-radius: 0;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    height: min(68vh, 540px);
+    bottom: calc(8px + var(--note-safe-b, 0px));
+    border-radius: 14px;
+  }
+
+  .asst-panel--left {
+    left: 8px;
+    right: 8px;
   }
 }
 
@@ -204,13 +165,13 @@ onUnmounted(() => {
 .asst-pop-enter-active,
 .asst-pop-leave-active {
   transition:
-    opacity 0.2s ease-out,
-    transform 0.2s ease-out;
+    opacity 0.18s ease-out,
+    transform 0.18s ease-out;
 }
 
 .asst-pop-enter-from,
 .asst-pop-leave-to {
   opacity: 0;
-  transform: translateY(8px) scale(0.98);
+  transform: translateY(6px) scale(0.97);
 }
 </style>

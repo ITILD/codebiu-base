@@ -176,3 +176,18 @@ class DbMetaService:
             "keyspace_misses": misses,
             "hit_rate": round(hits / total * 100, 2) if total else None,
         }
+
+    # ############################### 图数据库 ###############################
+    @staticmethod
+    async def graph_info() -> dict:
+        """
+        图数据库运行信息
+
+        Returns:
+            dict: 未启用时 type 为 None
+        """
+        mgr = _real()
+        graph = getattr(mgr, "db_graph", None) if mgr else None
+        if graph is None:
+            return {"type": None}
+        return {"type": type(graph).__name__}

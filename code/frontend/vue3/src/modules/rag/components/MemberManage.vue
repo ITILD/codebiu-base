@@ -1,13 +1,26 @@
 <template>
-  <!-- 成员管理面板(个人成员 + 部门授权): 由 project.vue 编辑抽屉内嵌使用 -->
-  <el-tabs v-model="activeTab">
-    <!-- Tab 1: 个人成员 -->
-    <el-tab-pane label="个人成员" name="members">
-      <!-- 工具行: 添加成员 -->
-      <div mb-3 flex justify-end>
-        <el-button type="primary" :icon="Plus" @click="handleAdd">添加成员</el-button>
+  <!-- 成员与授权面板(个人成员 + 部门授权): 与基本信息同页展示, 用分段切换替代内嵌 Tab -->
+  <section>
+    <!-- 标题行: 标题+数量 / 分段切换 + 当前视图主操作 -->
+    <div card-toolbar>
+      <div flex items-center gap-2 min-w-0>
+        <span text-sm font-semibold text-note>成员与授权</span>
+        <span text-xs text-note-sub>
+          {{ activeTab === 'members' ? `共 ${total} 人` : `共 ${deptTotal} 个部门` }}
+        </span>
       </div>
+      <div flex flex-wrap items-center justify-end gap-2>
+        <el-radio-group v-model="activeTab" size="small">
+          <el-radio-button value="members">个人成员</el-radio-button>
+          <el-radio-button value="depts">部门授权</el-radio-button>
+        </el-radio-group>
+        <el-button v-if="activeTab === 'members'" size="small" type="primary" :icon="Plus"
+          @click="handleAdd">添加成员</el-button>
+      </div>
+    </div>
 
+    <!-- 个人成员 -->
+    <template v-if="activeTab === 'members'">
       <!-- 统一搜索栏: 多字段筛选(用户关键字/角色) -->
       <TableSearchBar
         v-model="queryParams"
@@ -18,53 +31,55 @@
       />
 
       <!-- 成员表格 -->
-      <el-table v-loading="loading" :data="members" border stripe>
-        <el-table-column label="成员" min-width="200">
-          <template #default="{ row }">
-            <div flex items-center gap-2>
-              <UserAvatar :size="32" :name="userLabel(row.user_id)" />
-              <div>
-                <div>{{ userLabel(row.user_id) }}</div>
-                <div text-xs text-note-sub>{{ row.user_id }}</div>
+      <div rounded-2xl bg-note-card shadow-note overflow-hidden>
+        <el-table v-loading="loading" :data="members" stripe>
+          <el-table-column label="成员" min-width="200">
+            <template #default="{ row }">
+              <div flex items-center gap-2>
+                <UserAvatar :size="28" :name="userLabel(row.user_id)" />
+                <div>
+                  <div>{{ userLabel(row.user_id) }}</div>
+                  <div text-xs text-note-sub>{{ row.user_id }}</div>
+                </div>
               </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="角色" min-width="180" align="center">
-          <template #default="{ row }">
-            <el-select :model-value="row.role" size="small" w-32 @change="(val: string) => handleRoleChange(row, val)">
-              <el-option v-for="opt in ragRoleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="加入时间" min-width="130" align="center">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" min-width="100" align="center">
-          <template #default="{ row }">
-            <el-button size="small" type="danger" plain @click="handleRemove(row)">移除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+            </template>
+          </el-table-column>
+          <el-table-column label="角色" min-width="160" align="center">
+            <template #default="{ row }">
+              <el-select :model-value="row.role" size="small" w-32 @change="(val: string) => handleRoleChange(row, val)">
+                <el-option v-for="opt in ragRoleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="加入时间" min-width="120" align="center">
+            <template #default="{ row }">
+              {{ formatDate(row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" min-width="90" align="center">
+            <template #default="{ row }">
+              <el-button size="small" type="danger" plain @click="handleRemove(row)">移除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
 
       <!-- 空状态提示 -->
-      <div v-if="!loading && members.length === 0" py-10 flex flex-col items-center text-note-sub>
-        <el-icon text-4xl mb-2><UserFilled /></el-icon>
-        <p m-0>暂无成员，点击上方"添加成员"开始</p>
+      <div v-if="!loading && members.length === 0" py-6 flex flex-col items-center text-note-sub>
+        <el-icon text-3xl mb-2><UserFilled /></el-icon>
+        <p m-0>暂无成员，点击右上角"添加成员"开始</p>
       </div>
 
       <!-- 分页(手机居中, 桌面靠右) -->
       <div mt-3 flex flex-wrap justify-center sm:justify-end>
         <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size"
-          :total="total" layout="total, prev, pager, next"
+          :total="total" layout="prev, pager, next" hide-on-single-page
           @size-change="fetchData" @current-change="fetchData" />
       </div>
-    </el-tab-pane>
+    </template>
 
-    <!-- Tab 2: 部门授权(部门批量授权, 子部门自动继承, 与个人档位取最高) -->
-    <el-tab-pane label="部门授权" name="depts">
+    <!-- 部门授权(部门批量授权, 子部门自动继承, 与个人档位取最高) -->
+    <template v-else>
       <!-- 授权表单行: 部门树选择 + 档位 + 添加 -->
       <div mb-3 flex flex-wrap items-center gap-2>
         <el-tree-select v-model="deptForm.dept_id" :data="deptTreeData" :disabled="deptTreeDisabled"
@@ -80,49 +95,52 @@
       </div>
 
       <!-- 已授权部门表格 -->
-      <el-table v-loading="deptLoading" :data="deptAuths" border stripe>
-        <el-table-column label="部门" min-width="200">
-          <template #default="{ row }">
-            <div flex items-center gap-2>
-              <el-avatar :size="32" :icon="OfficeBuilding" />
-              <div>
-                <div>{{ deptLabel(row.dept_id) }}</div>
-                <div text-xs text-note-sub>含子部门</div>
+      <div rounded-2xl bg-note-card shadow-note overflow-hidden>
+        <el-table v-loading="deptLoading" :data="deptAuths" stripe>
+          <el-table-column label="部门" min-width="200">
+            <template #default="{ row }">
+              <div flex items-center gap-2>
+                <el-avatar :size="28" :icon="OfficeBuilding" />
+                <div>
+                  <div>{{ deptLabel(row.dept_id) }}</div>
+                  <div text-xs text-note-sub>含子部门</div>
+                </div>
               </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="授权档位" min-width="180" align="center">
-          <template #default="{ row }">
-            <el-select :model-value="row.role" size="small" w-32 @change="(val: string) => handleDeptRoleChange(row, val)">
-              <el-option v-for="opt in ragRoleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="授权时间" min-width="130" align="center">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" min-width="100" align="center">
-          <template #default="{ row }">
-            <el-button size="small" type="danger" plain @click="handleDeptRemove(row)">移除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+            </template>
+          </el-table-column>
+          <el-table-column label="授权档位" min-width="160" align="center">
+            <template #default="{ row }">
+              <el-select :model-value="row.role" size="small" w-32 @change="(val: string) => handleDeptRoleChange(row, val)">
+                <el-option v-for="opt in ragRoleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="授权时间" min-width="120" align="center">
+            <template #default="{ row }">
+              {{ formatDate(row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" min-width="90" align="center">
+            <template #default="{ row }">
+              <el-button size="small" type="danger" plain @click="handleDeptRemove(row)">移除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
 
       <!-- 分页(手机居中, 桌面靠右) -->
       <div mt-3 flex flex-wrap justify-center sm:justify-end>
         <el-pagination v-model:current-page="deptPagination.page" v-model:page-size="deptPagination.size"
-          :total="deptTotal" layout="total, prev, pager, next"
+          :total="deptTotal" layout="prev, pager, next" hide-on-single-page
           @size-change="fetchDeptAuths" @current-change="fetchDeptAuths" />
       </div>
 
-      <!-- 规则说明 -->
-      <el-alert type="info" :closable="false" show-icon mt-3
-        title="部门授权与个人成员档位取最高档生效；授权父部门时其所有子部门用户自动继承。" />
-    </el-tab-pane>
-  </el-tabs>
+      <!-- 规则说明(弱化为辅助文案, 不抢表格视觉权重) -->
+      <p text-xs text-note-sub mt-2 m-0 leading-relaxed>
+        部门授权与个人成员档位取最高档生效；授权父部门时其所有子部门用户自动继承。
+      </p>
+    </template>
+  </section>
 
   <!-- 添加成员对话框 -->
   <el-dialog v-model="dialogVisible" title="添加成员" width="90%" class="max-w-[480px]">
@@ -182,7 +200,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const props = defineProps<{ /** 所属知识库项目ID */ projectId: string }>()
 
-// 当前 Tab(members=个人成员 / depts=部门授权)
+// 当前分段视图(members=个人成员 / depts=部门授权)
 const activeTab = ref('members')
 
 // 成员列表: 分页/查询/拉取统一收口(统一使用 useTableQuery, fetcher 闭包引用 props.projectId)
@@ -324,7 +342,7 @@ const handleRemove = async (row: ProjectMember) => {
 
 // ---------------- 部门授权 ----------------
 
-// 部门树数据与禁用状态(部门树加载失败时禁用选择器,不影响成员 Tab)
+// 部门树数据与禁用状态(部门树加载失败时禁用选择器,不影响个人成员视图)
 const deptTreeData = ref<DeptTree[]>([])
 const deptTreeDisabled = ref(false)
 
@@ -424,7 +442,7 @@ const handleDeptRemove = async (row: ProjectDept) => {
   }
 }
 
-// 首次切到部门授权 Tab 时懒加载(减少不必要请求)
+// 首次切到部门授权视图时懒加载(减少不必要请求)
 watch(activeTab, (tab) => {
   if (tab === 'depts') {
     loadDeptTree()

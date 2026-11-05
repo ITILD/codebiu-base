@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6>
+  <div p-3 md:p-4>
     <!-- 水墨页头 -->
     <InkPageHead title="数据库概览" sub="以一页自然笔记, 整理你的数据资产" seal="览" />
     <el-row :gutter="16">

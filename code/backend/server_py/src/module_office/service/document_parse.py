@@ -4,6 +4,7 @@
 引擎产出统一 Chunk → 返回带尝试链路的结果。本层不直接调用任何模型服务。
 """
 
+import logging
 from pathlib import Path
 
 from module_office.do.parse import (
@@ -13,7 +14,12 @@ from module_office.do.parse import (
     ParseResult,
 )
 from module_office.utils.file_parse.do.chunk import Chunk
-from module_office.utils.file_parse.registry import engine_registry
+from module_office.utils.file_parse.registry import (
+    UnsupportedFileTypeError,
+    engine_registry,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentParseService:
@@ -37,6 +43,25 @@ class DocumentParseService:
         self._vision = vision
         self._ocr = ocr
 
+    @staticmethod
+    async def _load_plan() -> ParsePlan:
+        """读取后台「文档解析」动态配置(主引擎/备用引擎顺序)
+
+        未配置或读取异常时回退 auto(内置优先级), 不阻断解析流程。
+        """
+        try:
+            from common.config.dynamic import get_settings
+            from common.config.dynamic.schemas import ParserSettings
+
+            conf = await get_settings(ParserSettings)
+            return ParsePlan(
+                primary_engine=conf.primary_engine,
+                fallback_engines=list(conf.fallback_engines),
+            )
+        except Exception as e:
+            logger.warning("读取文档解析配置失败, 按默认 auto 路由: %s", e)
+            return ParsePlan()
+
     async def parse(
         self,
         file_path: Path,
@@ -49,29 +74,48 @@ class DocumentParseService:
 
         :param file_path: 文件路径
         :param user_id: 当前用户ID(解析其绑定的视觉/OCR 模型)
-        :param plan: 解析方案(主引擎/备用引擎/媒体策略), 缺省为 auto
+        :param plan: 解析方案(主引擎/备用引擎/媒体策略), 缺省读取后台「文档解析」配置
         :param engine: 显式指定引擎(覆盖 plan)
         :return: 解析结果
         :raises ValueError: 文件后缀无引擎支持
         """
         file_path = Path(file_path)
-        plan = plan or ParsePlan()
+        plan = plan or await self._load_plan()
         ctx = ParseContext(
             user_id=user_id, vision=self._vision, ocr=self._ocr, plan=plan
         )
-        parser, descriptor, failed = engine_registry.create(
-            file_path, ctx, plan=plan, engine=engine
-        )
-        chunks = await parser.extract(file_path)
-        return ParseResult(
-            chunks=chunks,
-            engine=descriptor.name,
-            attempts=[
-                *failed,
-                ParseAttempt(engine=descriptor.name, ok=True),
-            ],
-            source=file_path,
-        )
+        candidates = engine_registry.candidates(file_path, plan=plan, engine=engine)
+        if not candidates:
+            raise UnsupportedFileTypeError(file_path.suffix.lower(), engine_registry.names())
+
+        failed: list[ParseAttempt] = []
+        errors: list[str] = []
+        for descriptor in candidates:
+            try:
+                parser = descriptor.parser_cls(ctx)
+            except Exception as e:
+                logger.warning("解析引擎 %s 初始化失败: %s", descriptor.name, e)
+                errors.append(f"{descriptor.name}: {e}")
+                failed.append(ParseAttempt(engine=descriptor.name, ok=False, error=str(e)))
+                continue
+            try:
+                chunks = await parser.extract(file_path)
+            except Exception as e:
+                # 运行期失败(如上游服务不可达)同样降级到下一候选引擎
+                logger.warning("解析引擎 %s 执行失败: %s", descriptor.name, e)
+                errors.append(f"{descriptor.name}: {e}")
+                failed.append(ParseAttempt(engine=descriptor.name, ok=False, error=str(e)))
+                continue
+            return ParseResult(
+                chunks=chunks,
+                engine=descriptor.name,
+                attempts=[
+                    *failed,
+                    ParseAttempt(engine=descriptor.name, ok=True),
+                ],
+                source=file_path,
+            )
+        raise RuntimeError("全部解析引擎执行失败: " + "; ".join(errors))
 
     async def file2chunk(
         self,

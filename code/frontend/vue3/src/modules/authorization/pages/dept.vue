@@ -1,22 +1,44 @@
 <template>
-  <div p-4 md:p-6 w-full>
+  <div p-3 md:p-4 w-full>
     <!-- 水墨页头 -->
     <InkPageHead title="部门管理" sub="组织架构沿枝干自然生长" seal="枝" />
 
     <!-- 搜索栏 -->
-    <div mb-4 flex flex-wrap items-center gap-2>
-      <el-input class="w-full sm:w-80" v-model="searchQuery" placeholder="输入部门名称搜索" clearable @clear="handleSearch" @keyup.enter="handleSearch">
+    <div mb-3 flex flex-wrap items-center gap-2>
+      <el-input class="w-full sm:w-72" size="small" v-model="searchQuery" placeholder="输入部门名称搜索" clearable @clear="handleSearch" @keyup.enter="handleSearch">
         <template #append>
           <el-button :icon="Search" @click="handleSearch" />
         </template>
       </el-input>
-      <el-button type="primary" @click="handleCreate">
+      <el-button size="small" type="primary" @click="handleCreate">
         新增部门
       </el-button>
     </div>
 
+    <!-- 批量操作条: 选中后出现 -->
+    <div
+      v-if="selectedRows.length"
+      class="mb-2 flex flex-wrap items-center gap-2 rounded-note-md bg-note-tint px-3 py-2"
+    >
+      <span text-sm text-note-green>已选 {{ selectedRows.length }} 项</span>
+      <el-button size="small" type="danger" plain :loading="deleting" @click="handleBatchDelete">
+        批量删除
+      </el-button>
+      <el-button class="ml-auto" link size="small" @click="clearSelection">取消选择</el-button>
+    </div>
+
     <!-- 数据表格 -->
-    <el-table :data="tableData" v-loading="loading" stripe w-full row-key="id" :tree-props="{ children: 'children' }">
+    <el-table
+      ref="tableRef"
+      :data="tableData"
+      v-loading="loading"
+      stripe
+      w-full
+      row-key="id"
+      :tree-props="{ children: 'children' }"
+      @selection-change="handleSelectionChange"
+    >
+      <el-table-column type="selection" width="44" />
       <el-table-column prop="name" label="部门名称" min-width="180" />
       <el-table-column prop="order_num" label="排序" min-width="80" align="center" />
       <el-table-column prop="leader" label="负责人" min-width="100" />
@@ -84,9 +106,10 @@
 import { Search } from '@element-plus/icons-vue'
 import { createDept, deleteDept, getDept, getDeptTree, updateDept } from '../api/dept'
 import type { DeptCreate, DeptTree } from '../types/dept'
-import { ElMessage, ElMessageBox, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormRules, type TableInstance } from 'element-plus'
 import { useResponsive } from '@/common/composables/useResponsive'
 import { useCrudDialog } from '@/common/composables/useCrudDialog'
+import { useBatchDelete } from '@/common/composables/useBatchDelete'
 
 // 响应式: 平板及以上操作列固定右侧
 const { isMd } = useResponsive()
@@ -241,6 +264,34 @@ const handleDelete = async (row: DeptTreeNode) => {
     console.error('删除失败:', error)
     ElMessage.error('删除失败，请重试')
   }
+}
+
+// ################ 批量操作 ################
+const tableRef = ref<TableInstance>()
+const selectedRows = ref<DeptTreeNode[]>([])
+const { batchDelete, deleting } = useBatchDelete()
+
+/** 多选变化 */
+const handleSelectionChange = (rows: DeptTreeNode[]) => {
+  selectedRows.value = rows
+}
+
+/** 清空多选 */
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
+/** 批量删除(部门树删除后整树重载) */
+const handleBatchDelete = async () => {
+  const removed = await batchDelete({
+    rows: selectedRows.value,
+    getId: row => row.id,
+    remove: id => deleteDept(String(id)),
+    label: row => row.name,
+    onRemoved: fetchData,
+  })
+  if (removed) clearSelection()
 }
 
 // 初始化加载数据

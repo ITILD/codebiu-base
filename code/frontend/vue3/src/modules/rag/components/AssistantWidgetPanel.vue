@@ -14,7 +14,6 @@ import {
   Close,
   FullScreen,
   Plus,
-  Setting,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import ChatMessageList from '@/common/components/chat/ChatMessageList.vue'
@@ -59,6 +58,13 @@ const greetingText = computed(() => assistantConfig.value.greeting.trim() || t('
 const suggestions = computed(() =>
   assistantConfig.value.suggestions.filter((item) => item.trim() !== ''),
 )
+
+// 输入框浅色轮播提示(3 秒一轮渐显渐隐, 替代静态 Enter 快捷键文案)
+const composerTips = computed(() => [
+  t('asst_tip_input'),
+  t('asst_tip_multiline'),
+  t('asst_tip_knowledge'),
+])
 
 // ===== 流式状态(与完整对话页一致: 序号防旧流污染新流) =====
 const {
@@ -248,12 +254,6 @@ const openFullConversation = () => {
   emit('close')
 }
 
-/** 前往助手设置并收起面板 */
-const openAssistantSettings = () => {
-  router.push('/ai/assistant')
-  emit('close')
-}
-
 /** 加载可见助手列表(仅取名称; 失败静默) */
 const loadAgents = async () => {
   try {
@@ -268,53 +268,44 @@ onUnmounted(abortActiveStream)
 </script>
 
 <template>
-  <div class="flex h-full w-full min-w-0 flex-col overflow-hidden bg-note-paper">
-    <!-- 头部: 标题 + 当前助手名 + 操作按钮(44px 触控区) -->
-    <header class="flex h-12 shrink-0 items-center gap-1 border-b border-note bg-note-soft/60 px-2">
-      <div class="flex min-w-0 flex-1 items-center gap-2">
-        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-note-tint text-note-green">
-          <el-icon :size="17"><ChatDotRound /></el-icon>
-        </span>
-        <span v-ellipsis class="min-w-0 truncate text-sm font-medium text-note">{{ t('asst_widget_title') }}</span>
-        <span v-if="activeAgentName" v-ellipsis class="hidden min-w-0 shrink truncate text-xs text-note-sub sm:inline">
+  <div class="flex h-full w-full min-w-0 flex-col overflow-hidden bg-note-soft">
+    <!-- 头部: 紧凑标题栏(微信小窗式), 右侧仅保留 新对话 / 全屏 / 关闭 -->
+    <header class="flex h-11 shrink-0 items-center gap-1 border-b border-note bg-note-card px-2.5">
+      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-note-tint text-note-green">
+        <el-icon :size="15"><ChatDotRound /></el-icon>
+      </span>
+      <div class="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <span v-ellipsis class="min-w-0 truncate text-[13px] font-medium text-note">{{ t('asst_widget_title') }}</span>
+        <span v-if="activeAgentName" v-ellipsis class="min-w-0 truncate text-[11px] text-note-sub">
           · {{ activeAgentName }}
         </span>
       </div>
       <button
         type="button"
-        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-none bg-transparent text-note-sub cursor-pointer note-transition hover:bg-note-tint hover:text-note-green"
+        class="asst-head-btn"
         :aria-label="t('asst_new_chat')"
         :title="t('asst_new_chat')"
         @click="handleNewChat"
       >
-        <el-icon :size="17"><Plus /></el-icon>
+        <el-icon :size="15"><Plus /></el-icon>
       </button>
       <button
         type="button"
-        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-none bg-transparent text-note-sub cursor-pointer note-transition hover:bg-note-tint hover:text-note-green"
+        class="asst-head-btn"
         :aria-label="t('asst_expand')"
         :title="t('asst_expand')"
         @click="openFullConversation"
       >
-        <el-icon :size="17"><FullScreen /></el-icon>
+        <el-icon :size="15"><FullScreen /></el-icon>
       </button>
       <button
         type="button"
-        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-none bg-transparent text-note-sub cursor-pointer note-transition hover:bg-note-tint hover:text-note-green"
-        :aria-label="t('asst_settings')"
-        :title="t('asst_settings')"
-        @click="openAssistantSettings"
-      >
-        <el-icon :size="17"><Setting /></el-icon>
-      </button>
-      <button
-        type="button"
-        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-none bg-transparent text-note-sub cursor-pointer note-transition hover:bg-note-tint hover:text-note-green"
+        class="asst-head-btn"
         :aria-label="t('asst_close')"
         :title="t('asst_close')"
         @click="emit('close')"
       >
-        <el-icon :size="17"><Close /></el-icon>
+        <el-icon :size="15"><Close /></el-icon>
       </button>
     </header>
 
@@ -327,17 +318,17 @@ onUnmounted(abortActiveStream)
       @interact="handleInteraction"
     >
       <template #empty>
-        <div class="flex flex-col items-center justify-center gap-2 px-2 py-8 text-center">
-          <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-note-tint shadow-note">
-            <el-icon :size="24" class="text-note-green"><ChatDotRound /></el-icon>
+        <div class="flex flex-col items-center justify-center gap-1.5 px-2 py-6 text-center">
+          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-note-card shadow-note">
+            <el-icon :size="20" class="text-note-green"><ChatDotRound /></el-icon>
           </div>
-          <p class="m-0 text-sm leading-relaxed text-note">{{ greetingText }}</p>
-          <div v-if="suggestions.length" class="mt-2 flex w-full flex-col gap-1.5">
+          <p class="m-0 text-xs leading-relaxed text-note-sub">{{ greetingText }}</p>
+          <div v-if="suggestions.length" class="mt-1.5 flex w-full flex-col gap-1">
             <button
               v-for="s in suggestions"
               :key="s"
               type="button"
-              class="w-full rounded-note-md border border-note bg-note-card px-3 py-2 text-left text-xs text-note note-transition hover:border-note-green hover:bg-note-tint"
+              class="w-full truncate rounded-note-sm border border-note bg-note-card px-2.5 py-1.5 text-left text-[11px] text-note note-transition hover:border-note-green hover:bg-note-tint"
               @click="applySuggestion(s)"
             >
               {{ s }}
@@ -348,15 +339,41 @@ onUnmounted(abortActiveStream)
     </ChatMessageList>
 
     <!-- 输入区: 不启用语音输入, 避免面板内录音权限干扰 -->
-    <div class="shrink-0 px-2 pb-2 pt-1.5">
+    <div class="shrink-0 border-t border-note bg-note-card px-2 pb-1.5 pt-1.5">
       <ChatComposer
         v-model="inputMessage"
         :is-sending="isSending"
         :voice-input="false"
         :placeholder="t('asst_placeholder')"
+        :tips="composerTips"
         @send="handleSend"
         @stop="handleStop"
       />
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 头部图标按钮: 30px 紧凑触控区, 悬停品牌色 */
+.asst-head-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--note-sub);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease-out,
+    color 0.15s ease-out;
+}
+
+.asst-head-btn:hover {
+  background: var(--note-tint);
+  color: var(--note-accent);
+}
+</style>

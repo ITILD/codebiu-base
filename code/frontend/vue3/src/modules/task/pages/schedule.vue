@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full flex flex-col gap-4>
+  <div p-3 md:p-4 w-full flex flex-col gap-3>
     <!-- 水墨页头 -->
     <InkPageHead title="定时任务" sub="周期调度的定义与执行触发" seal="时" />
 
@@ -18,8 +18,32 @@
       </el-button>
     </div>
 
+    <!-- 批量操作条: 选中后出现 -->
+    <div
+      v-if="selectedRows.length"
+      class="flex flex-wrap items-center gap-2 rounded-note-md bg-note-tint px-3 py-2"
+    >
+      <span text-sm text-note-green>已选 {{ selectedRows.length }} 项</span>
+      <el-button size="small" :loading="batchBusy" @click="handleBatchToggle(true)">批量启用</el-button>
+      <el-button size="small" :loading="batchBusy" @click="handleBatchToggle(false)">批量停用</el-button>
+      <el-button size="small" :loading="batchBusy" @click="handleBatchTrigger">批量触发</el-button>
+      <el-button size="small" type="danger" plain :loading="deleting" @click="handleBatchDelete">
+        批量删除
+      </el-button>
+      <el-button class="ml-auto" link size="small" @click="clearSelection">取消选择</el-button>
+    </div>
+
     <!-- 调度表格 -->
-    <el-table :data="tableData" v-loading="loading" stripe w-full>
+    <el-table
+      ref="tableRef"
+      :data="tableData"
+      v-loading="loading"
+      stripe
+      w-full
+      row-key="id"
+      @selection-change="handleSelectionChange"
+    >
+      <el-table-column type="selection" width="44" :fixed="isMd ? 'left' : false" />
       <el-table-column prop="name" label="调度名称" min-width="150" show-overflow-tooltip />
       <el-table-column label="任务类型" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">
@@ -81,6 +105,7 @@
         v-model:current-page="pagination.page"
         v-model:page-size="pagination.size"
         :total="total"
+        small
         layout="total, prev, pager, next"
         @size-change="fetchData"
         @current-change="fetchData"
@@ -94,9 +119,10 @@
 
 <script setup lang="ts">
 import { Plus } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
 import { useTableQuery } from '@/common/composables/useTableQuery'
+import { useBatchDelete } from '@/common/composables/useBatchDelete'
 import { useResponsive } from '@/common/composables/useResponsive'
 import {
   deleteSchedule,
@@ -234,6 +260,92 @@ const handleDelete = (row: TaskSchedule) => {
       }
     })
     .catch(() => {})
+}
+
+// ################ 批量操作 ################
+const tableRef = ref<TableInstance>()
+const selectedRows = ref<TaskSchedule[]>([])
+const { batchDelete, deleting } = useBatchDelete()
+const batchUpdating = ref(false)
+const batchBusy = computed(() => deleting.value || batchUpdating.value)
+
+/** 多选变化 */
+const handleSelectionChange = (rows: TaskSchedule[]) => {
+  selectedRows.value = rows
+}
+
+/** 清空多选 */
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
+/** 批量结果汇总提示 */
+const notifyBatchResult = (results: PromiseSettledResult<unknown>[], action: string) => {
+  const ok = results.filter(r => r.status === 'fulfilled').length
+  const failed = results.length - ok
+  if (ok) ElMessage.success(`已${action} ${ok} 项${failed ? `，${failed} 项失败` : ''}`)
+  if (failed) ElMessage.error(`${failed} 项${action}失败`)
+}
+
+/** 批量启用/停用(仅处理状态需要变化的行) */
+const handleBatchToggle = async (enabled: boolean) => {
+  const targets = selectedRows.value.filter(r => r.enabled !== enabled)
+  if (!targets.length) {
+    ElMessage.warning(`选中调度均已是${enabled ? '启用' : '停用'}状态`)
+    return
+  }
+  batchUpdating.value = true
+  try {
+    const results = await Promise.allSettled(targets.map(row => updateSchedule(row.id, {
+      name: row.name,
+      task_type: row.task_type,
+      payload: row.payload ?? {},
+      cron: row.cron,
+      interval_seconds: row.interval_seconds,
+      enabled,
+      remark: row.remark,
+    })))
+    notifyBatchResult(results, enabled ? '启用' : '停用')
+    await fetchData()
+    clearSelection()
+  } finally {
+    batchUpdating.value = false
+  }
+}
+
+/** 批量立即触发一次 */
+const handleBatchTrigger = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `立即触发选中的 ${selectedRows.value.length} 个调度一次? 不影响原有周期节奏。`,
+      '批量触发确认',
+      { type: 'info', confirmButtonText: '触发', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  batchUpdating.value = true
+  try {
+    const results = await Promise.allSettled(selectedRows.value.map(row => triggerSchedule(row.id)))
+    notifyBatchResult(results, '触发')
+    await fetchData()
+    clearSelection()
+  } finally {
+    batchUpdating.value = false
+  }
+}
+
+/** 批量删除(逐条调用删除接口并汇总结果) */
+const handleBatchDelete = async () => {
+  const removed = await batchDelete({
+    rows: selectedRows.value,
+    getId: row => row.id,
+    remove: id => deleteSchedule(Number(id)),
+    label: row => row.name,
+    onRemoved: n => refreshAfterRemove(n),
+  })
+  if (removed) clearSelection()
 }
 
 // ################ 对话框编排 ################

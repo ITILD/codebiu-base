@@ -83,7 +83,11 @@ export const assistantKeys: Record<string, string[]> = {
     '何でも聞いてください。ナレッジとスキルを活用して回答します',
     'Ask me anything — I use your knowledge base and skills',
   ],
-  asst_placeholder: ['输入问题，Enter 发送', '質問を入力（Enterで送信）', 'Type a question, Enter to send'],
+  asst_placeholder: ['输入问题…', '質問を入力…', 'Type your question…'],
+  // 输入框浅色轮播提示(3 秒一轮渐显渐隐)
+  asst_tip_input: ['输入你的问题…', '質問を入力してください…', 'Type your question…'],
+  asst_tip_multiline: ['可粘贴长文，支持多行编辑', '長文の貼り付け・複数行編集に対応', 'Paste long text, multiline supported'],
+  asst_tip_knowledge: ['我会结合知识库为你解答', 'ナレッジベースを踏まえて回答します', 'I will answer with your knowledge base'],
   asst_send: ['发送', '送信', 'Send'],
   asst_stop: ['停止', '停止', 'Stop'],
   asst_failed: ['发送失败，请重试', '送信に失敗しました。再試行してください', 'Failed to send, please retry'],

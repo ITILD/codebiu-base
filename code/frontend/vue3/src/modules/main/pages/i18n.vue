@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full min-w-0 class="i18n-page">
+  <div p-3 md:p-4 w-full min-w-0 class="i18n-page">
     <!-- 水墨页头 -->
     <InkPageHead :title="t('i18n_title')" seal="译">
       <template #sub>{{ t('i18n_subtitle') }}</template>
@@ -57,8 +57,30 @@
             </div>
           </el-alert>
 
+          <!-- 批量操作条: 选中后出现 -->
+          <div
+            v-if="selectedKeys.length"
+            class="mb-2 flex flex-wrap items-center gap-2 rounded-note-md bg-note-tint px-3 py-1.5"
+          >
+            <span text-xs text-note-green>已选 {{ selectedKeys.length }} 项</span>
+            <el-button size="small" type="danger" plain :loading="deleting" @click="handleBatchDelete">
+              批量删除
+            </el-button>
+            <el-button class="ml-auto" link size="small" @click="clearSelection">取消选择</el-button>
+          </div>
+
           <!-- 桌面/平板: 词条表格(横向滚动收在表格内部) -->
-          <el-table v-if="isMd" v-loading="loading" :data="filteredRows" size="small" stripe>
+          <el-table
+            v-if="isMd"
+            ref="tableRef"
+            v-loading="loading"
+            :data="filteredRows"
+            size="small"
+            stripe
+            row-key="key"
+            @selection-change="handleSelectionChange"
+          >
+            <el-table-column type="selection" width="44" :selectable="selectableRow" />
             <el-table-column :label="t('i18n_key')" min-width="190">
               <template #default="{ row }">
                 <el-input
@@ -128,16 +150,24 @@
               class="rounded-note-md border border-note bg-note-soft/60 p-3"
             >
               <div class="mb-2 flex items-start justify-between gap-2">
-                <el-input
-                  v-if="row.isNew"
-                  v-model="row.key"
-                  size="small"
-                  class="min-w-0 flex-1 font-mono"
-                  :placeholder="t('i18n_key')"
-                  :aria-label="t('i18n_key')"
-                  @blur="blurSave(row)"
-                />
-                <span v-else class="min-w-0 break-all font-mono text-xs text-note">{{ row.key }}</span>
+                <div class="flex min-w-0 flex-1 items-center gap-2">
+                  <el-checkbox
+                    v-if="!row.isNew"
+                    :model-value="selectedKeys.includes(row.key)"
+                    :aria-label="row.key"
+                    @change="toggleRow(row)"
+                  />
+                  <el-input
+                    v-if="row.isNew"
+                    v-model="row.key"
+                    size="small"
+                    class="min-w-0 flex-1 font-mono"
+                    :placeholder="t('i18n_key')"
+                    :aria-label="t('i18n_key')"
+                    @blur="blurSave(row)"
+                  />
+                  <span v-else class="min-w-0 break-all font-mono text-xs text-note">{{ row.key }}</span>
+                </div>
                 <div class="flex shrink-0 gap-1">
                   <el-button size="small" type="primary" link :loading="row.saving" @click="saveRow(row)">
                     {{ t('i18n_save') }}
@@ -226,8 +256,9 @@
  * 1) 词条覆盖: 在线维护 key → 三语覆盖表, 保存后运行时热更新
  * 2) 缺失检测: 扫描源码中的静态 t() 键, 与 languageObj 比对, 支持一键补齐中文
  */
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import { Download, Plus, Search, Upload } from '@element-plus/icons-vue'
+import { useBatchDelete } from '@/common/composables/useBatchDelete'
 import { applyI18nOverrides, i18n, languageObj } from '@/common/i18n/language'
 import { useResponsive } from '@/common/composables/useResponsive'
 import { triggerBlobDownload } from '@/common/utils/export'
@@ -282,6 +313,55 @@ const filteredRows = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return kw ? rows.value.filter((row) => row.key.toLowerCase().includes(kw)) : rows.value
 })
+
+// ################ 批量删除 ################
+const tableRef = ref<TableInstance>()
+const selectedKeys = ref<string[]>([])
+const { batchDelete, deleting } = useBatchDelete()
+
+/** 新增未落库的行不参与批量选择 */
+const selectableRow = (row: OverrideRow) => !row.isNew
+
+/** 当前选中的已落库行 */
+const selectedRows = computed(() =>
+  rows.value.filter((row) => !row.isNew && selectedKeys.value.includes(row.key)),
+)
+
+/** 桌面表格多选变化 */
+const handleSelectionChange = (rows: OverrideRow[]) => {
+  selectedKeys.value = rows.filter((row) => !row.isNew).map((row) => row.key)
+}
+
+/** 手机卡片勾选切换 */
+const toggleRow = (row: OverrideRow) => {
+  if (row.isNew) return
+  selectedKeys.value = selectedKeys.value.includes(row.key)
+    ? selectedKeys.value.filter((key) => key !== row.key)
+    : [...selectedKeys.value, row.key]
+}
+
+/** 清空多选 */
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+  selectedKeys.value = []
+}
+
+/** 批量删除(逐条调用接口, 成功后本地移除并保留其他行的未保存编辑) */
+const handleBatchDelete = async () => {
+  const keys = [...selectedKeys.value]
+  const removed = await batchDelete({
+    rows: selectedRows.value,
+    getId: (row) => row.key,
+    remove: (id) => deleteI18nOverride(String(id)),
+    label: (row) => row.key,
+    onRemoved: () => {
+      rows.value = rows.value.filter((row) => !keys.includes(row.key))
+      for (const key of keys) snapshots.delete(key)
+      importSkipped.value = importSkipped.value.filter((key) => !keys.includes(key))
+    },
+  })
+  if (removed) clearSelection()
+}
 
 /** 行内容签名(判断是否有改动) */
 function signature(row: { zh: string; ja: string; en: string }): string {
@@ -374,6 +454,7 @@ async function handleDelete(row: OverrideRow) {
     await deleteI18nOverride(row.key)
     rows.value = rows.value.filter((item) => item.key !== row.key)
     snapshots.delete(row.key)
+    selectedKeys.value = selectedKeys.value.filter((key) => key !== row.key)
     importSkipped.value = importSkipped.value.filter((key) => key !== row.key)
     ElMessage.success(t('i18n_saved'))
   } catch (error) {

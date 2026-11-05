@@ -1,7 +1,7 @@
 """权限认证模块 user 数据访问层"""
 
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, func, update
+from sqlmodel import select, func, update, delete
 from common.utils.db.schema.pagination import (
     PaginationParams,
 )
@@ -43,6 +43,19 @@ class UserDao:
         await session.flush()
 
     @DaoRel
+    async def batch_delete(self, ids: list[str], session: AsyncSession | None = None) -> int:
+        """
+        批量删除用户记录(不存在的ID静默跳过)
+        :param ids: 要删除的用户ID列表
+        :param session: 可选数据库会话
+        :return: 实际删除的记录数
+        """
+        stmt = delete(User).where(User.id.in_(ids))
+        result = await session.exec(stmt)
+        await session.flush()
+        return result.rowcount
+
+    @DaoRel
     async def update(
         self,
         user_id: str,
@@ -69,6 +82,22 @@ class UserDao:
         if result.rowcount == 0:
             raise NotFoundError(f"未找到ID为 {user_id} 的用户")
         await session.flush()
+
+    @DaoRel
+    async def batch_update_status(
+        self, ids: list[str], is_active: bool, session: AsyncSession | None = None
+    ) -> int:
+        """
+        批量更新用户启用状态
+        :param ids: 用户ID列表
+        :param is_active: 目标状态
+        :param session: 可选数据库会话
+        :return: 实际更新条数
+        """
+        stmt = update(User).where(User.id.in_(ids)).values(is_active=is_active)
+        result = await session.exec(stmt)
+        await session.flush()
+        return result.rowcount
 
     @DaoRel
     async def get(self, id, session: AsyncSession | None = None):
@@ -139,6 +168,8 @@ class UserDao:
         statement = select(User)
         if conditions:
             statement = statement.where(*conditions)
+        # 固定排序: 避免无 ORDER BY 时跨页查询结果顺序漂移(新用户在前)
+        statement = statement.order_by(User.created_at.desc())
         statement = statement.offset(pagination.offset).limit(pagination.limit)
         result = await session.exec(statement)
         return result.all()

@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full>
+  <div p-3 md:p-4 w-full>
     <!-- 水墨页头 -->
     <InkPageHead title="权限管理" sub="菜单与接口的细粒度授权" seal="衡" />
 

@@ -1,44 +1,30 @@
 # base_web
 
-This template should help get you started developing with Vue 3 in Vite.
+## IDE 与类型支持
 
-## Recommended IDE Setup
+- [VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar)（禁用 Vetur）；`.vue` 导入类型检查用 `vue-tsc` 替代 `tsc`；Vite 配置见 [Vite Configuration Reference](https://vite.dev/config/)。
 
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+## 常用命令
 
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+安装 / 开发 / 构建 / 单测：
 
 ```sh
 pnpm install
 ```
 
-### Compile and Hot-Reload for Development
-
 ```sh
 pnpm dev
 ```
-
-### Type-Check, Compile and Minify for Production
 
 ```sh
 pnpm build
 ```
 
-### Run Unit Tests with [Vitest](https://vitest.dev/)
-
 ```sh
 pnpm test:unit
 ```
 
-### Run End-to-End Tests with [Playwright](https://playwright.dev)
+E2E（[Playwright](https://playwright.dev)）：
 
 ```sh
 # Install browsers for the first run
@@ -57,16 +43,17 @@ pnpm test:e2e tests/example.spec.ts
 pnpm test:e2e --debug
 ```
 
-### Lint with [ESLint](https://eslint.org/)
+Lint（[ESLint](https://eslint.org/)）：
 
 ```sh
 pnpm lint
 ```
 
+单测框架：[Vitest](https://vitest.dev/)。
+
 ## 项目架构（Feature-based / 模块化）
 
-业务代码按「业务模块」垂直切分，同一业务模块的页面、接口、类型、组件、状态聚合在同一个文件夹，
-与后端 `module_*` 模块一一对应；删除某个模块文件夹即等于下线该功能，不会遗留僵尸代码。
+业务代码按模块垂直切分，页面、接口、类型、组件、状态聚合在同一文件夹，与后端 `module_*` 一一对应；删除模块文件夹即下线该功能，不留僵尸代码。
 
 ```sh
 src/
@@ -90,18 +77,12 @@ src/
 ├── assets/  router/  App.vue  main.ts
 ```
 
-分层依赖规则（自上而下单向依赖）：
+分层依赖（自上而下单向）：
 
 ```
 pages → app → modules → common
 ```
 
-- `modules` 内部文件使用相对路径（`../api/xxx`），保证模块自包含、可整体删除；
-- 跨模块只能引用其 `api/types/components`，禁止引用其他模块的 `pages`；
-- `common` 不允许反向依赖 `modules`（唯一例外：会话状态 `common/stores/auth.ts` 依赖
-  `authorization` 模块的登录接口）。
+- `modules` 内部用相对路径（`../api/xxx`），模块自包含、可整体删除；跨模块只能引用其 `api/types/components`，禁止引用其他模块的 `pages`；`common` 不允许反向依赖 `modules`（唯一例外：`common/stores/auth.ts` 依赖 `authorization` 模块的登录接口）。
 
-自动路由由 `unplugin-vue-router` 完成：`vite.config.ts` 中 `routesFolder` 同时扫描
-`src/pages` 与 `src/modules/*/pages`，模块页面按模块规范挂载到 `/<模块名>/<页面>` 路径下，
-并通过 `extendRoute` 为除首页/404 外的路由写入 `meta.admin` 标记（登录拦截与侧边栏显示的依据），
-侧边栏菜单（`app/components/layout/SysSidebar.vue`）与路由路径保持一致。
+自动路由由 `unplugin-vue-router` 完成：`vite.config.ts` 中 `routesFolder` 同时扫描 `src/pages` 与 `src/modules/*/pages`，模块页面挂载到 `/<模块名>/<页面>`，`extendRoute` 为除首页/404 外的路由写入 `meta.admin`（登录拦截与侧边栏显示依据）；侧边栏菜单（`app/components/layout/SysSidebar.vue`）与路由路径保持一致。

@@ -66,6 +66,21 @@ class TokenDao:
         return result.rowcount > 0
 
     @DaoRel
+    async def delete_tokens_by_user_ids(
+        self, user_ids: list[str], session: AsyncSession | None = None
+    ) -> int:
+        """
+        批量删除多个用户的令牌(用于批量删除用户后的会话清理)
+        :param user_ids: 用户ID列表
+        :param session: 可选数据库会话
+        :return: 实际删除的记录数
+        """
+        stmt = delete(Token).where(Token.user_id.in_(user_ids))
+        result = await session.exec(stmt)
+        await session.flush()
+        return result.rowcount
+
+    @DaoRel
     async def delete_tokens_by_user_id(
         self, user_id, session: AsyncSession | None = None
     ):

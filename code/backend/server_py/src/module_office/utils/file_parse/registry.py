@@ -207,11 +207,11 @@ engine_registry.register(
     )
 )
 
-# PaddleOCR: pdf/图片整文件 OCR(能力由 module_ai 提供)
+# 在线 OCR: pdf/图片整文件解析(具体 OCR 厂商由 module_ai 的 OCR 配置降级链接管)
 engine_registry.register(
     EngineDescriptor(
         name="paddleocr",
-        label="PaddleOCR-VL",
+        label="在线 OCR(PaddleOCR/OXR)",
         suffixes=frozenset({".pdf", ".png", ".jpg", ".jpeg"}),
         capabilities=frozenset(
             {EngineCapability.LAYOUT, EngineCapability.OCR, EngineCapability.TABLE}

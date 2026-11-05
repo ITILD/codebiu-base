@@ -230,6 +230,28 @@ class CasbinRuleDao:
             logger.error(f"删除用户角色失败: {e}")
             return 0
 
+    async def delete_role_groupings(self, role_key: str, dom: str = "*") -> int:
+        """删除某角色的全部用户分配关系(grouping policy 第1列为角色键)
+
+        Args:
+            role_key: 角色键
+            dom: 域(项目ID或"*"表示全局，默认为全局)
+
+        Returns:
+            删除的分配关系数量
+        """
+        try:
+            # 注: get_filtered_grouping_policy 是同步方法(返回list),不能 await
+            affected = [
+                item
+                for item in self.enforcer.get_filtered_grouping_policy(1, role_key, dom)
+            ]
+            await self.enforcer.remove_filtered_grouping_policy(1, role_key, dom)
+            return len(affected)
+        except Exception as e:
+            logger.error(f"删除角色分配关系失败: {e}")
+            return 0
+
     async def reload_policy(self) -> None:
         """重新从数据库加载策略"""
         try:

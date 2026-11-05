@@ -201,6 +201,7 @@ src\main.ts 添加配置
 ```diff
 + 添加配置
 ```
+
 ## 4. 添加图标插件
 图标参考：https://icones.netlify.app
 ```sh

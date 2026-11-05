@@ -1,11 +1,13 @@
 """OCR 服务门面: 在线(外部服务)文字识别统一入口
 
 模型能力全部通过外部服务接入(基础框架不内置本地推理):
-    - 引擎: DashscopeOCR(阿里云百炼 qwen-vl-ocr) / PaddleOCROnline(PaddleOCR 官方云 API),
-      由 ModelEntryService 按 server_type/extra.protocol 分派
-    - 配置解析/引擎构建/缓存统一委托 ModelEntryService(service/model_entry.py):
+    - 引擎: DashscopeOCR(阿里云百炼 qwen-vl-ocr) / PaddleOCROnline(PaddleOCR 官方云 API) /
+      OXROnline(OXR 1.0 官方同步解析), 由 ModelEntryService 按 server_type/extra.protocol 分派
+    - 配置解析/引擎构建/缓存统一委托 ModelEntryService(service/model_config.py):
       model_config 表(model_type=ocr, server_type=dashscope/online)驱动,
       按 updated_at 缓存引擎(配置变更自动重建); 无配置时给出可操作错误提示
+    - 多解析器降级链: 后台可添加多条 OCR 配置(不同厂商/Key), 按
+      用户绑定 → 默认公共 → 其余生效配置 顺序逐个尝试, 单条失败自动切下一条
 """
 import asyncio
 import logging
@@ -13,7 +15,11 @@ from typing import Protocol, runtime_checkable
 
 from common.utils.media.file_format import bytes_to_cv2
 from module_ai.do.capability import OcrLine, OcrResult
-from module_ai.service.model_config import ModelEntryService, get_model_entry
+from module_ai.service.model_config import (
+    ModelEntryService,
+    ModelNotConfiguredError,
+    get_model_entry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +51,22 @@ class OcrService:
         """依赖注入构造器: 统一入口缺省取全局单例"""
         self._entry = model_entry or get_model_entry()
 
-    async def _get_engine(self, user_id: str | None = None):
-        """按统一入口解析 OCR 在线模型配置并获取引擎实例(用户绑定优先于全局配置)"""
-        return await self._entry.get_engine("ocr", user_id=user_id)
+    async def _get_engines(self, user_id: str | None = None) -> list:
+        """按降级链获取全部 OCR 引擎实例
+
+        顺序: 用户绑定 → 默认公共模型 → 其余生效配置(后台新增顺序)。
+        用户可在后台添加多条 OCR 配置(如 PaddleOCR-VL 1.6 + OXR 1.0),
+        识别失败时自动切换下一条, 充分利用各厂商免费额度。
+        """
+        configs = await self._entry.list_candidate_configs("ocr", user_id=user_id)
+        if not configs:
+            raise ModelNotConfiguredError(
+                "未配置 ocr 模型: 请在后台「模型配置」中添加 model_type=ocr 的记录"
+            )
+        return [
+            await self._entry.get_engine("ocr", model_id=config.id)
+            for config in configs
+        ]
 
     async def recognize(
         self,
@@ -67,14 +86,22 @@ class OcrService:
         Returns:
             {"ts": {"total": 秒}, "results": [{index, box, text, score}], "engine": "dashscope"}
         """
-        engine = await self._get_engine(user_id)
-        # 引擎为同步实现(内部同步 httpx + 轮询 sleep, 最长可达数分钟),
-        # 必须放入线程池, 否则单个 OCR 请求会阻塞整个事件循环
-        result = await asyncio.to_thread(engine.recognize, image_cv)
-        # 补充行序号(前端表格展示用)
-        for i, item in enumerate(result.get("results", [])):
-            item.setdefault("index", i)
-        return result
+        engines = await self._get_engines(user_id)
+        errors: list[str] = []
+        for engine in engines:
+            try:
+                # 引擎为同步实现(内部同步 httpx + 轮询 sleep, 最长可达数分钟),
+                # 必须放入线程池, 否则单个 OCR 请求会阻塞整个事件循环
+                result = await asyncio.to_thread(engine.recognize, image_cv)
+            except Exception as e:  # 单条配置失败(欠费/限流/服务不可达)时切换下一条
+                logger.warning("OCR 引擎 %s 识别失败, 尝试下一条: %s", type(engine).__name__, e)
+                errors.append(f"{type(engine).__name__}: {e}")
+                continue
+            # 补充行序号(前端表格展示用)
+            for i, item in enumerate(result.get("results", [])):
+                item.setdefault("index", i)
+            return result
+        raise RuntimeError("全部 OCR 引擎识别失败: " + "; ".join(errors))
 
     async def segment_layout(
         self, image_cv, detect: bool, classify: bool, lang: str, inpaint=False, user_id: str | None = None
@@ -132,17 +159,29 @@ class OcrService:
         :param user_id: 当前用户ID(绑定模型优先)
         :return: 标准 OCR 结果(整份文档合并为一个文本块)
         """
-        engine = await self._get_engine(user_id)
-        parse_document = getattr(engine, "parse_document", None)
-        if parse_document is None:
+        engines = await self._get_engines(user_id)
+        # 仅支持整份文档解析的引擎参与(PaddleOCR-VL 系 / OXR); 纯图片识别引擎跳过
+        capable = [e for e in engines if getattr(e, "parse_document", None)]
+        if not capable:
+            names = ", ".join(type(e).__name__ for e in engines)
             raise RuntimeError(
-                f"当前 OCR 引擎 {type(engine).__name__} 不支持整份文档解析, "
-                "请改用 PaddleOCR-VL 系在线模型"
+                f"当前 OCR 引擎均不支持整份文档解析({names}), "
+                "请改用 PaddleOCR-VL / OXR 系在线模型"
             )
-        text = await asyncio.to_thread(parse_document, data, filename)
-        text = str(text or "").strip()
-        return OcrResult(
-            text=text,
-            lines=[OcrLine(text=text)] if text else [],
-            engine=type(engine).__name__,
-        )
+        errors: list[str] = []
+        for engine in capable:
+            try:
+                text = await asyncio.to_thread(engine.parse_document, data, filename)
+                text = str(text or "").strip()
+                if not text:
+                    raise RuntimeError("未返回文本内容")
+            except Exception as e:  # 单条解析失败(额度耗尽/超大文件)时切换下一条
+                logger.warning("OCR 文档解析引擎 %s 失败, 尝试下一条: %s", type(engine).__name__, e)
+                errors.append(f"{type(engine).__name__}: {e}")
+                continue
+            return OcrResult(
+                text=text,
+                lines=[OcrLine(text=text)] if text else [],
+                engine=type(engine).__name__,
+            )
+        raise RuntimeError("全部 OCR 引擎文档解析失败: " + "; ".join(errors))

@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full>
+  <div p-3 md:p-4 w-full>
     <!-- 水墨页头 -->
     <InkPageHead title="策略中心" sub="角色权限矩阵与策略规则" seal="律" />
 

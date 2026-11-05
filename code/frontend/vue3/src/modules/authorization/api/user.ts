@@ -21,6 +21,30 @@ export const deleteUser = (userId: string) => {
 };
 
 /**
+ * 批量删除用户(一次请求, 不存在的ID会被后端静默跳过)
+ * @param ids 用户ID列表
+ * @returns 实际删除数量
+ */
+export const batchDeleteUsers = (ids: string[]) => {
+  return http_base_server.delete<{ deleted_count: number }>('/authorization/users/batch', {
+    body: JSON.stringify({ ids }),
+  });
+};
+
+/**
+ * 批量启用/禁用用户(一次请求)
+ * @param ids 用户ID列表
+ * @param isActive 目标状态
+ * @returns 实际更新数量
+ */
+export const batchUpdateUsersStatus = (ids: string[], isActive: boolean) => {
+  return http_base_server.put<{ updated_count: number }>('/authorization/users/batch-status', {
+    ids,
+    is_active: isActive,
+  });
+};
+
+/**
  * 更新用户
  * @param userId 用户ID
  * @param user 用户数据

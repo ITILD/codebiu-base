@@ -1,9 +1,9 @@
 <template>
-  <div p-4 md:p-6 w-full>
-    <!-- 水墨页头 -->
+  <div p-3 md:p-4 w-full>
+    <!-- 后台页头 -->
     <InkPageHead title="用户管理" sub="账户信息与角色授权" seal="员" />
 
-    <!-- 统一搜索栏: 多字段筛选 -->
+    <!-- 统一搜索栏: 多字段筛选 + 主操作 -->
     <TableSearchBar
       v-model="queryParams"
       :fields="searchFields"
@@ -11,45 +11,65 @@
       @reset="handleSearch"
     >
       <template #actions>
-        <el-button type="primary" @click="handleCreate">新增用户</el-button>
+        <el-button size="small" type="primary" @click="handleCreate">新增用户</el-button>
       </template>
     </TableSearchBar>
 
-    <!-- 数据表格 -->
-    <el-table :data="tableData" v-loading="loading" stripe w-full>
-      <el-table-column prop="username" label="用户名" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="nickname" label="昵称" min-width="100" show-overflow-tooltip />
-      <el-table-column label="部门" min-width="120">
-        <template #default="{ row }">
-          {{ getDeptName(row.dept_id) }}
-        </template>
-      </el-table-column>
-      <el-table-column prop="email" label="邮箱" min-width="150" show-overflow-tooltip />
-      <el-table-column prop="phone" label="电话" min-width="120" />
-      <el-table-column label="状态" min-width="80">
-        <template #default="{ row }">
-          <el-switch v-model="row.is_active" disabled :active-text="row.is_active ? '启用' : '禁用'" />
-        </template>
-      </el-table-column>
-      <el-table-column label="创建时间" min-width="180" sortable>
-        <template #default="{ row }">
-          {{ row.created_at ? new Date(row.created_at).toLocaleString() : '' }}
-        </template>
-      </el-table-column>
-      <!-- 操作列: 平板及以上固定右侧, 手机取消固定避免遮挡 -->
-      <el-table-column label="操作" min-width="200" :fixed="isMd ? 'right' : false">
-        <template #default="{ row }">
-          <el-button size="small" @click="handleEdit(row)" plain>编辑</el-button>
-          <el-button size="small" type="success" @click="handleAssignRole(row)" plain>分配角色</el-button>
-          <el-button size="small" type="danger" @click="handleDelete(row)" plain>删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- 数据表格: ProTable 统一列设置/密度/多选/移动端卡片 -->
+    <ProTable
+      ref="proTableRef"
+      :columns="columns"
+      :data="tableData"
+      :loading="loading"
+      table-key="auth-user"
+      card-title-prop="username"
+      selectable
+      @selection-change="(rows) => (selectedRows = rows as unknown as User[])"
+    >
+      <template #toolbar>
+        <span text-xs text-note-sub>共 {{ total }} 个用户</span>
+      </template>
+
+      <template #col-dept_id="{ row }">
+        {{ getDeptName(row.dept_id) || '—' }}
+      </template>
+
+      <template #col-is_active="{ row }">
+        <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
+          {{ row.is_active ? '启用' : '禁用' }}
+        </el-tag>
+      </template>
+
+      <template #row-actions="{ row }">
+        <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+        <el-button link type="primary" size="small" @click="handleAssignRole(row)">角色</el-button>
+        <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+      </template>
+
+      <!-- 批量操作条: 启用/禁用/删除 -->
+      <template #batch-actions="{ rows }">
+        <el-button size="small" :disabled="batchBusy" @click="handleBatchToggle(rows as unknown as User[], true)">
+          批量启用
+        </el-button>
+        <el-button size="small" :disabled="batchBusy" @click="handleBatchToggle(rows as unknown as User[], false)">
+          批量禁用
+        </el-button>
+        <el-button
+          size="small"
+          type="danger"
+          plain
+          :loading="deleting"
+          @click="handleBatchDelete(rows as unknown as User[])"
+        >
+          批量删除
+        </el-button>
+      </template>
+    </ProTable>
 
     <!-- 分页(手机居中, 桌面靠右) -->
-    <div mt-4 flex flex-wrap justify-center sm:justify-end>
+    <div mt-3 flex flex-wrap justify-center sm:justify-end>
       <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size"
-        :total="total" layout="total, prev, pager, next"
+        :total="total" layout="total, prev, pager, next" small
         @size-change="fetchData" @current-change="fetchData" />
     </div>
 
@@ -105,21 +125,29 @@
 </template>
 
 <script setup lang="ts">
-import { createUser, deleteUser, updateUser, getUser, listUsers } from '../api/user'
+import {
+  batchDeleteUsers,
+  batchUpdateUsersStatus,
+  createUser,
+  deleteUser,
+  updateUser,
+  getUser,
+  listUsers,
+} from '../api/user'
 import { getDeptTree } from '../api/dept'
 import { listAllRoles } from '../api/role'
 import { getRolesForUser, batchAddUserRoles } from '../api/casbin'
 import type { User, UserCreate, UserUpdate } from '../types/user'
 import type { DeptTree } from '../types/dept'
 import type { Role } from '../types/role'
-import type { SearchField } from '@/common/components/TableSearchBar.vue'
-import { useResponsive } from '@/common/composables/useResponsive'
+import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
+import ProTable from '@/common/components/pro-table/ProTable.vue'
+import type { ProTableColumn } from '@/common/components/pro-table/useProTablePrefs'
 import { useTableQuery } from '@/common/composables/useTableQuery'
 import { useCrudDialog } from '@/common/composables/useCrudDialog'
+import { useBatchDelete } from '@/common/composables/useBatchDelete'
+import { formatDateTime } from '@/common/utils/datetime'
 import { ElMessage, ElMessageBox, type FormRules } from 'element-plus'
-
-// 响应式: 平板及以上操作列固定右侧
-const { isMd } = useResponsive()
 
 // 搜索字段配置(用户名/昵称/状态多字段筛选)
 const searchFields: SearchField[] = [
@@ -130,6 +158,20 @@ const searchFields: SearchField[] = [
       { label: '启用', value: true },
       { label: '禁用', value: false },
     ]
+  },
+]
+
+// 列配置: 部门/状态走插槽, 时间走 formatter
+const columns: ProTableColumn[] = [
+  { prop: 'username', label: '用户名', minWidth: 130 },
+  { prop: 'nickname', label: '昵称', minWidth: 110 },
+  { prop: 'dept_id', label: '部门', minWidth: 130, slot: true },
+  { prop: 'email', label: '邮箱', minWidth: 170 },
+  { prop: 'phone', label: '电话', minWidth: 120 },
+  { prop: 'is_active', label: '状态', minWidth: 90, align: 'center', slot: true },
+  {
+    prop: 'created_at', label: '创建时间', minWidth: 160,
+    formatter: (row) => formatDateTime(row.created_at as string),
   },
 ]
 
@@ -147,6 +189,14 @@ const {
   }
   return listUsers(query)
 }, { defaultQuery: { username: '', nickname: '', is_active: undefined } })
+
+// 多选状态(ProTable 批量操作条 / 清空选择)
+const proTableRef = ref<InstanceType<typeof ProTable>>()
+const selectedRows = ref<User[]>([])
+const { batchDelete, deleting } = useBatchDelete()
+const batchUpdating = ref(false)
+// 任一批量任务进行中时禁用其他批量入口
+const batchBusy = computed(() => deleting.value || batchUpdating.value)
 
 // 部门树数据
 const deptTreeData = ref<DeptTree[]>([])
@@ -263,7 +313,7 @@ const handleEdit = (row: User) =>
     }
   })
 
-// 删除操作
+// 单条删除
 const handleDelete = async (row: User) => {
   try {
     await ElMessageBox.confirm('确定要删除此用户吗？此操作不可恢复。', '警告', {
@@ -278,6 +328,51 @@ const handleDelete = async (row: User) => {
     if (error !== 'cancel' && error !== 'close') {
       ElMessage.error('删除失败，请重试')
     }
+  }
+}
+
+/** 批量删除: 走后端批量接口(一次请求), 汇总后刷新并清空选择 */
+const handleBatchDelete = async (rows: User[]) => {
+  const removed = await batchDelete({
+    rows,
+    getId: (row) => row.id,
+    removeMany: (ids) => batchDeleteUsers(ids.map(String)),
+    label: (row) => row.username,
+    onRemoved: async (n) => {
+      await refreshAfterRemove(n)
+      proTableRef.value?.clearSelection()
+    },
+  })
+  if (removed) selectedRows.value = []
+}
+
+/** 批量启用/禁用(仅提交状态变化项, 避免无效请求) */
+const handleBatchToggle = async (rows: User[], active: boolean) => {
+  const targets = rows.filter((row) => Boolean(row.is_active) !== active)
+  if (!targets.length) {
+    ElMessage.info(`所选用户已是${active ? '启用' : '禁用'}状态`)
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定将选中的 ${targets.length} 个用户设为${active ? '启用' : '禁用'}吗？`,
+      '状态变更',
+      { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  batchUpdating.value = true
+  try {
+    const res = await batchUpdateUsersStatus(targets.map((row) => row.id), active)
+    ElMessage.success(`已更新 ${res.updated_count} 个用户`)
+    await fetchData()
+    proTableRef.value?.clearSelection()
+    selectedRows.value = []
+  } catch {
+    ElMessage.error('批量更新失败，请重试')
+  } finally {
+    batchUpdating.value = false
   }
 }
 

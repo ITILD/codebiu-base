@@ -18,6 +18,13 @@ export const deleteRole = (roleId: string) => {
   return http_base_server.delete<void>(`/authorization/roles/${roleId}`);
 };
 
+/** 批量删除角色(一次请求, 不存在的ID会被后端静默跳过) */
+export const batchDeleteRoles = (ids: string[]) => {
+  return http_base_server.delete<{ deleted_count: number }>('/authorization/roles/batch', {
+    body: JSON.stringify({ ids }),
+  });
+};
+
 /** 获取单个角色详情 */
 export const getRole = (roleId: string) => {
   return http_base_server.get<Role>(`/authorization/roles/${roleId}`);

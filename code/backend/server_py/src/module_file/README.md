@@ -1,6 +1,6 @@
 # module_file 网络文件系统模块
 
-完整的网络文件系统（虚拟文件树 + 可切换物理存储），支持 `local` / `s3`(MinIO等) 两种存储的**无缝切换**，对所有调用方（前端 / 其他后端模块）暴露**完全一致**的接口。
+虚拟文件树 + 可切换物理存储，支持 `local` / `s3`(MinIO等) **无缝切换**，对所有调用方（前端 / 其他后端模块）暴露**完全一致**的接口。
 
 ## 1. 架构
 
@@ -20,18 +20,16 @@ controller/filesystem.py ──► service/filesystem.py (FileService)
 config/filesystem.py: 按 conf.file_system.storage_type 启动时构建全局存储单例
 ```
 
-核心设计：
-
-- **虚拟文件树与物理存储解耦**：`file_entry` 表记录文件/目录树（pid + logical_path），`file_content` 表记录物理内容（content_hash 主键、physical_storage 物理键、storage_type 来源、ref_count 引用计数）。
-- **内容哈希去重**：同一内容全系统仅存一份物理文件，复制/秒传零成本；引用计数归零自动清理物理文件。
-- **存储无关**：业务层只见 `StorageInterface`（save/load/iter_chunks/delete/exists/size/list + 分片上传五件套），切换存储不改一行业务代码。
+- **虚拟树与物理存储解耦**：`file_entry` 表记录文件/目录树（pid + logical_path），`file_content` 表记录物理内容（content_hash 主键、physical_storage 物理键、storage_type 来源、ref_count 引用计数）。
+- **内容哈希去重**：同一内容全系统仅存一份，复制/秒传零成本；引用计数归零自动清理物理文件。
+- **存储无关**：业务层只见 `StorageInterface`（save/load/iter_chunks/delete/exists/size/list + 分片上传五件套），切换存储不改业务代码。
 
 ## 2. 存储根目录语义
 
-- `storage_type: local`：本地目录 `base_dir` 作为文件系统根目录（未配置时默认 `dir.base_child.upload`），物理键 `{hash}{ext}` 解析为 `base_dir/{hash}{ext}`。
-- `storage_type: s3`：bucket（如 `bucket0`）作为根目录，物理键即 bucket 内的 object key。
+- `storage_type: local`：`base_dir` 为文件系统根目录（未配置时默认 `dir.base_child.upload`），物理键 `{hash}{ext}` 解析为 `base_dir/{hash}{ext}`。
+- `storage_type: s3`：bucket（如 `bucket0`）为根目录，物理键即 bucket 内 object key。
 
-`config.dev.yaml`:
+`config.dev.yaml`：
 
 ```yaml
 file_system:
@@ -49,9 +47,9 @@ file_system:
   secure: false
 ```
 
-- `local` 无需 S3 配置，默认落盘 `dir.base_child.upload` 目录（可用 `base_dir` 覆盖），提供与 S3 一致的接口语义。
+- `local` 无需 S3 配置，默认落盘 `dir.base_child.upload`（可用 `base_dir` 覆盖），接口语义与 S3 一致。
 - 生效配置以 系统管理→通用配置页 的 `file_system` 组为准（首启按 yaml 种子入库，之后改 yaml 不再生效）。
-- **前端对接与存储类型无关**：上传先探 `GET /upload-mode`（s3 → `direct` 预签名直传；local → `proxy` 中转），下载统一走 `GET /download/{entry_id}`（s3 → 302 预签名直链；local → 流式代理）。后端切换存储前端零改动。
+- **前端对接与存储类型无关**：上传先探 `GET /upload-mode`（s3 → `direct` 预签名直传；local → `proxy` 中转），下载统一走 `GET /download/{entry_id}`（s3 → 302 预签名直链；local → 流式代理）。
 
 ### 存储切换与同步（local <-> s3 无痛互切）
 
@@ -60,11 +58,11 @@ file_system:
 | 同步 sync | `POST /file/filesystem/sync` | 双向**镜像补齐**缺失内容，两存储各持完整副本，**不改变**条目归属与主存储（幂等、支持中断续同、`dry_run` 试运行） |
 | 迁移 migrate | `POST /file/filesystem/migrate` | 单向**搬运**全部内容并把记录切换到目标存储（弃用旧存储，断点续迁） |
 
-推荐用 **sync 保持双副本**，切换只是改配置+重启（秒级），任意方向可回退：
+推荐 **sync 保持双副本**，切换只改配置+重启（秒级），任意方向可回退：
 
-1. `POST /file/filesystem/sync` `{"direction": "both", "dry_run": true}` — 先看有多少待同步；
-2. `{"direction": "both"}` 实际同步（如只补一侧用 `to_s3` / `to_local`）；
-3. 系统管理→通用配置页改 `storage_type`（如要下线 S3 则改为 `local`）→ 重启，新文件即全部落新存储；
+1. `POST /file/filesystem/sync` `{"direction": "both", "dry_run": true}` — 先看待同步量；
+2. `{"direction": "both"}` 实际同步（只补一侧用 `to_s3` / `to_local`）；
+3. 系统管理→通用配置页改 `storage_type`（如要下线 S3 则改为 `local`）→ 重启，新文件落新存储；
 4. 回退同理：把 `storage_type` 改回去重启即可（两侧副本都在）。
 
 > `migrate` 适合确定弃用某存储的场景（搬运后记录归属目标存储，源副本不再维护）。
@@ -104,12 +102,12 @@ file_system:
 ### 分片上传协议（大文件 >10MB 前端自动分流）
 
 1. **计算哈希**：前端用 `crypto.subtle` 计算 SHA-256。
-2. **初始化**：`POST /multipart/init`（filename/file_size_bytes/content_hash）→ 返回 `upload_id`（HMAC 签名会话凭证，自包含物理键与存储会话ID，24h 有效）与 `part_size`（8MB）。若内容已存在返回 `is_existing=true`，跳到第 4 步即秒传。
-3. **上传分片**：按 `part_size` 切片，逐片 `PUT /multipart/{upload_id}/parts/{n}`（body 为二进制），保存响应中的 `etag`。
-4. **完成**：`POST /multipart/{upload_id}/complete`（filename/pid/parts 列表）→ 服务端合并分片、流式计算真实 SHA-256、按哈希归位物理文件（同内容自动去重）、创建虚拟条目。秒传场景改调 `POST /upload-complete`。
+2. **初始化**：`POST /multipart/init`（filename/file_size_bytes/content_hash）→ 返回 `upload_id`（HMAC 签名会话凭证，自包含物理键与存储会话ID，24h 有效）与 `part_size`（8MB）。内容已存在返回 `is_existing=true`，跳到第 4 步秒传。
+3. **上传分片**：按 `part_size` 切片，逐片 `PUT /multipart/{upload_id}/parts/{n}`（body 为二进制），保存响应 `etag`。
+4. **完成**：`POST /multipart/{upload_id}/complete`（filename/pid/parts 列表）→ 合并分片、流式计算真实 SHA-256、按哈希归位物理文件（同内容去重）、创建虚拟条目。秒传场景改调 `POST /upload-complete`。
 5. **中断恢复**：`GET /multipart/{upload_id}/parts` 查询已传分片后续传；`DELETE /multipart/{upload_id}` 取消并清理。
 
-> 分片上传在 local 与 s3 下协议完全一致：s3 使用原生 Multipart Upload；local 分片暂存 `base_dir/.multipart/` 下，完成时合并。
+> 分片上传在 local 与 s3 下协议完全一致：s3 用原生 Multipart Upload；local 分片暂存 `base_dir/.multipart/`，完成时合并。
 
 ## 4. 其他模块如何操作文件
 
@@ -166,7 +164,7 @@ async def attach(
 
 ### Celery 任务进程中
 
-`FileService` 的 DAO 方法用 `@DaoRel` 自管事务，在 worker 的 `run_async` 协程里可直接 `await service.xxx(...)`，无需额外处理。
+`FileService` 的 DAO 方法用 `@DaoRel` 自管事务，在 worker 的 `run_async` 协程里可直接 `await service.xxx(...)`。
 
 ## 5. 目录结构
 

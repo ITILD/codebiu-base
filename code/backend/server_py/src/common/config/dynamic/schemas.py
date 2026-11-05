@@ -270,6 +270,28 @@ class AuditSettings(SettingsGroup):
     retention_days: int = Field(180, title="保留天数", ge=1, description="超过保留期的审计记录在启动时清理")
 
 
+# ############################# 文档解析 #############################
+class ParserSettings(SettingsGroup):
+    _group = "parser"
+    _name = "文档解析"
+
+    _description = (
+        "RAG 文档解析引擎路由顺序; 具体 OCR 厂商/密钥请在「模型配置」中添加多条 "
+        "OCR 记录(按用户绑定 → 默认公共 → 其余生效配置形成降级链)"
+    )
+
+    primary_engine: Literal["auto", "mineru", "paddleocr", "office-local"] = Field(
+        "auto",
+        title="主引擎",
+        description="auto 按内置优先级(MinerU > 在线 OCR > 本地 Office); 指定 paddleocr 可优先使用「模型配置」中的 OCR 解析器",
+    )
+    fallback_engines: list[Literal["mineru", "paddleocr", "office-local"]] = Field(
+        default_factory=list,
+        title="备用引擎顺序",
+        description="主引擎失败时依次尝试; 可多选, 顺序即降级顺序",
+    )
+
+
 # 注册表(UI 展示顺序即此顺序)
 GROUPS: list[type[SettingsGroup]] = [
     TokenSettings,
@@ -280,6 +302,7 @@ GROUPS: list[type[SettingsGroup]] = [
     DBVectorSettings,
     TasksSettings,
     WebSearchSettings,
+    ParserSettings,
     LoginSecuritySettings,
     AuditSettings,
     AdminSettings,

@@ -1,35 +1,42 @@
 <template>
-  <!-- 便签风表单卡片(编辑需 my_perms.update 档位>=2; 公开/私有切换需 manage_member 档位>=3 即 publish, v4 3.1) -->
-  <el-form
-    :model="editForm" :rules="rules" ref="editFormRef" label-width="90px"
-    class="max-w-[520px] p-5 rounded-2xl bg-note-soft/60 shadow-note"
-  >
-    <el-form-item label="名称" prop="name">
-      <el-input v-model="editForm.name" :disabled="!perms.update" placeholder="请输入知识库名称"
-        maxlength="100" />
-    </el-form-item>
-    <el-form-item label="分类" prop="kb_category">
-      <el-select v-model="editForm.kb_category" :disabled="!perms.update" placeholder="请选择分类" w-full>
-        <el-option v-for="opt in kbCategoryOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-      </el-select>
-    </el-form-item>
-    <el-form-item label="描述" prop="description">
-      <el-input v-model="editForm.description" :disabled="!perms.update" type="textarea" :rows="3"
-        placeholder="请输入描述" maxlength="500" />
-    </el-form-item>
-    <el-form-item label="是否私有">
-      <el-tooltip :disabled="perms.manage_member" content="仅项目管理员可切换公开/私有" placement="top">
-        <el-switch v-model="editForm.is_private" :disabled="!perms.manage_member" />
-      </el-tooltip>
-    </el-form-item>
-    <el-form-item v-if="perms.update">
-      <el-button class="px-6" :loading="savingBasic" @click="handleSaveBasic">保存</el-button>
-    </el-form-item>
-  </el-form>
+  <!-- 便签风基础信息栏(编辑需 my_perms.update 档位>=2; 公开/私有切换需 manage_member 档位>=3 即 publish, v4 3.1)
+       纵向表单: 左栏常驻, 与右侧成员面板并排, 避免字段横向挤压 -->
+  <aside class="bg-note-soft/60" w-full rounded-2xl border border-note p-4 flex flex-col gap-3>
+    <div>
+      <h3 text-sm font-semibold text-note m-0>基础信息</h3>
+      <p text-xs text-note-sub mt-0.5 m-0>用于知识库列表展示与检索</p>
+    </div>
+    <el-form :model="editForm" :rules="rules" ref="editFormRef" label-position="top"
+      class="[&_.el-form-item]:mb-3">
+      <el-form-item label="名称" prop="name">
+        <el-input v-model="editForm.name" :disabled="!perms.update" placeholder="请输入知识库名称"
+          maxlength="100" />
+      </el-form-item>
+      <div grid grid-cols-2 gap-x-3>
+        <el-form-item label="分类" prop="kb_category">
+          <el-select v-model="editForm.kb_category" :disabled="!perms.update" placeholder="请选择分类" w-full>
+            <el-option v-for="opt in kbCategoryOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="可见性">
+          <el-tooltip :disabled="perms.manage_member" content="仅项目管理员可切换公开/私有" placement="top">
+            <el-switch v-model="editForm.is_private" :disabled="!perms.manage_member"
+              active-text="私有" inactive-text="公开" inline-prompt />
+          </el-tooltip>
+        </el-form-item>
+      </div>
+      <el-form-item label="描述" prop="description">
+        <el-input v-model="editForm.description" :disabled="!perms.update" type="textarea" :rows="3"
+          placeholder="请输入描述" maxlength="500" />
+      </el-form-item>
+    </el-form>
+    <el-button v-if="perms.update" type="primary" :loading="savingBasic"
+      @click="handleSaveBasic">保存修改</el-button>
+  </aside>
 </template>
 
 <script setup lang="ts">
-// 知识库"基本信息"编辑表单(设置抽屉 info tab): 权限位控制字段可编辑性, 保存成功 emit saved 由父级同步标题并刷新列表
+// 知识库"基本信息"编辑表单(设置抽屉 basic tab): 权限位控制字段可编辑性, 保存成功 emit saved 由父级同步标题并刷新列表
 import { reactive, ref, watch } from 'vue'
 import { updateRagProject } from '../api/project'
 import { kbCategoryOptions, type Project, type ProjectMyPerms } from '../types'

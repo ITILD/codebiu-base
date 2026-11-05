@@ -40,15 +40,7 @@
       @pointerleave="onPointerLeave"
     ></canvas>
 
-    <!-- 竖排题款 + 朱砂闲章(国画构图"画完必题"; pointer-events-none 不挡水面交互) -->
-    <div
-      v-if="!fallback"
-      class="pointer-events-none absolute right-[2.5%] top-[10%] flex flex-col items-center gap-1.5"
-      aria-hidden="true"
-    >
-      <span class="font-hand text-[12px] text-[var(--note-sub)] opacity-80 [writing-mode:vertical-rl] tracking-[0.35em]">小池</span>
-      <span class="font-hand flex h-[17px] w-[17px] items-center justify-center rounded-[3px] bg-[var(--note-seal)] text-[10px] text-white/90">憩</span>
-    </div>
+    <!-- 水面交互层以上不再叠加题款/闲章: 保持画面纯净, 方便作为各类项目的基础首页 -->
   </div>
 </template>
 
@@ -153,6 +145,7 @@ uniform vec3 u_lotus;       // 荷瓣(--note-lotus)
 uniform vec3 u_core;        // 花蕊金(--note-lotus-core)
 uniform vec3 u_line;        // 水纹线(--note-water-line)
 uniform float u_ink_k;      // 主题墨浓因子: 亮纸 1.0(浓墨提神), 暗纸 ~0.5(夜荷剪影, 防亮墨大面积成灰盘)
+uniform float u_wash_k;     // 水意浓度因子: 亮纸 1.0(留白), 暗纸 ~2.2(避免池塘黑作一片)
 uniform vec3 u_rip[8];      // 涟漪: xy=落点, z=触发时刻(与 JS RIPPLE_N 一致)
 
 const vec2 RES = vec2(${RES_X}, ${RES_Y});
@@ -303,8 +296,8 @@ vec4 lotusFlower(vec2 p, vec2 c, float s, float alpha) {
     // 写意: 瓣有正侧俯仰——角度/长短/宽窄各自参差, 不排扇形
     float jitA = (hash(vec2(fi * 3.7, s)) - 0.5) * 0.34;
     float jitL = 0.86 + 0.28 * hash(vec2(fi * 7.1, s + 1.3));
-    float jitW = 0.36 + 0.12 * hash(vec2(fi * 2.9, s + 2.6));
-    float a = radians(-72.0 + 36.0 * fi) + jitA;
+    float jitW = 0.42 + 0.12 * hash(vec2(fi * 2.9, s + 2.6));
+    float a = radians(-60.0 + 30.0 * fi) + jitA;
     vec2 q = rot2(p - c, a);
     float rr = length(q) / (13.0 * s * jitL);
     float dA = abs(atan(q.x, -q.y));
@@ -312,31 +305,20 @@ vec4 lotusFlower(vec2 p, vec2 c, float s, float alpha) {
     float body = smoothstep(0.12, -0.06, d);
     // 勾线时浓时淡(笔断意连); 过渡带放宽如洇开, 系数已按 α² 显示效应反推
     float edge = smoothstep(0.60, 0.05, abs(d)) * (0.68 + 0.32 * noise(p * 0.22 + fi));
-    acc = over(acc, vec4(u_lotus, body * 0.50 * alpha));
-    acc = over(acc, vec4(u_ink, edge * 0.60 * alpha));
+    acc = over(acc, vec4(u_lotus, body * 0.64 * alpha));
+    acc = over(acc, vec4(u_ink, edge * 0.78 * alpha));
   }
-  // 左右横卧侧瓣(淡填 + 勾线)
-  float dl = sdEllipse(p, c + vec2(-10.5 * s, 2.0 * s), vec2(7.0 * s, 2.9 * s));
-  float nl = (fbm(p * 0.35 + 13.7) - 0.5) * 2.0;
-  float bl = smoothstep(1.1, -0.5, dl + nl * 1.2);
-  acc = over(acc, vec4(u_lotus, bl * 0.44 * alpha));
-  acc = over(acc, vec4(u_ink, smoothstep(1.8, 0.15, abs(dl + nl * 1.2)) * 0.42 * alpha));
-  float dr = sdEllipse(p, c + vec2(10.5 * s, 2.0 * s), vec2(7.0 * s, 2.9 * s));
-  float nr = (fbm(p * 0.35 + 21.3) - 0.5) * 2.0;
-  float br = smoothstep(1.1, -0.5, dr + nr * 1.2);
-  acc = over(acc, vec4(u_lotus, br * 0.44 * alpha));
-  acc = over(acc, vec4(u_ink, smoothstep(1.8, 0.15, abs(dr + nr * 1.2)) * 0.42 * alpha));
   // 莲蕊: 花色淡晕 + 5 向焦墨蕊丝(角度参差) + 心点
   vec2 qc = p - c;
   float rc = length(qc) / s;
-  acc = over(acc, vec4(u_core, smoothstep(4.6, 1.6, rc) * 0.36 * alpha));
+  acc = over(acc, vec4(u_core, smoothstep(4.6, 1.6, rc) * 0.46 * alpha));
   float st = 1e3;
   for (int i = 0; i < 5; i++) {
     float a = 6.2832 * float(i) / 5.0 + 0.35 + (hash(vec2(float(i), 9.1)) - 0.5) * 0.5;
     st = min(st, sdSeg(qc, vec2(cos(a), sin(a)) * 1.3 * s, vec2(cos(a), sin(a)) * 4.0 * s));
   }
-  acc = over(acc, vec4(u_ink_deep, smoothstep(1.4, 0.2, st) * 0.55 * alpha));
-  acc = over(acc, vec4(u_ink_deep, smoothstep(1.8 * s, 0.6 * s, rc) * 0.6 * alpha));
+  acc = over(acc, vec4(u_ink_deep, smoothstep(1.4, 0.2, st) * 0.68 * alpha));
+  acc = over(acc, vec4(u_ink_deep, smoothstep(1.8 * s, 0.6 * s, rc) * 0.72 * alpha));
   return acc;
 }
 
@@ -387,7 +369,7 @@ void main() {
   float frameB = 1.0 - smoothstep(184.0, 200.0, p.y) * 0.55;
   float depthT = smoothstep(44.0, 200.0, p.y);
   vec3 wash = mix(u_water_top, u_water_deep, depthT * 0.65);
-  float washA = (0.10 + 0.05 * depthT) * (0.7 + 0.6 * noise(p * 0.013 + vec2(t * 0.012, 0.0)));
+  float washA = (0.10 + 0.05 * depthT) * u_wash_k * (0.7 + 0.6 * noise(p * 0.013 + vec2(t * 0.012, 0.0)));
   acc = over(acc, vec4(wash, washA * waterM * frameX * frameB));
 
   // ===== 2. 远岸淡墨横带(两端渐隐) =====
@@ -415,7 +397,7 @@ void main() {
   acc = over(acc, vec4(u_glint, min(ripVis, 1.2) * 0.15 * waterM * frameX));
 
   // ===== 6. 倒影墨晕(清档: 花影/大叶影, 极淡拉伸) =====
-  acc = over(acc, vec4(u_lotus, smoothstep(40.0, 6.0, abs(p.y - 97.0)) * smoothstep(42.0, 10.0, abs(p.x - 672.0)) * 0.06));
+  acc = over(acc, vec4(u_lotus, smoothstep(40.0, 6.0, abs(p.y - 112.0)) * smoothstep(42.0, 10.0, abs(p.x - 648.0)) * 0.06));
   acc = over(acc, vec4(u_ink, smoothstep(26.0, 5.0, length((p - vec2(96.0, 176.0)) * vec2(1.0, 2.6))) * 0.06));
 
   // ===== 7. 收束: 花头无根斜入(画外旁逸), 不画茎——留白更显空灵 =====
@@ -424,7 +406,7 @@ void main() {
   acc = over(acc, lilyPad(p, vec2(92.0, 148.0 + bob * 0.3), vec2(74.0, 24.0), 0.35, 1.0));
   acc = over(acc, lilyPad(p, vec2(592.0, 98.0 + bob * 0.5), vec2(44.0, 15.0), 2.9, 0.85));
   acc = over(acc, lilyPad(p, vec2(778.0, 88.0 + bob * 0.5), vec2(26.0, 9.0), 5.1, 0.72));
-  acc = over(acc, lotusFlower(p, vec2(672.0, 60.0 + bob), 1.6, 0.95));
+  acc = over(acc, lotusFlower(p, vec2(648.0, 76.0 + bob), 2.25, 1.0));
   acc = over(acc, fish(p, vec2(392.0, 128.0), t, 0.9));
 
   // ===== 9. 苔点收边(焦墨, 左右两组) =====
@@ -464,8 +446,10 @@ function cssRGB(name: string, fallbackRgb: [number, number, number]): [number, n
 function setupGl(reducedMotion: boolean) {
   const canvas = glCanvas.value
   if (!canvas) return
-  // alpha 透明(留白处露出页面纸底), straight alpha 输出
-  const gl = canvas.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false, powerPreference: 'low-power' })
+  // alpha 透明(留白处露出页面纸底)。混合结果已带 alpha(SRC_ALPHA 混合到透明底),
+  // 必须按预乘 alpha 交给浏览器合成; 若声明 premultipliedAlpha: false, 浏览器会再乘一次
+  // alpha, 水面/荷花透明度被二次衰减, 画面整体发灰、花几乎看不见
+  const gl = canvas.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: true, powerPreference: 'low-power' })
   if (!gl) {
     fallback.value = true
     return
@@ -513,6 +497,7 @@ function setupGl(reducedMotion: boolean) {
   const uLine = U('u_line')
   const uRip = U('u_rip')
   const uInkK = U('u_ink_k')
+  const uWashK = U('u_wash_k')
 
   // 颜色取自 --note-* 变量(亮暗自适应); 焦墨按墨色亮度再压一档(亮纸)/提一档(暗纸)
   const applyColors = () => {
@@ -532,7 +517,10 @@ function setupGl(reducedMotion: boolean) {
     gl.uniform3f(uInkDeep, inkGreen[0] * k, inkGreen[1] * k, inkGreen[2] * k)
     // 墨浓因子: 暗纸(墨色为亮值)把叶身面积墨压回夜荷剪影, 亮纸满浓
     gl.uniform1f(uInkK, lum > 0.5 ? 0.5 : 1.0)
-    gl.uniform3f(uGlint, ...cssRGB('--note-green', [0.42, 0.62, 0.47]))
+    // 水意浓度: 亮纸保持大面积留白, 暗纸加浓水面, 池塘不至黑作一片
+    gl.uniform1f(uWashK, lum > 0.5 ? 2.2 : 1.0)
+    // 波光: 亮纸用品牌青绿, 暗纸用更亮的青绿, 暗水面才有一点水光
+    gl.uniform3f(uGlint, ...cssRGB(lum > 0.5 ? '--note-green-deep' : '--note-green', [0.42, 0.62, 0.47]))
     gl.uniform3f(uLotus, ...cssRGB('--note-lotus', [0.91, 0.76, 0.73]))
     gl.uniform3f(uCore, ...cssRGB('--note-lotus-core', [0.76, 0.61, 0.34]))
     gl.uniform3f(uLine, ...cssRGB('--note-water-line', [0.33, 0.5, 0.38]))

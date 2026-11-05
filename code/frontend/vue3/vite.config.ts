@@ -70,6 +70,14 @@ export default defineConfig(
     if (command === 'serve') killPort(env.VITE_PORT)
 
     const proxys = createProxy(JSON.parse(env.VITE_PROXY as string) as string[][])
+
+    // 文件监听策略: 部分 Linux 桌面被 IDE/语言服务器占满 inotify 实例
+    // (EMFILE: too many open files, watch 启动即崩), 默认改用轮询规避;
+    // 仅影响 dev 热更新(构建不受影响)。系统已调大 fs.inotify.max_user_instances
+    // 时可设 VITE_WATCH_POLLING=0 恢复原生 inotify。
+    const watchPolling =
+      env.VITE_WATCH_POLLING === '1' ||
+      (process.platform === 'linux' && env.VITE_WATCH_POLLING !== '0')
     return {
       // 设置基础路径
       base: env.BASE_URL,
@@ -110,17 +118,13 @@ export default defineConfig(
           ],
           // 路由 meta 标记(登录拦截与侧边栏显示的依据):
           // 1. 首页与 404 为公开页, 不加标记
-          // 2. 前台应用模块(rag 知识库问答 / agent 智能体编排)标记 app: 需登录, 但无侧边栏,
-          //    从首页直接进入, 模块内孙页面导航由各模块页面自行承担
-          // 3. 其余(后台工作台/账户设置/后台管理模块页面)标记 admin: 需登录 + 显示侧边栏,
-          //    仅经头像下拉"后台管理"入口可达
+          // 2. 其余页面(含 rag 知识库问答 / agent 智能体编排)统一标记 admin:
+          //    需登录 + 后台侧边栏; 使用页作为侧边栏末级子项出现, 不再有页内导航
+          // 3. 首页入口卡进入时追加 ?bare=1 单页模式(不渲染侧边栏, 见 menu.ts homeLink)
           extendRoute: (route) => {
             const file = (route.component ?? '').replace(/\\/g, '/')
             const isPublic = file.endsWith('/src/pages/index.vue') || file.includes('/[..all].vue')
-            // rag(AI 助手/知识库) 与 agent(智能体编排) 同属 AI 助手主应用: 无后台侧边栏,
-            // 三者由 RagPageNav 内页导航同级切换
-            const isMainApp = /\/src\/modules\/(rag|agent)\//.test(file)
-            if (file && !isPublic) route.addToMeta(isMainApp ? { app: true } : { admin: true })
+            if (file && !isPublic) route.addToMeta({ admin: true })
             // 独立页面(如账户设置): 属后台路由(需登录), 但页面自带导航, 不渲染侧边栏
             if (file.endsWith('/src/pages/setting.vue')) route.addToMeta({ standalone: true })
             // 版本信息页(系统介绍+版本时间线): 属后台路由(需登录), 页面自带布局, 不渲染侧边栏
@@ -201,6 +205,13 @@ export default defineConfig(
         allowedHosts: true, // 允许所有 Host
         headers: {
           'Access-Control-Allow-Origin': '*'
+        },
+        // 监听: dist/doc/e2e 等非源码目录不参与热更新, 减少 watcher 数量
+        watch: {
+          ignored: ['**/dist/**', '**/doc/**', '**/e2e/**', '**/*.log'],
+          ...(watchPolling
+            ? { usePolling: true, interval: 1000, binaryInterval: 2000 }
+            : {}),
         },
         // 代理
         proxy: proxys

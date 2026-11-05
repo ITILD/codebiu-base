@@ -3,7 +3,14 @@
 from fastapi import APIRouter, status, Depends, Query
 from common.utils.fastapi_ex.exceptions import NotFoundError, UnauthorizedError
 from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
-from module_authorization.do.user import User, UserCreate, UserUpdate, UserResponse
+from module_authorization.do.user import (
+    User,
+    UserCreate,
+    UserUpdate,
+    UserResponse,
+    UserBatchDelete,
+    UserBatchStatus,
+)
 from module_authorization.service.user import UserService
 from module_authorization.dependencies.user import get_user_service
 from module_authorization.dependencies.permission import require_permission
@@ -51,6 +58,42 @@ async def list_users(
     return await service.list_paged(
         pagination, username=username, nickname=nickname, is_active=is_active
     )
+
+# 批量删除路由必须声明在 /{user_id} 之前, 否则 "batch" 会被当作用户ID
+@router.delete(
+    "/batch", summary="批量删除用户", status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permission("sys", "user", "delete"))],
+)
+async def batch_delete_users(
+    batch_delete: UserBatchDelete,
+    service: UserService = Depends(get_user_service),
+) -> dict:
+    """
+    按ID列表批量删除用户, 不存在的ID静默跳过
+    :param batch_delete: 批量删除请求(包含ids列表)
+    :param service: 用户服务依赖注入
+    :return: 实际删除数量 {deleted_count}
+    """
+    deleted_count = await service.batch_delete(batch_delete)
+    return {"deleted_count": deleted_count}
+
+# 批量启停路由同样必须先于 /{user_id}, 避免 "batch-status" 被当作用户ID
+@router.put(
+    "/batch-status", summary="批量启用/禁用用户", status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permission("sys", "user", "update"))],
+)
+async def batch_update_user_status(
+    batch_status: UserBatchStatus,
+    service: UserService = Depends(get_user_service),
+) -> dict:
+    """
+    按ID列表批量启用或禁用用户
+    :param batch_status: 批量状态变更请求(ids + is_active)
+    :param service: 用户服务依赖注入
+    :return: 实际更新数量 {updated_count}
+    """
+    updated_count = await service.batch_update_status(batch_status)
+    return {"updated_count": updated_count}
 
 @router.get("/{user_id}", summary="获取单个用户",
     dependencies=[Depends(require_permission("sys", "user", "read"))])

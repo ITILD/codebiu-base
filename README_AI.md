@@ -1,152 +1,83 @@
-# codebiu_base — AI 协作指南
+# codebiu_base — AI 协作指南（总入口）
 
-> 本文件是 AI 编码助手与新人开发者的**唯一入口地图**：项目是什么、怎么扩展、每一步放什么文档。
-> 项目定位与快速开始见 [README.md](README.md)；详细规范在 `doc/doc_ch/`（见文末文档地图）。
+> 本文件只保留**全局工作流与跨端规则**；后端/前端技术硬规则见 [后端 AI 规则](code/backend/server_py/README_AI.md) · [前端 AI 规则](code/frontend/vue3/README_AI.md)。项目定位见 [README.md](README.md)，文档分层见 [doc/README.md](doc/README.md)。
 
 ## 1. 项目定位
 
-**基线项目 = 公共底座**。保留用户注册登录 / 权限管理 / 文件系统 / 字典 / 动态配置 / AI 模型接入 / RAG / 任务队列等通用能力，作为后续场景的起步架子：
+**基线项目 = 公共底座**，保留注册登录 / 权限 / 文件 / 字典 / 动态配置 / AI 模型接入 / RAG / 任务队列等通用能力：
 
 - `AGENT` — AI 智能体应用
 - `CADGIS` — CAD/GIS 二三维专业应用
 - `NOVEL` — 小说站等大众娱乐应用
 - 其他场景按同模式扩展
 
-扩展原则：**以新增模块扩展场景，不污染公共底座；禁 500MB+ 大库，模型能力走在线服务接入。**
+扩展原则：**新增模块扩展场景，不污染公共底座；禁 500MB+ 大库，模型能力走在线服务接入。**
 
-## 2. 技术栈与目录
+## 2. 规则分层
 
-- **后端** `code/backend/server_py`：Python 3.13（强制新类型语法 `X | None`）+ FastAPI + SQLAlchemy 2.0 异步 + SQLModel + PostgreSQL/SQLite + **LanceDB**（唯一向量库）+ Redis/Fakeredis + Celery
-- **前端** `code/frontend/vue3`：Vue 3.5 + TS + Vite(rolldown) + Element Plus + UnoCSS + Pinia + unplugin 全家桶（vue-router 文件路由 / auto-import / vue-components / icons）；图表 echarts，三维 babylonjs；页面与组件按业务模块垂直切分
-- **零依赖本地组合**：SQLite + Fakeredis + LanceDB（不装外部服务即可启动）
+| 层 | 文档 | 内容 |
+| :--- | :--- | :--- |
+| 全局 | 本文件 | 需求门禁、跨端边界、密钥、依赖、文档分层、交付自检 |
+| 后端 | [server_py/README_AI.md](code/backend/server_py/README_AI.md) | Python 3.13、七类目录、分层职责、跨模块 service、配置/迁移、权限接入 |
+| 前端 | [vue3/README_AI.md](code/frontend/vue3/README_AI.md) | 垂直模块、自动路由、HTTP 复用、列表/对话框、样式/响应式、菜单权限 |
+| 运维 | [deveops/README.md](deveops/README.md) | 部署、首次初始化、跨版本数据库升级、回滚 |
 
-```
-code/backend/server_py/src/
-├── common/            # 公共层: 配置中心(db/log/net)/动态配置/数据库封装/工具
-├── module_main/       # 字典/健康检测/数据监测/通用动态配置
-├── module_authorization/  # 注册登录(邮箱验证开关)/用户角色部门/Casbin RBAC
-├── module_file/       # 虚拟文件树/local+S3 上传下载
-├── module_ai/         # 模型配置/LLM/重排/OCR/在线语音 (仅接入, 不含本地推理)
-├── module_rag/        # 知识库: 项目/文档/分块/授权/AG-UI 流式问答
-├── module_agent/      # AI 助手: Agent 配置/Skill 注册表/手工 tool-calling 执行循环(AG-UI 流式)
-├── module_office/     # 文档解析(仅 MinerU 外部服务调用, 工厂接口可扩展其他服务), 库模式无路由
-├── module_task/       # 任务队列(local 协程 + Celery 双引擎)
-├── module_contact/    # 联系触达: 验证码收发 + 通知中心(站内信必达+邮件/短信按订阅路由)
-└── module_template/   # 新模块脚手架示例(CRUD/组件选型/布局/Babylon 3D)
+同一规则只在一层写详细内容；根文件只做摘要 + 链接。
 
-# 每个业务线模块只允许七类目录(名称固定, 禁自建 api/dto/types 等平行目录):
-module_<业务线>/
-├── controller/        # 对外路由(即 api 层): 参数校验 + 调度 service, 不写业务
-├── service/           # 业务逻辑; 跨模块调用唯一入口; 能力契约(Protocol)随实现放这里
-├── dao/               # 数据访问(关系库/向量库)
-├── do/                # 数据对象: 表模型/请求响应体/DTO/枚举/运行时上下文
-├── dependencies/      # FastAPI 依赖注入(仅装配 service/dao 单例)
-├── config/            # 配置层: 模块路由挂载、权限声明、模块级常量
-└── utils/             # 从业务中抽取的纯工具与非业务算法(不依赖业务状态)
-```
-
-前端按业务垂直切分，与后端模块一一对应（删模块文件夹即删整个功能）：
-
-```
-frontend/vue3/src/
-├── common/             # 全局公共: api(http/httpError/authFetch)/components(自动注册)/composables/enums/i18n/stores/types/utils
-├── app/                # 应用壳: layout 与设置面板组件(自动注册)/composables/config(menu.ts, versions)
-├── modules/<模块>/     # {api, components, pages, types} 垂直聚合; 组件显式 import
-└── pages/              # 全局页面: index.vue(toC主应用首页+登录) / admin.vue(toB后台工作台) / setting / version / 404
-```
-
-## 3. 工作流：从需求到代码（必读，一图记住）
+## 3. 工作流：从需求到代码
 
 ```
 用户提需求 → ① AI填卡+登记册加行(草案) → ② 人批准(唯一必做动作) → ③ AI开发 → ④ 交付登记
 ```
 
-**核心门禁：状态 =「已批准」才能开发。** 状态只有 4 个：草案 / 已批准 / 已交付 / 已废弃。
+**门禁：状态 =「已批准」才能开发。** 状态只有 4 个：草案 / 已批准 / 已交付 / 已废弃。
 
 | 步骤 | 动作 | 文档落点 |
 | :--- | :--- | :--- |
-| ① 登记 | AI 全自动：填一张需求卡 + 登记册加行 | [03-设计文档/00-需求功能登记册.md](doc/doc_ch/03-设计文档/00-需求功能登记册.md) + [99-需求卡模板](doc/doc_ch/03-设计文档/99-需求卡模板.md) |
-| ② 批准 | **人一次对话确认**（"同意/可以"即算）→ 置「已批准」 | [04-规范/需求与功能管理.md](doc/doc_ch/04-规范/需求与功能管理.md) |
-| ③ 开发 | AI 按手册实现（后端/前端接入清单），全程遵守代码规范 | [04-规范/开发流程.md](doc/doc_ch/04-规范/开发流程.md) + [代码规范.md](doc/doc_ch/04-规范/代码规范.md) |
+| ① 登记 | AI 全自动：填一张需求卡 + 登记册加行 | [00-需求功能登记册](doc/02-设计文档/00-需求功能登记册.md) + [99-需求卡模板](doc/02-设计文档/99-需求卡模板.md) |
+| ② 批准 | **人一次对话确认**（"同意/可以"即算）→ 置「已批准」 | [需求与功能管理](doc/03-规范/需求与功能管理.md) |
+| ③ 开发 | AI 按手册实现（后端/前端接入清单），遵守代码规范 | [开发流程](doc/03-规范/开发流程.md) + [代码规范](doc/03-规范/代码规范.md) |
 | ④ 交付 | 验收标准逐条勾选 → 登记册与卡置「已交付」 | 登记册 + 需求卡 |
 
-**AI 默认全自动**：用户提需求后 AI 填卡→给方案请求批准→批准后开发→交付；用户只需在第 ② 步说"批准"。
-**豁免**（不占编号，不开卡）：缺陷修复、文档、纯重构、依赖升级——登记册「变更记录」表记一行。
+AI 默认全自动：填卡→给方案请批准→开发→交付，用户只在第 ② 步说"批准"。
+豁免（不占编号，不开卡）：缺陷修复、文档、纯重构、依赖升级——登记册「变更记录」记一行。
 
-## 4. 架构硬规则
+## 4. 全局硬规则
 
-1. Python 3.13 新类型语法（禁 `typing.Optional/Union/List`），async 优先，重库惰性 import。
-2. **每个业务线模块只允许七类目录**：`controller / service / dao / do / dependencies / config / utils`（结构见第 2 节）。**禁止自建 `api/`、`dto/`、`types/`、`core/` 等平行目录**——`controller` 就是 api 层，数据对象一律进 `do/`，能力契约（Protocol）随实现放进对应 `service/` 文件。
-3. **层间职责固定**：controller 只做参数校验与调度；业务逻辑只写 service；dao 只碰数据访问；do 只放对象（含能力契约的输入输出 DTO/枚举/上下文），不含逻辑；utils 只放可从业务中抽取、无业务状态的纯工具与外部服务适配；config 只放模块配置、路由挂载与权限声明。**controller / service / dependencies 三层文件必须一一同名对应**（一个业务能力一条线，如 `llm`、`voice`、`ocr`、`rerank`、`model_config`）；同一条线的细分能力（向量化、视觉理解归 `llm`，整段转写归 `voice`，模型解析归 `model_config`）合并在该线内，禁止出现没有 controller 的独立能力 service 文件。
-4. **跨模块调用只走 service**：调用方只能依赖目标模块的 `service`（业务入口，含能力契约 Protocol）与 `dependencies`（注入装配），**禁止引用对方的 controller/dao/do/utils**；依赖方向固定 `module_rag → module_office → module_ai`，禁止反向依赖；通用能力下沉 `common/`（后端）或 `src/common/`（前端）。
-5. 权限点 `域:资源:动作`，前后端声明必须一致（`config/permissions.py` ↔ `menu.ts`）。
-6. 业务可热更配置进动态配置中心（`sys_config` + schema 即表单）；引导配置进 config.yaml；**config.yaml 为入 git 的基线模板，严禁提交任何真实密钥**（密钥位一律留空，只注释 `to set real key`）；真实密钥只放 `config.<APP_ENV>.yaml`（gitignored，默认不存在，**开发时需自建 `config.dev.yaml`**，参考同目录注释示例）或 `CODEBIU_*` 环境变量。
-7. 向量表继承 `VectorModel`（LanceModel 不支持 dict 注解，聚合元数据存 JSON 字符串）。
-8. 前端页面自动路由（`pages/` 下文件路径即路由，**入口 .vue 不可改名/移位**，拆分只动同模块 `components/`）；菜单接 menu.ts；API 统一走 `common/api/http.ts`（流式/Blob 用 `authFetch.ts`，FastAPI 错误解析走 `httpError.ts`）；列表页用 `useTableQuery`、新增/编辑对话框用 `useCrudDialog`、日期格式化用 `common/utils/datetime.ts`，**禁止在页面内重复实现这些公共能力**；对话框子组件约定 `defineExpose({ open })`、打开时重置防脏数据、props/emits 必须带类型。
-9. 依赖变更先 grep 复用，再确认无 500MB+ 大库，最后两端同步（pyproject / package.json）。
+1. **需求门禁**：功能必须「已批准」才写代码；无需求卡不得开工（豁免类除外）。
+2. **公共底座保护**：优先新增模块/文件扩展场景；必须改公共底座时在需求卡写明影响面与兼容说明。
+3. **跨端边界**：前后端权限码、接口契约、枚举必须一致；后端权限点 `域:资源:动作` ↔ 前端 `menu.ts`。
+4. **模块化扩展**：后端新增 `module_xxx/`，前端新增 `src/modules/xxx/`；删除模块文件夹应能删除整个功能。
+5. **密钥**：`config.yaml` 入 git 且**严禁真实密钥**；真实密钥只放 `config.dev.yaml`（gitignored）或 `CODEBIU_*` 环境变量。
+6. **依赖**：先 grep 复用 → 确认无 500MB+ 大库 → 后端 `pyproject.toml` / 前端 `package.json` 同步登记 → 重库惰性加载/分包。
+7. **数据库演进**：改表必须写 Alembic 增量脚本；启动只建缺失表/打基线，不自动 upgrade；生产升级前备份。
+8. **文档分层**：跨端 → `doc/`；后端 → `server_py/doc/`；前端 → `vue3/doc/`；部署运维 → `deveops/`；禁止同一内容复制两份。
+9. **交付同步**：代码、登记册状态、需求卡、相关文档一起更新；文档变更也在「变更记录」留痕。
 
-## 5. 关键文件索引
+## 5. 关键文件索引（跨端）
 
-### 后端
+- **后端**：`src/app.py`（入口 + router 注册中心）、`src/common/config/lifespan.py`（启动初始化时序）、`alembic/versions/`（迁移脚本）、`config.yaml`（基线配置，入 git 无真实密钥）。
+- **前端**：`vite.config.ts`（自动路由/导入/分包）、`src/app/config/menu.ts`（菜单/权限/首页入口唯一数据源）、`src/common/api/http.ts`（HTTP 封装）。
+- **设计/运维**：`doc/02-设计文档/00-需求功能登记册.md`（需求台账与门禁）、`deveops/运维手册/配置与数据库初始化.md`（首次部署初始化）、`deveops/运维手册/版本升级与数据库迁移.md`（跨版本升级与回滚）。
 
-| 文件 | 说明 |
-| :--- | :--- |
-| `src/app.py` | 服务入口 + **模块 router 注册中心**（新模块必须在此 import） |
-| `src/app_task.py` | Celery Worker 入口（tasks.engine=celery 时需要；定时任务另启 `celery -A src.app_task beat`） |
-| `src/module_task/tasks/scheduler.py` + `schedule_beat.py` | 周期调度(REQ-012)：local 单协程调度循环 / celery beat 每分钟 tick，调度定义落库热更（详见 deveops/运维手册/任务与调度运维.md） |
-| `src/module_contact/service/notification.py` | 通知中心统一入口(REQ-011)：`notify(user_id, notify_type, title, content)` 站内必达 + 邮件/短信按订阅路由；任务终态埋点见 `module_task/tasks/__init__.py` |
-| `src/module_agent/service/runner.py` | Agent 执行循环(REQ-013)：`chat_stream` 手工 tool-calling（bind_tools→astream→skill 执行回填→续跑，8 轮上限）；Skill 注册表见 `module_agent/skills/`（增删 skill 零改循环） |
-| `login_security` 动态配置组 + `src/module_authorization/service/login_security.py` | 登录安全(REQ-014)：失败锁定/密码强度/二次验证参数管理员通用配置页可调即改即生效（默认锁 5 次/15 分钟）；失败计数走缓存键 TTL 到期自动恢复 |
-| `GET /file/filesystem/preview/{entry_id}` + 前端 `modules/file/components/FilePreviewDialog.vue` | 文件在线预览(REQ-016)：鉴权同下载判定链，服务端流式代理(inline + RFC5987)规避对象存储跨域；前端 file-viewer 浏览器端渲染(依赖 @file-viewer/vue3，渲染器 6 件显式限定独立 chunk 按需懒加载，白名单见组件内 PREVIEWABLE_EXTENSIONS；不含 .ppt 老格式——其链路 16M CJK 字体) |
-| `src/common/config/lifespan.py` | 启动流程（连接/建表/种子/权限初始化） |
-| `src/common/config/db.py` | 数据库管理器（关系/缓存/向量装配） |
-| `src/common/config/dynamic/schemas.py` | 动态配置组 schema（通用配置页由它驱动） |
-| `src/common/utils/db/session/impl/db_vector_lancedb.py` | LanceDB 封装（建表/检索/谓词删除/重向量化） |
-| `src/module_authorization/config/permissions.py` | sys/main 域权限声明 |
-| `src/module_rag/config/permissions.py` | rag/task 域权限声明 |
-| `src/module_main/controller/codegen.py` + `utils/codegen/` | 代码生成器（表元数据 → 后端七层 + 前端模块，Jinja2 模板渲染，AI 辅助可勾选，写盘限定 src/ 根内） |
-| `src/module_main/controller/i18n.py` | 多语言词条覆盖存储（前端启动时拉取热更新）+ 导入导出 |
-| `src/module_contact/utils/notification_hub.py` | 通知 SSE 进程内发布订阅（`GET /contact/notifications/stream`，断线由前端退避重连） |
-| `config.yaml` / `config.<APP_ENV>.yaml` | 基线层(零依赖默认, 单文件可启动; **入 git，严禁真实密钥，只留 to-set-real-key 占位**) / 环境层(数据库/模型种子/真实密钥, gitignored; **默认不存在，开发时自建 `config.dev.yaml`**) |
-| `alembic/`、`alembic.ini`、`src/common/utils/db/migration.py` | 数据库结构迁移(REQ-008)：首启 create_all+自动 stamp；演进 `alembic revision --autogenerate` + `upgrade head`(详见 deveops/运维手册/数据库运维.md) |
-| `doc/dev/permission.md` | 新模块权限接入指南 |
-
-### 前端
-
-| 文件 | 说明 |
-| :--- | :--- |
-| `vite.config.ts` | **extendRoute 路由主题约定**（app/admin/standalone）+ 自动导入范围（common/app 组件全局注册，模块组件显式 import）+ 分包 |
-| `src/app/config/menu.ts` | 全局菜单/权限/主应用入口卡数据源 |
-| `src/common/api/http.ts` | fetch 封装（token 注入/401 单飞刷新重试） |
-| `src/common/components/pro-table/` | 通用增强表格 ProTable（列设置/密度/批量/行内编辑/手机卡片切换，偏好持久化于 localStorage） |
-| `src/common/components/AppErrorBoundary.vue` / `RouteSkeleton.vue` | 全局错误边界（可重试回退卡片）/ 路由懒加载骨架屏 |
-| `src/common/i18n/language.ts` + `src/common/i18n/keys/*.ts` | 三语词条（**新增功能词条写各自的 keys 文件，禁止多人同改 language.ts**）；启动时合并后端覆盖词条（`applyI18nOverrides`） |
-| `src/modules/ai/pages/model_config.vue` + `components/ModelTestDialog.vue` | 模型统一配置与测试：打开测试对话框即按模型类型自动跑预设用例并给出「模型可用/部分异常/不可用」结论；自定义测试承接原 AI 对话、OCR 识别、语音识别页面能力（含 OCR 示例图一键识别） |
-| `src/modules/ai/pages/assistant.vue` + `utils/assistantConfig.ts` | AI 助手配置（展示形态、悬浮位置、会话级自动弹开、默认助手/知识库/思考/联网、欢迎语与快捷提问），配置经 localStorage 单例即时同步到悬浮入口 |
-| `src/app/components/layout/AssistantFloat.vue` + `src/modules/rag/components/AssistantWidgetPanel.vue` | 悬浮 AI 助手（异步懒加载面板、每会话自动弹开一次、桌面 400px/手机全屏、Esc 关闭与焦点归还），与完整对话页共用 AG-UI 流式链路 |
-| `src/modules/rag/components/RagPageNav.vue` | AI 助手内页导航：AI 助手（对话）/ 知识库管理 / 智能体编排三个同级入口（rag 与 agent 页面均为无侧边栏 app 路由） |
-| `src/common/api/authFetch.ts` + `httpError.ts` | 原生 fetch 助手（流式/Blob 自动带令牌）+ FastAPI 错误解析共享层 |
-| `src/common/api/aguiStream.ts` | AG-UI 流式事件（RAG 问答） |
-| `src/common/composables/useTableQuery.ts` / `useCrudDialog.ts` | 分页列表查询 / 新增编辑对话框统一 composables（新 CRUD 页面必须复用，禁手写重复逻辑） |
-| `src/common/utils/datetime.ts` | 日期时间格式化统一工具（formatDate/formatDateTime/formatTimeShort） |
-| `src/pages/admin.vue` / `index.vue` | toB 后台工作台 / toC 主应用首页 |
-| `src/modules/template/` | 组件选型参考（element-plus / echarts / babylonjs 基础用法） |
+各子项目完整索引见其 `README_AI.md` 与 `doc/README.md`。
 
 ## 6. 常用命令
 
 ```bash
 # 后端
 cd code/backend/server_py
-uv sync                 # 安装依赖
-python src/app.py       # 启动 → http://127.0.0.1:2001/docs
-python -m pytest tests -x   # 测试
+uv sync
+python src/app.py            # http://127.0.0.1:6666/docs
+uv run pytest tests -x
+uv run alembic upgrade head
 
 # 前端
 cd code/frontend/vue3
 pnpm i
-pnpm run dev            # 开发 → http://localhost:2002（端口取 .env 的 VITE_PORT）
-pnpm vitest run         # 单元测试（配置在 vitest.config.ts，用例 src/**/*.spec.ts）
-pnpm run build          # 构建（含 type-check: vue-tsc）
+pnpm run dev                 # http://localhost:8888
+pnpm vitest run
+pnpm run build
 
 # 默认管理员: admin / admin123（config.yaml admin 段）
 ```
@@ -155,17 +86,12 @@ pnpm run build          # 构建（含 type-check: vue-tsc）
 
 - [ ] 功能在登记册为「已批准」状态（豁免类除外）
 - [ ] 后端新模块 → `app.py` 已注册；权限点已声明且前后端一致
-- [ ] 新表/向量表可自动创建；动态配置（如有）schema 已声明
-- [ ] 前端新页面 → menu.ts 已加；CRUD 复用 useTableQuery/useCrudDialog（对话框拆同模块 components/，`defineExpose({ open })`）；`pnpm run build` 通过；后端 `import app` 无报错
-- [ ] 代码符合 [代码规范](doc/doc_ch/04-规范/代码规范.md)（新类型语法/中文注释/分层/惰性加载）
-- [ ] 登记册与需求卡状态已同步；涉及文档已更新
+- [ ] 新表/新字段 → Alembic 迁移脚本已生成并审查；动态配置 schema 已声明
+- [ ] 前端新页面 → `menu.ts` 已加；CRUD 复用 `useTableQuery` / `useCrudDialog`
+- [ ] 前端 `pnpm run build` 通过；后端 `import app` 无报错
+- [ ] 代码符合 [代码规范](doc/03-规范/代码规范.md) 与对应子项目 `README_AI.md`
+- [ ] 登记册、需求卡、相关文档已同步；文档变更已记入「变更记录」
 
 ## 8. 文档地图
 
-| 位置 | 内容 | 何时读 |
-| :--- | :--- | :--- |
-| [README.md](README.md) | 项目定位/快速开始/能力总览 | 第一次接触项目 |
-| `doc/doc_ch/01-入门/` | 环境搭建（技术基础/数据库/IDE） | 新人配环境 |
-| `doc/doc_ch/02-开发指南/` | 大模型调用/后端/前端/权限体系/内存优化 | 开发中查阅 |
-| `doc/doc_ch/03-设计文档/` | **需求功能登记册**/需求分析/总体架构/权限设计 + 需求卡模板 | 需求登记与评审 |
-| `doc/doc_ch/04-规范/` | **需求与功能管理**/**开发流程**/**代码规范**/响应式规范/版本管理 | 开发全程 |
+根文档按 01-入门 / 02-设计文档 / 03-规范 / 04-测试报告 分目录，完整导航（含「何时读」）见 [doc/README.md](doc/README.md)。

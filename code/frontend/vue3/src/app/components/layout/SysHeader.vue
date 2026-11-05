@@ -196,8 +196,11 @@ const TITLE = ref(import.meta.env.VITE_GLOB_APP_TITLE)
 
 const route = useRoute()
 const router = useRouter()
-// 仅后台路由显示汉堡(打开侧边栏抽屉), admin 标记见 vite.config.ts 的 extendRoute
-const isAdmin = computed(() => Boolean(route.meta.admin && !route.meta.standalone))
+// 仅后台路由显示汉堡(打开侧边栏抽屉), admin 标记见 vite.config.ts 的 extendRoute;
+// bare=1 为首页入口卡进入的单页模式, 不渲染侧边栏, 汉堡同步隐藏
+const isAdmin = computed(() =>
+  Boolean(route.meta.admin && !route.meta.standalone && String(route.query.bare ?? '') !== '1')
+)
 
 // 未登录被拦截回首页时自动弹出登录框
 watch(
@@ -241,7 +244,7 @@ const handleRegisterSuccess = (authResponse: AuthResponse) => {
 
 // 顶栏黑白开关: 二态切换后套用主题并同步到后端用户配置
 const handleThemeToggle = (value: string | number | boolean) => {
-  const theme = Boolean(value) ? 'dark' : 'light'
+  const theme = value ? 'dark' : 'light'
   sysSettingStore.applyThemeValue(theme)
   authStore.saveUserTheme(theme)
 }

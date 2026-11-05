@@ -29,6 +29,8 @@ interface Props {
   attachmentDisabled?: boolean
   /** 是否启用语音输入(发送按钮右侧下拉可切换, 流式 ASR 实时转文字填入输入框) */
   voiceInput?: boolean
+  /** 输入为空时的浅色轮播提示(3 秒一轮渐显渐隐); 传空数组则不显示 */
+  tips?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -40,6 +42,7 @@ const props = withDefaults(defineProps<Props>(), {
   accept: '',
   attachmentDisabled: false,
   voiceInput: false,
+  tips: () => [],
 })
 
 const emit = defineEmits<{
@@ -133,6 +136,58 @@ const shownPlaceholder = computed(() => {
   return props.placeholder
 })
 
+// ===== 浅色轮播提示: 输入为空时每 3 秒切换一条, 渐显渐隐(替代静态快捷键文案) =====
+const tipsList = computed(() => (props.tips ?? []).filter(Boolean))
+const tipIndex = ref(0)
+const tipVisible = ref(true)
+const currentTip = computed(
+  () => tipsList.value[tipIndex.value % Math.max(tipsList.value.length, 1)] ?? '',
+)
+const showTips = computed(
+  () =>
+    tipsList.value.length > 0 &&
+    !props.modelValue &&
+    !props.disabled &&
+    sendMode.value === 'text' &&
+    !voiceRecording.value,
+)
+/** 轮播提示可见时清空原生 placeholder, 避免两层灰字重叠 */
+const effectivePlaceholder = computed(() => (showTips.value ? '' : shownPlaceholder.value))
+
+let tipTimer: ReturnType<typeof setInterval> | undefined
+let tipFadeTimer: ReturnType<typeof setTimeout> | undefined
+
+const stopTipRotation = () => {
+  if (tipTimer) {
+    clearInterval(tipTimer)
+    tipTimer = undefined
+  }
+  if (tipFadeTimer) {
+    clearTimeout(tipFadeTimer)
+    tipFadeTimer = undefined
+  }
+}
+
+const startTipRotation = () => {
+  stopTipRotation()
+  if (!tipsList.value.length) return
+  tipTimer = setInterval(() => {
+    tipVisible.value = false // 渐隐
+    tipFadeTimer = setTimeout(() => {
+      tipIndex.value = (tipIndex.value + 1) % tipsList.value.length
+      tipVisible.value = true // 下一条渐显
+    }, 420)
+  }, 3000)
+}
+
+// 清空输入后立即恢复提示可见(避免刚好停在渐隐阶段)
+watch(
+  () => props.modelValue,
+  (value) => {
+    if (!value) tipVisible.value = true
+  },
+)
+
 // ===== 多行检测: 文字到达按钮区域(需要换行)时, 按键自动下移一行 =====
 const inputRef = ref<{ textarea?: HTMLTextAreaElement } | null>(null)
 const mirrorRef = ref<HTMLElement | null>(null)
@@ -195,6 +250,7 @@ watch(
 onMounted(() => {
   resizeInput()
   syncMultiline()
+  startTipRotation()
   // 尺寸变化时重新评估: 覆盖窗口缩放/样式延迟注入(此时 padding 生效会引起尺寸变化)等场景
   const el = inputRef.value?.textarea
   if (el && typeof ResizeObserver !== 'undefined') {
@@ -207,6 +263,8 @@ onMounted(() => {
     onUnmounted(() => ro.disconnect())
   }
 })
+// 轮播定时器随组件卸载清理
+onUnmounted(stopTipRotation)
 </script>
 
 <template>
@@ -246,26 +304,32 @@ onMounted(() => {
           <el-icon :size="16"><Plus /></el-icon>
         </button>
       </el-tooltip>
-      <el-input
-        ref="inputRef"
-        :model-value="modelValue"
-        type="textarea"
-        :rows="1"
-        :placeholder="shownPlaceholder"
-        :disabled="disabled"
-        resize="none"
-        @update:model-value="onInput"
-        @keydown="onKeydown"
-      />
+      <div class="cc-input-wrap">
+        <el-input
+          ref="inputRef"
+          :model-value="modelValue"
+          type="textarea"
+          :rows="1"
+          :placeholder="effectivePlaceholder"
+          :disabled="disabled"
+          resize="none"
+          @update:model-value="onInput"
+          @keydown="onKeydown"
+        />
+        <!-- 浅色轮播提示: 单行截断, 3 秒切换一条并渐显渐隐 -->
+        <div v-if="showTips" class="cc-tip" :class="{ 'is-hidden': !tipVisible }" aria-hidden="true">
+          {{ currentTip }}
+        </div>
+      </div>
       <div class="cc-side flex items-center gap-1.5 shrink-0">
         <div class="cc-toolbar flex items-center gap-1.5 min-w-0">
           <slot name="toolbar">
-            <span class="text-xs text-note-sub whitespace-nowrap">{{ hint || 'Enter 发送 · Shift+Enter 换行' }}</span>
+            <span v-if="hint" class="text-xs text-note-sub whitespace-nowrap">{{ hint }}</span>
           </slot>
         </div>
         <!-- 停止生成(生成中) -->
         <el-tooltip v-if="isSending" content="停止生成" placement="top">
-          <button class="cc-btn stop flex items-center justify-center w-9 h-9 rounded-full border border-transparent bg-note-card text-note-sub cursor-pointer note-transition shadow-[0_0_0_1px_var(--note-edge-soft,rgba(107,158,120,0.16))]" @click="handleStop">
+          <button class="cc-btn stop flex items-center justify-center w-9 h-9 rounded-full border border-transparent bg-note-card text-note-sub cursor-pointer note-transition shadow-[0_0_0_1px_var(--note-edge-soft,rgba(46,124,107,0.16))]" @click="handleStop">
             <el-icon :size="16"><VideoPause /></el-icon>
           </button>
         </el-tooltip>
@@ -409,7 +473,7 @@ onMounted(() => {
 
 /* 聚焦: 光晕环收拢变亮, 提示输入中(状态选择器, 保留在 style) */
 .cc-card:focus-within {
-  box-shadow: 0 0 0 2px var(--note-edge-soft, rgba(107, 158, 120, 0.16)), 0 6px 20px -6px var(--note-glow, rgba(107, 158, 120, 0.22));
+  box-shadow: 0 0 0 2px var(--note-edge-soft, rgba(46, 124, 107, 0.16)), 0 6px 20px -6px var(--note-glow, rgba(46, 124, 107, 0.16));
 }
 
 /* 聚焦时的淡渐变光晕: 几乎不可见的流动微光(伪元素 + 动画, 保留在 style) */
@@ -449,10 +513,38 @@ onMounted(() => {
   100% { background-position: -150% 0; }
 }
 
-/* 同行布局下 el-textarea 占满剩余宽度(子元素选择器, 保留在 style) */
-.cc-row > .el-textarea {
+/* 同行布局下输入容器占满剩余宽度(子元素选择器, 保留在 style) */
+.cc-row > .cc-input-wrap {
+  position: relative;
+  display: flex;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.cc-input-wrap > .el-textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 浅色轮播提示: 覆盖在空输入框上, 单行截断, 3 秒切换并渐显渐隐 */
+.cc-tip {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 9px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.95rem;
+  line-height: 24px;
+  color: var(--note-sub, #6b7f6e);
+  opacity: 0.62;
+  pointer-events: none;
+  transition: opacity 0.42s ease;
+}
+
+.cc-tip.is-hidden {
+  opacity: 0;
 }
 
 /* 多行布局: 输入占满整行, 第二行 + 号居左、工具栏与发送组靠右铺开(动态态 + 子元素联动, 保留在 style) */
@@ -460,7 +552,7 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.cc-row.stacked > .el-textarea {
+.cc-row.stacked > .cc-input-wrap {
   order: 1;
   flex-basis: 100%;
 }

@@ -1,81 +1,62 @@
-# base_server
+# server_py — 后端基线库
 
-项目后端基线库
+Python 3.13 + FastAPI + SQLAlchemy 2.0(异步) + SQLModel + PostgreSQL/SQLite + Milvus/LanceDB + Redis/Fakeredis + Celery。
 
-## 项目结构
-
-## 开发
+## 快速开始
 
 ```bash
-# 拉取基础代码(如果需要)
-git clone https://gitee.com/lastfree/codebiu.git
-git clone https://github.com/ITILD/codebiu.git
-
-
-# 版本和三方库在pyproject.toml里，安装依赖(需要uv包管理 ) 
+cd code/backend/server_py
 uv sync
 
-# 运行
-.venv\Scripts\python.exe src\app.py
+# 默认配置（config.yaml 会加载 config.dev.yaml）
+#   真实 PostgreSQL/Redis/模型：新建 config.dev.yaml 写覆盖项
+#   只跑零依赖基线：把 config.yaml 的 config.local_file 置空
+python src/app.py            # http://127.0.0.1:6666/docs
 
-# 控制台运行
-$env:PYTHONPATH="src"; uvicorn src.app:app --host 0.0.0.0 --port 2001
-
+# 或指定模块启动
+PYTHONPATH=src uv run uvicorn app:app --host 0.0.0.0 --port 6666
 ```
+
+默认管理员：`admin / admin123`（`config.yaml` 的 `admin` 段）。
 
 ## 测试
 
-```sh
-# pytest配置
-# .vscode\settings.json里添加
+```bash
+uv run pytest tests -x
+```
+
+VS Code `settings.json`：
+
+```json
 {
-  "python.testing.pytestArgs": [
-    "-v",          // 显示详细输出
-    "-s",          // 禁用输出捕获(关键！)
-    "--log-cli-level=INFO"  //  启用日志输出到控制台
-  ]
+  "python.testing.pytestArgs": ["-v", "-s", "--log-cli-level=INFO"]
 }
 ```
 
-## 打包exe或docker
+## 构建与部署
 
-```sh
-# dev
+```bash
+# 开发镜像
 bash tools/docker_dev/build.sh
-# 构建 exe bin
+
+# 二进制构建
 bash tools/docker_build/linux_build.sh
 bash tools/docker_build/build.sh
-
-# 运行
-docker compose up
-docker compose down
-docker compose 
 ```
 
-## 基础mvc分层
+部署、配置初始化与版本升级见 [deveops](../../../deveops/README.md)。
 
-```mermaid
-graph TD
-    A[用户请求] -->|调用| B[Controller]
-    B -->|调用| C[Service]
-    C -->|调用| D[DAO]
-    D -->|操作| E[数据库]
-  
-    F[dependence] -.->|依赖注入| B
-    F -.->|依赖注入| C  
-    F -.->|依赖注入| D
-  
-    subgraph "数据和相关的行为"
-        G[DO<br/>Domain Object]
-    end
-  
-    G -.->|数据传输| B
-    G -.->|数据处理| C
-    G -.->|数据持久化| D
-```
+## 基础分层
+
+`controller → service → dao → 数据库`；`dependencies` 依赖注入，`do` 承载对象。职责表与链路图见 [01-开发指南](./doc/dev/01-开发指南.md)。
 
 ## 项目文档
 
+- [后端文档导航](./doc/README.md)
+- [AI 协作规则](./README_AI.md)
+- [开发指南](./doc/dev/01-开发指南.md)
+- [配置与初始化](./doc/dev/03-配置与初始化.md)
+- [数据库迁移](./doc/dev/04-数据库迁移.md)
 - [版本信息](./doc/tag_doc/version_info.md)
-- [依赖库](./doc/dev/lib.md)
-- [项目目录](./doc/dev/dir.md)
+- [依赖库](./doc/dev/09-依赖管理.md)
+- [项目目录](./doc/dev/02-目录结构.md)

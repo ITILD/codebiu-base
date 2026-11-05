@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full class="server-status-page">
+  <div p-3 md:p-4 w-full class="server-status-page">
     <!-- 水墨页头(操作开关收进右侧操作区) -->
     <InkPageHead title="服务状态" seal="诊">
       <template #sub>
@@ -125,7 +125,7 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 // 进度条颜色: 低负载苔绿, 高负载警示
 const progressColor = [
-  { color: '#6b9e78', percentage: 60 },
+  { color: '#2e7c6b', percentage: 60 },
   { color: '#e6a23c', percentage: 85 },
   { color: '#f56c6c', percentage: 100 },
 ]

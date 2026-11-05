@@ -5,12 +5,14 @@
 - 类型映射: server_types_for 对 asr/tts 仅 online, ocr 仅 dashscope, vad/denoise 已下线返回空
 - 引擎归一化: 旧 engine 值 dashscope/sherpa/qwen/local -> online, 空值/无效值 -> None
 - 统一入口注册表: ModelEntryService._BUILDERS 将 asr/tts/ocr 构建为在线引擎并展平 extra
-- DashscopeASR/DashscopeTTS/DashscopeOCR: 请求体构建与响应解析(httpx 全局打桩, 零外部依赖)
+- DashscopeASR/DashscopeTTS/DashscopeOCR/OXROnline: 请求体构建与响应解析(httpx 全局打桩)
+- OcrService 多配置降级链: 前一条引擎失败时自动切换下一条
 
 说明: 本地推理(sherpa/qwen)已全部下线, 语音引擎仅保留 online 方案(协议细节由 extra.protocol
-分派); OCR 仅保留 DashscopeOCR(百炼 qwen-vl-ocr), 不再测 OcrService 引擎解析。
+分派); OCR 按 server_type/extra.protocol 分派 DashscopeOCR / PaddleOCROnline / OXROnline。
 """
 
+import asyncio
 import base64
 import json
 from types import SimpleNamespace
@@ -21,8 +23,10 @@ import pytest
 
 from module_ai.do.voice import VoiceEngine, resolve_engine
 from module_ai.service.model_config import ModelEntryService
+from module_ai.service.ocr import OcrService
 from module_ai.utils.llm.types import ModelServerType, ModelType, server_types_for
 from module_ai.utils.ocr.dashscope import DashscopeOCR
+from module_ai.utils.ocr.oxr import OXROnline
 from module_ai.utils.voice.asr.dashscope import DashscopeASR
 from module_ai.utils.voice.asr.online import OnlineASR
 from module_ai.utils.voice.audio import pcm_to_wav_bytes, to_pcm16
@@ -60,8 +64,25 @@ class _FakeHttpClient:
     def __exit__(self, *args) -> bool:
         return False
 
-    def post(self, url: str, headers: dict | None = None, json: dict | None = None, **kw) -> _FakeResponse:
-        self.calls.append({"method": "post", "url": url, "headers": headers, "json": json})
+    def post(
+        self,
+        url: str,
+        headers: dict | None = None,
+        json: dict | None = None,
+        data=None,
+        files=None,
+        **kw,
+    ) -> _FakeResponse:
+        self.calls.append(
+            {
+                "method": "post",
+                "url": url,
+                "headers": headers,
+                "json": json,
+                "data": data,
+                "files": files,
+            }
+        )
         return self.responses.pop(0)
 
     def get(self, url: str, **kw) -> _FakeResponse:
@@ -101,15 +122,15 @@ def test_voice_engine_legacy_normalize():
 def test_model_entry_builders_registered():
     """统一模型入口注册表: asr/tts/ocr 应构建在线引擎实例, extra 展平进引擎配置
 
-    OCR 按方案分派: server_type=dashscope → DashscopeOCR, 其余(默认 online)
-    → PaddleOCROnline(见 ModelEntryService._build_ocr_engine)
+    OCR 按方案分派: server_type=dashscope → DashscopeOCR,
+    extra.protocol=oxr → OXROnline, 其余(默认 online) → PaddleOCROnline
     """
     from module_ai.utils.ocr.paddle_online import PaddleOCROnline
 
-    def _build(model_type: str, server_type: str | None = None):
+    def _build(model_type: str, server_type: str | None = None, extra: dict | None = None):
         config = SimpleNamespace(
             model_type=model_type, model="m-1", server_type=server_type,
-            extra={"protocol": "openai", "api_key": "sk-test"},
+            extra=extra or {"protocol": "openai", "api_key": "sk-test"},
             api_key="", url=None, timeout=60,
         )
         return ModelEntryService._BUILDERS[model_type](config)
@@ -118,10 +139,12 @@ def test_model_entry_builders_registered():
     tts = _build("tts")
     ocr_default = _build("ocr")
     ocr_dashscope = _build("ocr", server_type=ModelServerType.DASHSCOPE)
+    ocr_oxr = _build("ocr", server_type=ModelServerType.ONLINE, extra={"protocol": "oxr"})
     assert isinstance(asr, OnlineASR)
     assert isinstance(tts, OnlineTTS)
     assert isinstance(ocr_default, PaddleOCROnline), "OCR 未指定方案时默认 online(PaddleOCR 云 API)"
     assert isinstance(ocr_dashscope, DashscopeOCR), "OCR 指定 dashscope 方案应构建百炼引擎"
+    assert isinstance(ocr_oxr, OXROnline), "OCR extra.protocol=oxr 应构建 OXR 引擎"
     # extra 展平: 协议/模型键进入引擎配置(顶层字段回填, extra 同名键优先)
     assert asr._conf["protocol"] == "openai"
     assert ocr_default._conf["model"] == "m-1"
@@ -231,3 +254,97 @@ def test_dashscope_ocr_missing_api_key():
     """OCR: 缺少 api_key 应给出可操作的错误提示"""
     with pytest.raises(RuntimeError, match="api_key"):
         DashscopeOCR({}).recognize(np.zeros((4, 4, 3), dtype="uint8"))
+
+
+# ==================== OXROnline ====================
+def test_oxr_parse_document(monkeypatch):
+    """OXR: multipart 上传 + 免费接口默认 dummy Key + outputs.markdown 抽取"""
+    _patch_httpx(
+        monkeypatch,
+        [_FakeResponse({"code": 0, "data": {"result": {"outputs": {"markdown": "# 标题\n\n正文"}}}})],
+    )
+    text = OXROnline({}).parse_document(b"%PDF-1.4", "sample.pdf")
+    assert text == "# 标题\n\n正文"
+
+    call = _FakeHttpClient.last.calls[0]
+    assert call["url"] == "https://free-oxr.somark.cn/api/v1/parse/sync"
+    assert call["data"]["api_key"] == "dummy"
+    assert call["data"]["output_formats"] == ["markdown"]
+    assert call["files"]["file"][1] == b"%PDF-1.4"
+
+
+def test_oxr_recognize_returns_paddle_like_result(monkeypatch):
+    """OXR: 图片识别结果与本地流水线同构(box 为整图矩形)"""
+    _patch_httpx(
+        monkeypatch,
+        [_FakeResponse({"code": 0, "data": {"result": {"outputs": {"markdown": "识别文本"}}}})],
+    )
+    image = np.full((10, 20, 3), 255, dtype="uint8")
+    result = OXROnline({}).recognize(image)
+    assert result["results"][0]["text"] == "识别文本"
+    assert result["results"][0]["box"] == [[0, 0], [20, 0], [20, 10], [0, 10]]
+    assert result["engine"] == "oxr"
+
+
+def test_oxr_error_code(monkeypatch):
+    """OXR: 响应 code 非 0 应抛出含服务端消息的 RuntimeError"""
+    _patch_httpx(monkeypatch, [_FakeResponse({"code": 1001, "message": "额度已用尽"})])
+    with pytest.raises(RuntimeError, match="额度已用尽"):
+        OXROnline({}).parse_document(b"%PDF", "a.pdf")
+
+
+# ==================== OcrService 多配置降级链 ====================
+class _FlakyOcrEngine:
+    """首个引擎: 模拟额度耗尽/限流失败"""
+
+    def recognize(self, image_cv):
+        raise RuntimeError("免费额度已用尽")
+
+    def parse_document(self, data, filename):
+        raise RuntimeError("免费额度已用尽")
+
+
+class _GoodOcrEngine:
+    """备用引擎: 返回成功结果"""
+
+    def recognize(self, image_cv):
+        return {"ts": {"total": 0.1}, "results": [{"box": [[0, 0]], "text": "备用结果", "score": 1.0}], "engine": "oxr"}
+
+    def parse_document(self, data, filename):
+        return "备用文档文本"
+
+
+class _StubEntry:
+    """ModelEntryService 桩: 按候选顺序返回预设引擎"""
+
+    def __init__(self, engines):
+        self._engines = list(engines)
+
+    async def list_candidate_configs(self, model_type, *, user_id=None):
+        return [SimpleNamespace(id=str(i)) for i in range(len(self._engines))]
+
+    async def get_engine(self, model_type, *, model_id=None, **kwargs):
+        return self._engines[int(model_id)]
+
+
+def test_ocr_service_recognize_fallback_chain():
+    """OCR 图片识别: 首条配置失败时自动切换下一条"""
+    result = asyncio.run(
+        OcrService(_StubEntry([_FlakyOcrEngine(), _GoodOcrEngine()])).recognize(
+            np.zeros((4, 4, 3), dtype="uint8")
+        )
+    )
+    assert result["engine"] == "oxr"
+    assert result["results"][0]["text"] == "备用结果"
+    assert result["results"][0]["index"] == 0
+
+
+def test_ocr_service_document_fallback_chain():
+    """OCR 文档解析: 首条配置失败时自动切换下一条"""
+    result = asyncio.run(
+        OcrService(_StubEntry([_FlakyOcrEngine(), _GoodOcrEngine()])).recognize_document(
+            b"%PDF", "a.pdf"
+        )
+    )
+    assert result.text == "备用文档文本"
+    assert result.engine == "_GoodOcrEngine"

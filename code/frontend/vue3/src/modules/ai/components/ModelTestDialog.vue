@@ -344,7 +344,7 @@ const applyScoreSuggest = async (suggest: RerankScoreSuggest) => {
   if (!currentRow || suggest.score_min === undefined || suggest.score_max === undefined) return
   try {
     applyingSuggest.value = true
-    const mergedExtra = { ...(currentRow.extra ?? {}), score_min: suggest.score_min, score_max: suggest.score_max }
+    const mergedExtra = { ...currentRow.extra, score_min: suggest.score_min, score_max: suggest.score_max }
     await updateModelConfig(currentRow.id, { extra: mergedExtra })
     emit('suggestApplied', { modelId: currentRow.id, suggest, capabilities: [...testResults.value] })
     ElMessage.success(`已应用分数范围: ${suggest.score_min} ~ ${suggest.score_max}`)

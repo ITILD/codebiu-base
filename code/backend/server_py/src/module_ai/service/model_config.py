@@ -27,7 +27,7 @@ from module_ai.utils.llm.factory.builder import (
     build_rerank_model,
 )
 from module_ai.utils.llm.types import ModelServerType, ModelType, server_types_for
-from module_ai.utils.ocr import DashscopeOCR, PaddleOCROnline
+from module_ai.utils.ocr import DashscopeOCR, OXROnline, PaddleOCROnline
 from module_ai.utils.voice.asr import OnlineASR
 from module_ai.utils.voice.tts import OnlineTTS
 
@@ -420,12 +420,16 @@ def _build_ocr_engine(config: ModelConfig | None):
     """按 server_type/extra.protocol 构建 OCR 引擎
 
     - dashscope 或 extra.protocol=dashscope: 阿里云百炼方案(DashscopeOCR)
+    - extra.protocol=oxr/somark: OXR 1.0 官方方案(OXROnline)
     - online(默认): PaddleOCR 官方云 API 方案(PaddleOCROnline)
     """
     conf = flatten_conf(config)
+    protocol = str(conf.get("protocol") or "").strip().lower()
     # server_type 可能是枚举或字符串, str-mixin 枚举与 .value 直接相等比较
-    if getattr(config, "server_type", None) == ModelServerType.DASHSCOPE or str(conf.get("protocol") or "") == "dashscope":
+    if getattr(config, "server_type", None) == ModelServerType.DASHSCOPE or protocol == "dashscope":
         return DashscopeOCR(conf)
+    if protocol in ("oxr", "somark"):
+        return OXROnline(conf)
     return PaddleOCROnline(conf)
 
 
@@ -535,6 +539,32 @@ class ModelEntryService:
                 f"未配置 {type_key} 模型: 请在模型配置中添加 model_type={type_key} 的记录"
             )
         return config
+
+    async def list_candidate_configs(
+        self, model_type: "ModelType | str", *, user_id: str | None = None
+    ) -> list[ModelConfig]:
+        """按降级链顺序返回全部生效配置(多解析器/多 Key 轮流兜底场景)
+
+        顺序: 用户绑定 → 默认公共模型 → 其余生效配置(创建时间升序)。
+        调用方逐个尝试, 单条失败自动切换下一条; 与 ``resolve_config`` 的单条解析互不影响。
+
+        :param model_type: 模型类型(ocr 等支持多配置的能力)
+        :param user_id: 当前用户ID(其个人绑定排在最前)
+        :return: 去重后的生效配置列表; 无任何配置时返回空列表
+        """
+        type_key = self.type_key(model_type)
+        candidates: list[ModelConfig] = []
+        seen: set[str] = set()
+        if user_id:
+            user_config = await self._resolve_user_config(type_key, user_id)
+            if user_config is not None and user_config.is_active:
+                candidates.append(user_config)
+                seen.add(user_config.id)
+        for config in await self.model_config_dao.list_active_by_type(type_key):
+            if config.id not in seen:
+                candidates.append(config)
+                seen.add(config.id)
+        return candidates
 
     # ---------- 实例构建与缓存 ----------
 

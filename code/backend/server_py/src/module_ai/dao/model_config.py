@@ -170,6 +170,30 @@ class ModelConfigDao:
         fallback_stmt = base.order_by(ModelConfig.created_at.asc()).limit(1)
         return (await session.exec(fallback_stmt)).first()
 
+    @DaoRel
+    async def list_active_by_type(
+        self,
+        model_type: str,
+        session: AsyncSession | None = None,
+    ) -> list[ModelConfig]:
+        """
+        获取指定类型的全部生效配置(多解析器降级链场景)
+        排序: 默认公共模型优先 > 创建时间升序(后台新增顺序即降级顺序)
+        :param model_type: 模型类型(chat/embeddings/rerank/ocr/asr/tts)
+        :param session: 可选数据库会话
+        :return: 生效配置列表(可能为空)
+        """
+        statement = (
+            select(ModelConfig)
+            .where(
+                ModelConfig.model_type == model_type,
+                ModelConfig.is_active == True,  # noqa: E712
+            )
+            .order_by(ModelConfig.is_default.desc(), ModelConfig.created_at.asc())
+        )
+        result = await session.exec(statement)
+        return list(result.all())
+
     @staticmethod
     def _visibility_condition(
         user_id: str | None,

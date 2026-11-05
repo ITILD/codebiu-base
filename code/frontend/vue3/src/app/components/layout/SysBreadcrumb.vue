@@ -20,6 +20,9 @@
 import { findMenuTrail } from '@/app/config/menu'
 // 菜单轨迹: findMenuTrail 未收录的路径(如 /setting)返回空数组 → 不渲染
 const route = useRoute()
-const isAdmin = computed(() => Boolean(route.meta.admin))
+// bare=1 单页模式(首页入口卡进入): 不渲染侧边栏, 也不显示后台面包屑
+const isAdmin = computed(
+  () => Boolean(route.meta.admin && String(route.query.bare ?? '') !== '1'),
+)
 const trail = computed(() => findMenuTrail(route.path))
 </script>

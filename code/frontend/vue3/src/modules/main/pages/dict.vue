@@ -1,5 +1,5 @@
 <template>
-  <div p-4 md:p-6 w-full class="dict-manage-page">
+  <div p-3 md:p-4 w-full class="dict-manage-page">
     <!-- 水墨页头 -->
     <InkPageHead title="字段表管理" seal="典">
       <template #sub>
@@ -7,11 +7,11 @@
       </template>
     </InkPageHead>
 
-    <div flex flex-col lg:flex-row gap-4>
+    <div flex flex-col lg:flex-row gap-3>
       <!-- ############ 左侧: 字段类型列表 ############ -->
       <div w-full shrink-0 page-card class="lg:w-2/5">
         <div mb-3 flex items-center justify-between>
-          <h3 font-bold text-note>字段类型</h3>
+          <h3 text-sm font-semibold text-note>字段类型</h3>
           <el-button size="small" type="primary" @click="openTypeDialog()">新增类型</el-button>
         </div>
 
@@ -24,9 +24,23 @@
           @reset="handleSearch"
         />
 
+        <!-- 批量操作条: 选中后出现 -->
+        <div
+          v-if="selectedTypes.length"
+          class="mb-2 flex flex-wrap items-center gap-2 rounded-note-md bg-note-tint px-3 py-1.5"
+        >
+          <span text-xs text-note-green>已选 {{ selectedTypes.length }} 项</span>
+          <el-button size="small" type="danger" plain :loading="deletingTypes" @click="handleBatchDeleteTypes">
+            批量删除
+          </el-button>
+          <el-button class="ml-auto" link size="small" @click="clearTypeSelection">取消选择</el-button>
+        </div>
+
         <!-- 类型表格 -->
         <el-table :data="typeList" v-loading="typeLoading" highlight-current-row stripe
-          size="small" @current-change="handleTypeSelect">
+          ref="typeTableRef" row-key="id" size="small"
+          @current-change="handleTypeSelect" @selection-change="handleTypeSelectionChange">
+          <el-table-column type="selection" width="44" />
           <el-table-column prop="type_name" label="类型名称" min-width="100" show-overflow-tooltip />
           <el-table-column prop="type_code" label="类型编码" min-width="100" show-overflow-tooltip />
           <el-table-column label="状态" min-width="70" align="center">
@@ -56,7 +70,7 @@
       <!-- ############ 右侧: 字段项列表 ############ -->
       <div flex-1 min-w-0 page-card>
         <div mb-3 flex flex-wrap items-center justify-between gap-2>
-          <h3 font-bold text-note>
+          <h3 text-sm font-semibold text-note>
             字段项
             <el-tag v-if="currentType" size="small" class="ml-2">{{ currentType.type_name }}</el-tag>
           </h3>
@@ -68,8 +82,22 @@
         <!-- 未选择类型提示 -->
         <el-empty v-if="!currentType" description="请先在左侧选择字段类型" :image-size="80" />
         <template v-else>
+          <!-- 批量操作条: 选中后出现 -->
+          <div
+            v-if="selectedItems.length"
+            class="mb-2 flex flex-wrap items-center gap-2 rounded-note-md bg-note-tint px-3 py-1.5"
+          >
+            <span text-xs text-note-green>已选 {{ selectedItems.length }} 项</span>
+            <el-button size="small" type="danger" plain :loading="deletingItems" @click="handleBatchDeleteItems">
+              批量删除
+            </el-button>
+            <el-button class="ml-auto" link size="small" @click="clearItemSelection">取消选择</el-button>
+          </div>
+
           <!-- 项表格 -->
-          <el-table :data="itemList" v-loading="itemLoading" stripe size="small">
+          <el-table :data="itemList" v-loading="itemLoading" stripe size="small"
+            ref="itemTableRef" row-key="id" @selection-change="handleItemSelectionChange">
+            <el-table-column type="selection" width="44" />
             <el-table-column prop="item_name" label="项名称" min-width="100" show-overflow-tooltip />
             <el-table-column prop="item_code" label="项编码" min-width="100" show-overflow-tooltip />
             <el-table-column prop="item_value" label="项值" min-width="100" show-overflow-tooltip />
@@ -163,13 +191,14 @@
 </template>
 
 <script setup lang="ts">
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type TableInstance } from 'element-plus'
 import {
   createDictType, deleteDictType, listDictTypes, updateDictType,
   createDictItem, deleteDictItem, listDictItemsByType, updateDictItem,
 } from '../api/dict'
 import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
 import { useResponsive } from '@/common/composables/useResponsive'
+import { useBatchDelete } from '@/common/composables/useBatchDelete'
 import type { PaginationParams } from '@/common/types/common'
 import type { DictType, DictItem } from '../types/dict'
 
@@ -199,6 +228,73 @@ const typeTotal = ref(0)
 const typePagination = ref<PaginationParams>({ page: 1, size: 10 })
 // 当前选中的类型(高亮行)
 const currentType = ref<DictType | null>(null)
+
+// ################ 批量操作(类型/字段项各一份选择态) ################
+const typeTableRef = ref<TableInstance>()
+const itemTableRef = ref<TableInstance>()
+const selectedTypes = ref<DictType[]>([])
+const selectedItems = ref<DictItem[]>([])
+const { batchDelete: batchDeleteTypes, deleting: deletingTypes } = useBatchDelete()
+const { batchDelete: batchDeleteItems, deleting: deletingItems } = useBatchDelete()
+
+/** 类型多选变化 */
+const handleTypeSelectionChange = (rows: DictType[]) => {
+  selectedTypes.value = rows
+}
+
+/** 清空类型多选 */
+const clearTypeSelection = () => {
+  typeTableRef.value?.clearSelection()
+  selectedTypes.value = []
+}
+
+/** 字段项多选变化 */
+const handleItemSelectionChange = (rows: DictItem[]) => {
+  selectedItems.value = rows
+}
+
+/** 清空字段项多选 */
+const clearItemSelection = () => {
+  itemTableRef.value?.clearSelection()
+  selectedItems.value = []
+}
+
+/** 批量删除类型(逐条调用接口, 删除后整页刷新) */
+const handleBatchDeleteTypes = async () => {
+  const removed = await batchDeleteTypes({
+    rows: selectedTypes.value,
+    getId: row => row.id,
+    remove: id => deleteDictType(String(id)),
+    label: row => row.type_name,
+    onRemoved: async (n) => {
+      if (typeList.value.length <= n && typePagination.value.page > 1) {
+        typePagination.value.page -= 1
+      }
+      await fetchTypes()
+    },
+  })
+  if (removed) {
+    clearTypeSelection()
+    clearItemSelection()
+  }
+}
+
+/** 批量删除字段项(逐条调用接口, 删除后刷新当前类型) */
+const handleBatchDeleteItems = async () => {
+  const removed = await batchDeleteItems({
+    rows: selectedItems.value,
+    getId: row => row.id,
+    remove: id => deleteDictItem(String(id)),
+    label: row => row.item_name,
+    onRemoved: async (n) => {
+      if (itemList.value.length <= n && itemPagination.value.page > 1) {
+        itemPagination.value.page -= 1
+      }
+      await fetchItems()
+    },
+  })
+  if (removed) clearItemSelection()
+}
 
 // 类型对话框
 const typeDialogVisible = ref(false)
@@ -255,6 +351,7 @@ const handleSearch = () => {
 /** 选中类型行时加载右侧字段项 */
 const handleTypeSelect = (row: DictType | null) => {
   currentType.value = row
+  clearItemSelection()
   if (row) {
     itemPagination.value.page = 1
     fetchItems()

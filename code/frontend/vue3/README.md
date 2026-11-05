@@ -1,31 +1,29 @@
-# base_web
+# vue3 — 前端基线库
 
-基础前端模板
+Vue 3.5 + TypeScript + Vite + Element Plus + UnoCSS + Pinia + unplugin 全家桶（自动路由 / 自动导入 / 图标）。
 
-## 项目结构
-src/
-├── assets/ 静态资源
-├── components/ 公共组件
-├── pages/ 页面
-├── router/ 路由
-├── store/ 状态管理
-├── App.vue 根组件
-├── main.ts 入口文件
+## 快速开始
 
-
-## 开发
 ```bash
-# 实际执行的package.json脚本
-# 安装依赖
+cd code/frontend/vue3
 pnpm i
+pnpm run dev        # http://localhost:8888（端口取 .env 的 VITE_PORT）
+pnpm run build      # vue-tsc 类型检查 + 生产构建
+pnpm vitest run     # 单元测试
+```
 
-# 启动开发环境
-pnpm run dev
+## 目录结构
 
-# 打包
-pnpm run build
+```text
+src/
+├── common/             # 跨业务公共层：api / components / composables / enums / i18n / stores / types / utils
+├── app/                # 应用壳：layout 与设置面板组件 / composables(config) / menu.ts
+├── modules/<模块>/     # 业务垂直切片：api / components / pages / types
+└── pages/              # 全局页：index.vue(toC) / admin.vue(toB) / setting / version / 404
 ```
 
 ## 项目文档
+
+- [前端文档导航](./doc/README.md)（含开发指南、视觉主题、样式、响应式、权限与菜单）
+- [AI 协作规则](./README_AI.md)
 - [版本信息](./doc/tag_doc/version_info.md)
-- [依赖库](./doc/env/lib.md)
