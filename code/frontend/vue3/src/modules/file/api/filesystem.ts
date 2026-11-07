@@ -1,8 +1,8 @@
 // src/modules/file/api/filesystem.ts
-// 文件模块 API(虚拟文件系统,后端存储可配置切换本地/S3对象存储)
+// 文件模块 API(虚拟文件系统, 后端为 S3 兼容对象存储 rustfs/MinIO)
 // 上传链路复用公共统一存储流程(common/utils/storageUpload),本模块仅提供端点适配器:
 // - direct(s3): 凭证签发(init)后前端预签名直传对象存储,数据面不经过服务端
-// - proxy(local): 小文件 FormData 中转 /upload,大文件分片中转
+// - proxy: 小文件 FormData 中转 /upload,大文件分片中转(测试内存存储等场景)
 import { http_base_server } from '@/common/api/http';
 import { createStorageUploader } from '@/common/utils/storageUpload';
 import type { MultipartPart } from '@/common/utils/storageUpload';
@@ -13,8 +13,6 @@ import type {
   FileEntryDetail,
   BatchDeleteResult,
   StorageStats,
-  MigrateRequest,
-  MigrateResult,
 } from '../types/file';
 
 /** 上传模式缓存(direct=预签名直传 / proxy=服务端中转) */
@@ -380,12 +378,4 @@ export const copyEntry = (entryId: string, targetPid?: string) => {
  */
 export const getStorageStats = () => {
   return http_base_server.get<StorageStats>('/file/filesystem/stats');
-};
-
-/**
- * 存储迁移(local<->s3 物理内容搬运,切换配置前调用)
- * @param data 迁移请求(源/目标存储类型)
- */
-export const migrateStorage = (data: MigrateRequest) => {
-  return http_base_server.post<MigrateResult>('/file/filesystem/migrate', data);
 };

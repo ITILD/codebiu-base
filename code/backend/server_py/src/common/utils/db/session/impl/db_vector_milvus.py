@@ -4,7 +4,7 @@
 - 纯稠密向量检索(COSINE), BM25/sparse/分词器混合检索逻辑已随基线口径移除
 - pymilvus 延迟导入: 仅在真正连接/建表时才加载 SDK, 未启用 milvus 的部署零开销
 - 过滤语法适配: 调用方按 SQL 风格书写谓词(如 project_id IN ('a','b')),
-  实现内自动转为 Milvus 表达式(project_id in ['a','b']), 与 LanceDB 实现共用同一套调用代码
+  实现内自动转为 Milvus 表达式(project_id in ['a','b']), 调用代码与关系库口径一致
 - create_all 自动发现: 遍历 VectorModel.registry, 仅创建远端尚未存在的集合(幂等)
 
 连接失败: 启动时仅告警跳过(connect_all 内部容错), 其余模块不受影响。
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# SQL 风格 IN 列表: "IN ('a','b')" (LanceDB SQL 语法)
+# SQL 风格 IN 列表: "IN ('a','b')"(调用方书写口径)
 _SQL_IN_RE = re.compile(r"\bIN\s*\(([^)]*)\)", re.IGNORECASE)
 
 # 批量插入: 单 RPC 行数上限(行含 8KB 文本 + 1024 维向量, 500 行约 8MB, 防单请求体过大)
@@ -50,7 +50,7 @@ def _to_milvus_expr(where: str) -> str:
     """SQL 风格谓词转 Milvus 表达式
 
     Milvus 布尔表达式的列表成员判断用方括号: `field in ['a','b']`,
-    调用方(SQLModel/LanceDB 口径)书写的是 `field IN ('a','b')`, 此处统一转换;
+    调用方(SQL 风格口径)书写的是 `field IN ('a','b')`, 此处统一转换;
     == 与比较运算符两者语法一致, 无需处理。
     """
     return _SQL_IN_RE.sub(lambda m: f"in [{m.group(1)}]", where)
@@ -551,7 +551,7 @@ class DBVectorMilvus(DBVectorInterface):
     ) -> list[dict]:
         """向量相似检索(可选谓词预过滤), 返回含 _distance 的原始行
 
-        与 LanceDB 实现的返回约定对齐: 每行为字段 dict + `_distance`
+        返回约定: 每行为字段 dict + `_distance`
         (此处为 COSINE 距离 = 1 - cos_sim, 越小越相关),
         上层 score=1/(1+_distance) 的单调映射口径不变。
         """

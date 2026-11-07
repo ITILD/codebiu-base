@@ -1,6 +1,6 @@
 # server_py — 后端基线库
 
-Python 3.13 + FastAPI + SQLAlchemy 2.0(异步) + SQLModel + PostgreSQL/SQLite + Milvus/LanceDB + Redis/Fakeredis + Celery。
+Python 3.13 + FastAPI + SQLAlchemy 2.0(异步) + SQLModel + PostgreSQL + Milvus + Redis + Celery + S3 兼容对象存储(rustfs/MinIO)。
 
 ## 快速开始
 

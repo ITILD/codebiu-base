@@ -20,6 +20,7 @@
 | 全局 | 本文件 | 需求门禁、跨端边界、密钥、依赖、文档分层、交付自检 |
 | 后端 | [server_py/README_AI.md](code/backend/server_py/README_AI.md) | Python 3.13、七类目录、分层职责、跨模块 service、配置/迁移、权限接入 |
 | 前端 | [vue3/README_AI.md](code/frontend/vue3/README_AI.md) | 垂直模块、自动路由、HTTP 复用、列表/对话框、样式/响应式、菜单权限 |
+| 客户端 | [flutter/README_AI.md](code/frontend/flutter/README_AI.md) | 四层单向依赖（ui→providers→services→models）、provider 状态、SSE 流式、主题与多端壳 |
 | 运维 | [deveops/README.md](deveops/README.md) | 部署、首次初始化、跨版本数据库升级、回滚 |
 
 同一规则只在一层写详细内容；根文件只做摘要 + 链接。

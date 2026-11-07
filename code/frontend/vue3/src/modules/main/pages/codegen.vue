@@ -111,6 +111,15 @@
                   <el-checkbox v-model="includeFrontend">{{ t('cg_tpl_frontend') }}</el-checkbox>
                 </div>
               </div>
+
+              <!-- 覆盖开关(仅插入项目时生效) -->
+              <div class="flex min-w-0 items-start gap-2.5">
+                <el-switch v-model="overwrite" :aria-label="t('cg_overwrite')" />
+                <div class="min-w-0">
+                  <p class="text-sm leading-tight text-note">{{ t('cg_overwrite') }}</p>
+                  <p class="text-xs leading-tight text-note-sub">{{ t('cg_overwrite_desc') }}</p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -143,11 +152,19 @@
                 <el-button
                   type="primary"
                   :icon="Download"
+                  :loading="downloadLoading"
+                  :disabled="!selectedTable || (!includeBackend && !includeFrontend)"
+                  @click="handleDownload"
+                >
+                  {{ t('cg_download') }}
+                </el-button>
+                <el-button
+                  :icon="Upload"
                   :loading="generateLoading"
                   :disabled="!selectedTable || (!includeBackend && !includeFrontend)"
-                  @click="handleGenerate"
+                  @click="handleInsert"
                 >
-                  {{ t('cg_generate') }}
+                  {{ t('cg_insert') }}
                 </el-button>
               </div>
             </div>
@@ -322,6 +339,17 @@
               </ul>
             </div>
           </div>
+
+          <!-- 下载结果 -->
+          <div v-if="downloadResult.length" page-card>
+            <h3 class="mb-2 font-bold text-note">{{ t('cg_download_result') }}</h3>
+            <el-tag type="success" size="small">
+              {{ t('cg_download_done', { n: downloadResult.length }) }}
+            </el-tag>
+            <ul class="m-0 mt-2 list-none space-y-1 break-all font-mono text-xs text-note-sub">
+              <li v-for="path in downloadResult" :key="path">{{ path }}</li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
@@ -374,7 +402,7 @@
     >
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <el-switch v-model="overwrite" :active-text="t('cg_overwrite')" />
+          <el-tag size="small" type="info">{{ previewFiles.length }}</el-tag>
           <span v-ellipsis class="truncate font-mono text-[11px] text-note-sub">
             {{ activePreview?.path }}
           </span>
@@ -443,8 +471,11 @@
 
       <template #footer>
         <el-button @click="previewVisible = false">{{ t('pt_cancel') }}</el-button>
-        <el-button type="primary" :loading="generateLoading" @click="handleGenerate">
-          {{ t('cg_generate') }}
+        <el-button :loading="generateLoading" @click="handleInsert">
+          {{ t('cg_insert') }}
+        </el-button>
+        <el-button type="primary" :loading="downloadLoading" @click="handleDownload">
+          {{ t('cg_download') }}
         </el-button>
       </template>
     </el-dialog>
@@ -454,14 +485,20 @@
 <script setup lang="ts">
 /**
  * 代码生成器
- * 左侧选表 → 读取表结构 → AI/模板建议字段配置 → 预览文件 → 落盘生成
+ * 左侧选表 → 读取表结构 → AI/模板建议字段配置 → 预览文件 → 默认下载到本地目录(可选确认后插入项目)
  * 桌面双栏, 平板/手机抽屉选表 + 字段卡片折叠
  */
-import { ElMessage } from 'element-plus'
-import { CopyDocument, Download, MagicStick, Search, View } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { CopyDocument, Download, MagicStick, Search, Upload, View } from '@element-plus/icons-vue'
 import { i18n } from '@/common/i18n/language'
 import { useResponsive } from '@/common/composables/useResponsive'
 import { copyToClipboard } from '@/common/utils/export'
+import {
+  downloadFilesAsZip,
+  pickSaveDirectory,
+  supportsDirectoryPicker,
+  writeFilesToDirectory,
+} from '@/common/utils/folderDownload'
 import {
   generateCodegen,
   getCodegenTable,
@@ -525,11 +562,14 @@ const includeFrontend = ref(true)
 const columns = ref<CodegenFieldConfig[]>([])
 const warnings = ref<string[]>([])
 const lastResult = ref<CodegenGenerateResult | null>(null)
+/** 最近一次下载到本地的文件相对路径 */
+const downloadResult = ref<string[]>([])
 
 // ################ 操作状态 ################
 const suggestLoading = ref(false)
 const previewLoading = ref(false)
 const generateLoading = ref(false)
+const downloadLoading = ref(false)
 
 // ################ 预览 ################
 const previewVisible = ref(false)
@@ -654,6 +694,7 @@ async function handleSelectTable(table: CodegenTable) {
   columnMeta.value = {}
   warnings.value = []
   lastResult.value = null
+  downloadResult.value = []
   overwrite.value = false
   pickerVisible.value = false
   try {
@@ -745,14 +786,69 @@ async function handlePreview() {
   }
 }
 
-/** 生成: 按覆盖开关落盘, 并展示写入/跳过结果 */
-async function handleGenerate() {
+/**
+ * 下载代码: 默认让用户在浏览器中选择本地目录, 按项目相对路径写入完整文件树
+ * 浏览器不支持目录选择时(如 Firefox/Safari)退化为 ZIP 打包下载
+ */
+async function handleDownload() {
   const payload = buildPayload()
   if (!payload) return
+
+  // 目录选择器必须在用户手势内调用, 因此先选目录再请求生成内容
+  let dirHandle: FileSystemDirectoryHandle | null = null
+  if (supportsDirectoryPicker()) {
+    try {
+      dirHandle = await pickSaveDirectory()
+    } catch (error) {
+      ElMessage.error(errorText(error))
+      return
+    }
+    if (!dirHandle) return // 用户取消
+  }
+
+  try {
+    downloadLoading.value = true
+    const res = await previewCodegen(payload)
+    const files = res.files ?? []
+    if (!files.length) {
+      ElMessage.warning(t('cg_error'))
+      return
+    }
+    warnings.value = res.warnings ?? []
+    lastResult.value = null
+    downloadResult.value = files.map((file) => file.path)
+    if (dirHandle) {
+      const saved = await writeFilesToDirectory(dirHandle, files)
+      ElMessage.success(t('cg_download_done', { n: saved }))
+    } else {
+      downloadFilesAsZip(files, `${payload.module_name}-code.zip`)
+      ElMessage.warning(t('cg_download_zip'))
+    }
+  } catch (error) {
+    ElMessage.error(errorText(error))
+  } finally {
+    downloadLoading.value = false
+  }
+}
+
+/** 插入项目: 二次确认后由后端直接写盘, 展示写入/跳过结果 */
+async function handleInsert() {
+  const payload = buildPayload()
+  if (!payload) return
+  try {
+    await ElMessageBox.confirm(t('cg_insert_warning'), t('cg_insert_title'), {
+      type: 'warning',
+      confirmButtonText: t('cg_insert_confirm'),
+      cancelButtonText: t('pt_cancel'),
+    })
+  } catch {
+    return // 用户取消
+  }
   try {
     generateLoading.value = true
     const res = await generateCodegen({ ...payload, overwrite: overwrite.value })
     lastResult.value = res
+    downloadResult.value = []
     warnings.value = res.warnings ?? []
     previewVisible.value = false
     ElMessage.success(t('cg_written', { n: res.written.length }))

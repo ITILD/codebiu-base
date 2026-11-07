@@ -16,7 +16,8 @@
         items-center
         justify-center
         rounded
-        p-2
+        w-8
+        h-8
         text-note
         hover:bg-note-tint
         note-transition

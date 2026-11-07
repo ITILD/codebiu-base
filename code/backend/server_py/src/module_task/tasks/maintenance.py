@@ -3,7 +3,7 @@
 
 sys_audit_purge: 操作审计日志周期清理 —— 联动 REQ-009 审计模块,
 按动态配置 audit.retention_days 清理过期记录(薄启动器模式:
-读参数 → 调业务模块 service → 双写进度, 与 demo 任务同构)。
+读参数 → 调业务模块 service → 双写进度)。
 """
 import logging
 
@@ -50,10 +50,5 @@ async def _run_purge_audit(task_id: str) -> dict:
 
 @celery_app.task(name="module_task.tasks.maintenance.purge_audit_task")
 def purge_audit_task(task_id: str) -> dict:
-    """celery 引擎入口(worker 专用循环内执行)"""
+    """审计清理任务入口(worker 专用循环内执行)"""
     return run_async(_run_purge_audit(task_id))
-
-
-async def run_purge_audit_local(task_id: str) -> dict:
-    """local 引擎入口(进程内后台协程, 与 celery 共用同一执行主体)"""
-    return await _run_purge_audit(task_id)

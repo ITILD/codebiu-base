@@ -45,7 +45,7 @@ class DbMetaService:
             return []
         rows: list[dict] = []
         async with rel.engine.connect() as conn:
-            # 按方言引用表名/列名(sqlite/postgres 双引号, mysql 反引号)
+            # 按方言引用表名/列名(postgres 双引号, mysql 反引号)
             preparer = conn.dialect.identifier_preparer
             for name, table in SQLModel.metadata.tables.items():
                 comment = table.comment

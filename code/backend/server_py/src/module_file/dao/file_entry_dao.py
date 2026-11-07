@@ -462,8 +462,7 @@ class FileEntryDao:
         获取目录及其所有子项的 ID 列表（深度优先）
         假设表结构有 parent_id 字段
         """
-        # 使用递归 CTE（Common Table Expression）—— PostgreSQL / SQLite 3.8.3+ / MySQL 8.0+
-        # 兼容性说明：SQLite 需启用 recursive_triggers，MySQL 需 8.0+
+        # 使用递归 CTE（Common Table Expression）—— PostgreSQL 8.4+ / MySQL 8.0+
 
         """获取目录子树所有 ID（类型安全 + 高性能）"""
         # 注意: 模型中父级字段为 pid

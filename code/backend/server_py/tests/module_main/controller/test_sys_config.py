@@ -84,11 +84,11 @@ async def test_tasks_update_invalidates_celery_app(client):
     from common.config import tasks as tasks_config
 
     old_app = tasks_config._celery_app
-    resp = await client.put("/sys-configs/tasks", json={"data": {"engine": "local"}})
+    resp = await client.put("/sys-configs/tasks", json={"data": {"scheduler_enabled": False}})
     assert resp.status_code == 204
     assert tasks_config._celery_app is None or tasks_config._celery_app is not old_app
-    # 恢复(避免影响后续用例的引擎快照)
-    await client.put("/sys-configs/tasks", json={"data": {"engine": "local"}})
+    # 恢复(避免影响后续用例的调度开关)
+    await client.put("/sys-configs/tasks", json={"data": {"scheduler_enabled": True}})
 
 
 async def test_update_unknown_group(client):

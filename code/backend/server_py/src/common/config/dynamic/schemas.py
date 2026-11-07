@@ -76,12 +76,8 @@ class SmsSettings(SettingsGroup):
 class FileSystemSettings(SettingsGroup):
     _group = "file_system"
     _name = "文件存储"
-    _description = (
-        "上传限额即时生效; 存储类型与连接信息变更需重启"
-        "(切换存储前建议先调 POST /file/filesystem/sync 同步双副本, 可秒切)"
-    )
+    _description = "S3 兼容对象存储(rustfs/MinIO 等)连接配置; 上传限额即时生效, 连接信息变更需重启"
 
-    storage_type: Literal["local", "s3"] = Field("s3", title="存储类型")
     max_size: float = Field(10, title="上传大小限制(MB)", gt=0)
     allowed_extensions: list[str] = Field(
         default_factory=lambda: [
@@ -112,14 +108,12 @@ class FileSystemSettings(SettingsGroup):
 class DBCacheSettings(SettingsGroup):
     _group = "db_cache"
     _name = "缓存数据库"
-    _description = "Redis/Fakeredis 连接; 变更需重启生效"
+    _description = "Redis 连接; 变更需重启生效"
 
-    type: str = Field("redis", title="类型", description="redis / fakeredis(本地内存)")
     db: int = Field(0, title="逻辑库编号", ge=0)
     host: str = Field("127.0.0.1", title="主机")
     port: int = Field(6379, title="端口", ge=1, le=65535)
     password: str = Field("", title="密码")
-    database: str = Field("temp_source/db/redis.db", title="持久化文件", description="Fakeredis 持久化地址; Redis 模式留作记录")
 
     _secret_fields = frozenset({"password"})
     _restart_required = True
@@ -128,12 +122,9 @@ class DBCacheSettings(SettingsGroup):
 class DBVectorSettings(SettingsGroup):
     _group = "db_vector"
     _name = "向量数据库"
-    _description = "milvus(远程) / lancedb(本地文件); 变更需重启生效, 更换向量库后需重建向量索引"
+    _description = "Milvus 连接; 变更需重启生效, 更换实例后需重建向量索引"
 
-    type: str = Field("milvus", title="类型", description="milvus(远程, 默认) / lancedb(本地文件)")
-    database: str = Field(
-        "default", title="数据库", description="milvus 为库名(默认 default); lancedb 为本地目录路径"
-    )
+    database: str = Field("default", title="数据库", description="milvus 库名(默认 default)")
     uri: str | None = Field(None, title="URI", description="milvus 完整地址(如 http://ip:20005), 配置后忽略 host/port")
     host: str | None = Field(None, title="主机", description="milvus 地址")
     port: int | None = Field(None, title="端口", description="milvus 端口")
@@ -148,16 +139,14 @@ class DBVectorSettings(SettingsGroup):
 class TasksSettings(SettingsGroup):
     _group = "tasks"
     _name = "任务队列"
-    _description = "engine 切换(local=进程内协程/celery=Redis worker)对新建任务即时生效; broker 地址变更需重启 worker"
+    _description = "任务统一经 Celery broker 派发至 app_task.py worker 执行; broker 地址变更需重启 worker 与 API"
 
-    engine: Literal["local", "celery"] = Field("local", title="执行引擎")
-    broker_url: str = Field("memory://", title="Broker 地址", description="celery 引擎的 Redis broker(与缓存库同实例分库)")
-    result_backend: str = Field("cache+memory://", title="结果后端", description="celery 引擎的结果回写地址")
+    broker_url: str = Field("memory://", title="Broker 地址", description="celery 的 Redis broker(与缓存库同实例分库)")
+    result_backend: str = Field("cache+memory://", title="结果后端", description="celery 的结果回写地址")
     scheduler_enabled: bool = Field(
         True,
         title="周期调度开关",
-        description="定时任务总开关: local 引擎启停进程内调度循环(即时生效); "
-                    "celery 引擎控制 beat tick 是否派发(beat 进程需重启读取)",
+        description="定时任务总开关: 控制 beat tick 是否派发(beat 进程需重启读取)",
     )
 
     _secret_fields = frozenset({"broker_url", "result_backend"})  # URL 内嵌密码, 一并打码

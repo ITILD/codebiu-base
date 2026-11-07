@@ -1,8 +1,8 @@
 """统一文件服务依赖注入
 
 新业务模块接入文件服务约定(知识库/头像即按此模式实现, 零自建存储):
-1. 控制器/服务注入 get_file_service(本文件) —— 存储后端(local/s3)由
-   config.dev.yaml file_system.storage_type 决定, 业务代码与前端均无感;
+1. 控制器/服务注入 get_file_service(本文件) —— 存储后端为 S3 兼容对象存储
+   (rustfs/MinIO 等, 连接信息见 系统管理→通用配置页 file_system 组), 业务代码与前端无感;
 2. 首次使用时 ensure_module_root(key, label) 幂等创建模块根目录(虚拟目录树中
    独立成模块大文件夹, source_module=key 标记来源), 再 ensure_folder 建业务子目录;
 3. 小文件走 upload_file/upload_content_bytes(SHA-256去重), 大文件走

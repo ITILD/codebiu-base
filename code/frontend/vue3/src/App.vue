@@ -166,10 +166,18 @@ onUnmounted(() => {
             </keep-alive>
           </RouterView>
         </AppErrorBoundary>
-        <!-- 路由懒加载占位: 覆盖旧页面, 加载完成后自然消失 -->
-        <div v-if="routeLoading" class="absolute inset-0 z-10 bg-note-paper px-4 py-6 md:px-6" aria-busy="true">
-          <RouteSkeleton variant="paragraph" />
-        </div>
+        <!-- 路由懒加载占位: 覆盖旧页面, 加载完成后自然消失
+             与后台页/展示页使用同一内边距, 骨架让位时内容不横向跳一下 -->
+        <Transition name="route-veil">
+          <div
+            v-if="routeLoading"
+            class="absolute inset-0 z-10 bg-note-paper"
+            :class="isAdmin ? 'px-3 py-3 md:px-4 md:py-4' : 'px-4 py-6 md:px-8 md:py-8'"
+            aria-busy="true"
+          >
+            <RouteSkeleton :variant="isAdmin ? 'admin' : 'paragraph'" />
+          </div>
+        </Transition>
       </main>
     </div>
 

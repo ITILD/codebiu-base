@@ -29,24 +29,24 @@ body,
     --el-color-primary-light-9: #eff6f4;
     --el-color-primary-dark-2: #256355;
 
-    /* 全局底色: 冷中性浅灰(去掉黄色纸感, 与纯白卡片形成干净层次) */
-    --el-bg-color: #f4f6f9;
+    /* 全局底色: 极淡冷绿纸面(与纯白卡片拉开一档, 页面更有层次不发灰) */
+    --el-bg-color: #eff3f1;
     --el-bg-color-overlay: #ffffff;
-    --el-bg-color-page: #f4f6f9;
-    --el-fill-color-blank: #f4f6f9;
-    --el-fill-color-light: #eef2f6;
-    --el-fill-color-lighter: #f5f7fa;
+    --el-bg-color-page: #eff3f1;
+    --el-fill-color-blank: #eff3f1;
+    --el-fill-color-light: #e8eeec;
+    --el-fill-color-lighter: #f3f7f5;
 
-    /* 边框: 冷灰细线(比正文弱两档, 只负责分组) */
-    --el-border-color: #dde4ea;
-    --el-border-color-light: #e6ecf1;
-    --el-border-color-lighter: #eef2f6;
+    /* 边框: 冷绿细线(比正文弱两档, 只负责分组) */
+    --el-border-color: #d8e1dd;
+    --el-border-color-light: #e3eae7;
+    --el-border-color-lighter: #edf2ef;
 
-    /* 文字: 墨蓝灰(高对比正文 + 低饱和辅助) */
-    --el-text-color-primary: #1f2933;
-    --el-text-color-regular: #4b5866;
-    --el-text-color-secondary: #6b7785;
-    --el-text-color-placeholder: #9aa6b2;
+    /* 文字: 墨绿灰(高对比正文 + 低饱和辅助) */
+    --el-text-color-primary: #1c292e;
+    --el-text-color-regular: #47565c;
+    --el-text-color-secondary: #66757c;
+    --el-text-color-placeholder: #98a5ab;
 
     /* 品牌色变量(自用, 是 uno.config.ts note-* shortcut 的唯一取值来源)
        写法: 通道三元组(--note-x-rgb)是唯一色值来源, --note-x 由其派生。
@@ -58,24 +58,30 @@ body,
     --note-green: rgb(var(--note-green-rgb));
     --note-green-deep-rgb: 37 99 85;
     --note-green-deep: rgb(var(--note-green-deep-rgb));
-    --note-paper-rgb: 244 246 249;
+    --note-paper-rgb: 239 243 241;
     --note-paper: rgb(var(--note-paper-rgb));
-    --note-soft-rgb: 240 243 247;
+    --note-soft-rgb: 246 249 247;
     --note-soft: rgb(var(--note-soft-rgb));
     --note-card-rgb: 255 255 255;
     --note-card: rgb(var(--note-card-rgb));
-    --note-tint-rgb: 233 243 240;
+    --note-tint-rgb: 229 242 238;
     --note-tint: rgb(var(--note-tint-rgb));
-    --note-border-rgb: 223 230 236;
+    --note-border-rgb: 216 225 221;
     --note-border: rgb(var(--note-border-rgb));
-    --note-border-green-rgb: 165 206 195;
+    --note-border-green-rgb: 168 203 194;
     --note-border-green: rgb(var(--note-border-green-rgb));
-    --note-text-rgb: 31 41 51;
+    --note-text-rgb: 28 41 46;
     --note-text: rgb(var(--note-text-rgb));
-    --note-sub-rgb: 95 109 122;
+    --note-sub-rgb: 95 111 118;
     --note-sub: rgb(var(--note-sub-rgb));
-    --note-accent-rgb: 38 107 92;
+    --note-accent-rgb: 36 103 89;
     --note-accent: rgb(var(--note-accent-rgb));
+    /* 菜单激活底色: 亮暗共用同一语义(侧栏/弹出菜单取用), 避免直接叠 EP 的 light-8 */
+    --note-menu-active: rgb(var(--note-green-rgb) / 10%);
+    --note-menu-hover: rgb(var(--note-green-rgb) / 6.5%);
+    /* 主题开关关闭态: 中性灰绿, 在浅底上有明确可点击感 */
+    --note-switch-off: #b7c8c3;
+    --el-switch-off-color: var(--note-switch-off);
 
     /* 底部安全区高度(刘海屏 home indicator): 与主题无关仅声明一份,
        供 FloatTools 等贴底元素经 getComputedStyle 读取避让 */
@@ -83,32 +89,32 @@ body,
 
     /* 阴影: 冷调纸片影 / 悬浮抬升影
        首段 1px 冷灰光晕环替代实线边框, 比彩色光晕更中性、更"后台" */
-    --note-shadow: 0 0 0 1px rgba(16, 32, 45, 0.05), 0 1px 2px rgba(16, 32, 45, 0.04), 0 8px 22px -14px rgba(16, 32, 45, 0.16);
-    --note-shadow-hover: 0 0 0 1px rgba(16, 32, 45, 0.06), 0 2px 4px rgba(16, 32, 45, 0.05), 0 16px 32px -16px rgba(16, 32, 45, 0.22);
+    --note-shadow: 0 0 0 1px rgba(18, 42, 36, 0.05), 0 1px 2px rgba(18, 42, 36, 0.04), 0 10px 24px -16px rgba(18, 42, 36, 0.18);
+    --note-shadow-hover: 0 0 0 1px rgba(18, 42, 36, 0.06), 0 2px 4px rgba(18, 42, 36, 0.05), 0 18px 34px -18px rgba(18, 42, 36, 0.24);
 
     /* 渐变(Hero/页头大区块): 极淡青白, 仅保留一丝品牌气 */
-    --note-grad-from: #eef6f3;
-    --note-grad-via: #f6faf9;
-    --note-grad-to: #e6f1ee;
+    --note-grad-from: #eaf4f1;
+    --note-grad-via: #f4f9f7;
+    --note-grad-to: #e2efeb;
 
     /* 吸顶毛玻璃底(须配 backdrop-blur) */
-    --note-glass: rgba(255, 255, 255, 0.84);
+    --note-glass: rgba(255, 255, 255, 0.82);
 
     /* 手写体(点缀用, 无外链字体时回落到系统楷体) */
     --note-font-hand: 'LXGW WenKai', 'LXGW WenKai GB', 'Kaiti SC', 'STKaiti', 'KaiTi', cursive;
 
     /* 滚动条 */
-    --note-scrollbar: rgba(46, 124, 107, 0.28);
-    --note-scrollbar-hover: rgba(46, 124, 107, 0.46);
+    --note-scrollbar: rgba(46, 124, 107, 0.30);
+    --note-scrollbar-hover: rgba(46, 124, 107, 0.48);
 
     /* 柔边光晕: 冷灰边 + 克制的品牌辉光 */
-    --note-glow: rgba(46, 124, 107, 0.16);
-    --note-edge-soft: rgba(16, 32, 45, 0.09);
+    --note-glow: rgba(46, 124, 107, 0.15);
+    --note-edge-soft: rgba(18, 42, 36, 0.09);
 
     /* 水墨点缀(笔触/晕染/闲章用, 亮暗两版) */
-    --note-ink: #2a3a44;          /* 浓墨: 笔触分隔线用 */
-    --note-ink-wash: rgba(46, 124, 107, 0.10);  /* 淡墨晕染(青绿) */
-    --note-ink-wash-deep: rgba(37, 99, 85, 0.06);  /* 二道晕染 */
+    --note-ink: #283a40;          /* 浓墨: 笔触分隔线用 */
+    --note-ink-wash: rgba(46, 124, 107, 0.09);  /* 淡墨晕染(青绿) */
+    --note-ink-wash-deep: rgba(37, 99, 85, 0.05);  /* 二道晕染 */
 
     /* 小池 / 枝叶点缀色(首页诗意场景, 亮暗两版; 与品牌青绿同族, 避免冷暖打架) */
     --note-water: #d3e7e4;        /* 水面亮色: 淡青绿 */
@@ -132,87 +138,92 @@ body,
    底色/边框/正文全部中性化, 大面积不再出现墨绿;
    墨绿只保留在: 主色按钮 / 强调文字 / 光晕环 / 辉光阴影 / 滚动条等小面积点缀 */
 html.dark:root {
-    --el-color-primary: #2a8b72;
-    --el-color-primary-rgb: 42, 139, 114;
-    --el-color-primary-light-3: #24765f;
-    --el-color-primary-light-5: #1d5f4d;
-    --el-color-primary-light-7: #164a3c;
-    --el-color-primary-light-8: #123a2f;
-    --el-color-primary-light-9: #0d2a23;
-    --el-color-primary-dark-2: #4fc3a1;
+    --el-color-primary: #38a487;
+    --el-color-primary-rgb: 56, 164, 135;
+    --el-color-primary-light-3: #30917a;
+    --el-color-primary-light-5: #287b67;
+    --el-color-primary-light-7: #206553;
+    --el-color-primary-light-8: #1a5143;
+    --el-color-primary-light-9: #15332c;
+    --el-color-primary-dark-2: #6fd3b6;
 
-    /* 底色阶梯: 页面最深 → 卡片居中 → 弹层最亮(冷灰蓝) */
-    --el-bg-color: #131920;
-    --el-bg-color-page: #0c1015;
-    --el-bg-color-overlay: #19212a;
-    --el-fill-color-blank: #131920;
-    --el-fill-color-light: #1b232c;
-    --el-fill-color-lighter: #161d25;
+    /* 底色阶梯: 页面最深 → 卡片居中 → 弹层最亮(冷青石墨, 层次拉开一点更透气) */
+    --el-bg-color: #1a232c;
+    --el-bg-color-page: #0d1319;
+    --el-bg-color-overlay: #202a34;
+    --el-fill-color-blank: #1a232c;
+    --el-fill-color-light: #202a34;
+    --el-fill-color-lighter: #161e26;
 
-    /* 边框: 冷石墨灰 */
-    --el-border-color: #2a3540;
-    --el-border-color-light: #232d37;
-    --el-border-color-lighter: #1d252d;
+    /* 边框: 冷石墨灰(比卡片亮一档, 暗色下卡片边界可辨) */
+    --el-border-color: #2e3b47;
+    --el-border-color-light: #26323d;
+    --el-border-color-lighter: #202b35;
 
     /* 文字: 中性灰白, 不带绿 */
-    --el-text-color-primary: #e8edf1;
-    --el-text-color-regular: #a4b0bc;
-    --el-text-color-secondary: #8b98a5;
-    --el-text-color-placeholder: #6f7c89;
+    --el-text-color-primary: #e9eff4;
+    --el-text-color-regular: #aab7c4;
+    --el-text-color-secondary: #8b99a6;
+    --el-text-color-placeholder: #6e7c8a;
 
     /* 品牌色: 与亮色同构, 通道三元组为唯一色值来源(派生规则见 :root 注释) */
-    --note-green-rgb: 42 139 114;
+    --note-green-rgb: 56 164 135;
     --note-green: rgb(var(--note-green-rgb));
-    --note-green-deep-rgb: 79 195 161;
+    --note-green-deep-rgb: 111 211 182;
     --note-green-deep: rgb(var(--note-green-deep-rgb));
-    --note-paper-rgb: 12 16 21;
+    --note-paper-rgb: 13 19 25;
     --note-paper: rgb(var(--note-paper-rgb));
-    --note-soft-rgb: 18 24 30;
+    --note-soft-rgb: 18 26 33;
     --note-soft: rgb(var(--note-soft-rgb));
-    --note-card-rgb: 21 27 33;
+    --note-card-rgb: 26 35 44;
     --note-card: rgb(var(--note-card-rgb));
-    --note-tint-rgb: 24 39 35;
+    --note-tint-rgb: 27 46 40;
     --note-tint: rgb(var(--note-tint-rgb));
-    --note-border-rgb: 38 49 58;
+    --note-border-rgb: 46 59 71;
     --note-border: rgb(var(--note-border-rgb));
-    --note-border-green-rgb: 56 96 83;
+    --note-border-green-rgb: 60 103 90;
     --note-border-green: rgb(var(--note-border-green-rgb));
-    --note-text-rgb: 232 237 241;
+    --note-text-rgb: 233 239 244;
     --note-text: rgb(var(--note-text-rgb));
-    --note-sub-rgb: 151 165 177;
+    --note-sub-rgb: 154 169 182;
     --note-sub: rgb(var(--note-sub-rgb));
-    --note-accent-rgb: 102 211 183;
+    --note-accent-rgb: 110 214 184;
     --note-accent: rgb(var(--note-accent-rgb));
+    /* 菜单激活底色: 暗色下略提亮, 保证胶囊在深底上可辨 */
+    --note-menu-active: rgb(var(--note-green-rgb) / 13%);
+    --note-menu-hover: rgb(var(--note-green-rgb) / 8%);
+    --note-switch-off: #3c4a57;
+    --el-switch-off-color: var(--note-switch-off);
 
     /* 暗色阴影: 深色影定层次, 末段叠一层极淡品牌辉光作为点缀 */
     --note-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.04),
-        0 2px 8px rgba(0, 0, 0, 0.45),
-        0 1px 20px -8px rgba(42, 139, 114, 0.10);
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 2px 10px rgba(0, 0, 0, 0.42),
+        0 1px 22px -8px rgba(56, 164, 135, 0.12);
     --note-shadow-hover:
-        0 0 0 1px rgba(255, 255, 255, 0.06),
-        0 8px 24px rgba(0, 0, 0, 0.55),
-        0 2px 28px -10px rgba(42, 139, 114, 0.16);
+        0 0 0 1px rgba(255, 255, 255, 0.07),
+        0 10px 28px rgba(0, 0, 0, 0.5),
+        0 2px 30px -10px rgba(56, 164, 135, 0.18);
 
-    /* 渐变: 中性深色(冷灰蓝三阶, 去掉末端的墨绿斜带 —— 大卡片上那抹绿会破坏中性基调) */
-    --note-grad-from: #1a222b;
-    --note-grad-via: #121a22;
-    --note-grad-to: #0f161d;
+    /* 渐变: 中性深青灰(冷调三阶, 顶端略提亮增加体积感) */
+    --note-grad-from: #1d2731;
+    --note-grad-via: #141c24;
+    --note-grad-to: #10171e;
 
-    --note-glass: rgba(13, 17, 22, 0.82);
+    --note-glass: rgba(15, 21, 27, 0.82);
 
     /* 滚动条: 品牌小点缀 */
-    --note-scrollbar: rgba(79, 195, 161, 0.26);
-    --note-scrollbar-hover: rgba(79, 195, 161, 0.44);
+    --note-scrollbar: rgba(110, 214, 184, 0.28);
+    --note-scrollbar-hover: rgba(110, 214, 184, 0.46);
 
     /* 柔边光晕: 冷白边 + 克制品牌辉光 */
-    --note-glow: rgba(79, 195, 161, 0.16);
-    --note-edge-soft: rgba(255, 255, 255, 0.07);
+    --note-glow: rgba(110, 214, 184, 0.16);
+    --note-edge-soft: rgba(255, 255, 255, 0.075);
 
     /* 水墨点缀(暗色: 笔触中性化, 晕染收敛防过曝) */
-    --note-ink: #d3dce2;
-    --note-ink-wash: rgba(79, 195, 161, 0.08);
-    --note-ink-wash-deep: rgba(42, 139, 114, 0.05);
+    --note-ink: #d6e0e7;
+    --note-ink-wash: rgba(110, 214, 184, 0.08);
+    --note-ink-wash-deep: rgba(56, 164, 135, 0.05);
 
     /* 小池 / 枝叶点缀色(首页装饰内容, 非底色; 暗景提亮花瓣, 水面加浓避免黑作一片) */
     --note-water: #2f5a58;        /* 暗色水面: 暗青, 可感知水意 */
@@ -225,12 +236,13 @@ html.dark:root {
 
     /* 暗底需略强颗粒方可"摸"到质感(中性噪声, 整体收敛) */
     --note-body-grain:
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.02 0.4' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E"),
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.02 0.4' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.028'/%3E%3C/svg%3E"),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.018'/%3E%3C/svg%3E");
 }
 
 /* 纸张底色 + 纸纤维/细颗粒双层纹理(亮暗由 --note-body-grain 切换; 固定不随滚动) */
 body {
+    color: var(--note-text);
     background-color: var(--note-paper);
     background-image: var(--note-body-grain);
     background-attachment: fixed;
@@ -319,17 +331,22 @@ html.dark .paper-sheet::after {
 
 /* ---- Element Plus 组件笔记风微调 ---- */
 
-/* 侧边菜单: 激活项呈淡绿胶囊 */
+/* 侧边菜单: 激活项呈淡绿胶囊(语义令牌与侧栏一致, 弹层菜单同样适用) */
 .el-menu-item.is-active {
-    background-color: var(--el-color-primary-light-8);
+    background-color: var(--note-menu-active);
     border-radius: 6px;
-    color: var(--el-color-primary-dark-2);
+    color: var(--note-accent);
 }
 
-/* 侧边菜单: 悬浮淡绿 */
+/* 侧边菜单: 悬浮淡绿(带过渡, 悬停不跳色) */
+.el-menu-item,
+.el-sub-menu__title {
+    transition: background-color 0.18s ease-out, color 0.18s ease-out;
+}
+
 .el-menu-item:hover,
 .el-sub-menu__title:hover {
-    background-color: var(--el-color-primary-light-9);
+    background-color: var(--note-menu-hover);
     border-radius: 6px;
 }
 
@@ -345,11 +362,12 @@ html.dark .paper-sheet::after {
     --el-table-border-color: var(--el-border-color-lighter);
     --el-table-header-bg-color: var(--note-soft);
     --el-table-header-text-color: var(--note-text);
-    --el-table-tr-bg-color: var(--el-bg-color);
-    --el-table-bg-color: var(--el-bg-color);
-    --el-table-row-hover-bg-color: var(--el-color-primary-light-9);
-    --el-table-expanded-cell-bg-color: var(--el-bg-color);
-    --el-table-current-row-bg-color: var(--el-color-primary-light-9);
+    /* 表体用卡片纸色: 与页面底纸拉开一档, 表格像浮在页面上的白纸 */
+    --el-table-tr-bg-color: var(--note-card);
+    --el-table-bg-color: var(--note-card);
+    --el-table-row-hover-bg-color: var(--note-menu-hover);
+    --el-table-expanded-cell-bg-color: var(--note-card);
+    --el-table-current-row-bg-color: var(--note-menu-active);
     border-radius: 10px;
     overflow: hidden;
     /* 外圈光晕纸影替代生硬外框 */
@@ -458,6 +476,43 @@ html.dark .paper-sheet::after {
 
 .el-select__wrapper:not(.is-focused):hover {
     box-shadow: 0 0 0 1px var(--note-border-green) inset;
+}
+
+/* 暗色下拉底色比卡片再亮一档, 与输入框保持同一视觉高度; 亮色保持纯白 */
+html.dark .el-select__wrapper {
+    background-color: var(--el-bg-color-overlay);
+}
+
+/* 主题开关关闭态: EP 默认拿边框色当关闭色, 浅底上几乎看不见, 这里单独给一档中性灰绿 */
+.el-switch:not(.is-checked) .el-switch__core {
+    background-color: var(--note-switch-off);
+    border-color: var(--note-switch-off);
+}
+
+/* ---- 全局 loading 遮罩: 毛玻璃淡入, 替代纯白/纯黑硬闪 ---- */
+.el-loading-mask {
+    background-color: rgb(var(--note-card-rgb) / 0.55);
+    backdrop-filter: blur(2px);
+    animation: note-fade-in 0.14s ease-out both;
+}
+
+html.dark .el-loading-mask {
+    background-color: rgb(var(--note-paper-rgb) / 0.55);
+}
+
+@keyframes note-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* 加载中隐藏表格空态文案("暂无数据"), 数据到达后一次出现, 不再先闪空再跳数据 */
+.el-loading-parent--relative:has(.el-loading-mask) .el-table__empty-text,
+.el-loading-parent--relative:has(.el-loading-mask) .el-empty__description {
+    opacity: 0;
 }
 
 /* ---- 标签: 胶囊形, 淡底色差即可辨识, 去掉描边 ---- */
@@ -1082,7 +1137,53 @@ a:focus-visible,
 }
 
 main.route-enter {
-    animation: note-route-in 0.24s ease-out both;
+    animation: note-route-in 0.18s ease-out both;
+}
+
+/* ---- 路由骨架遮罩: 淡入淡出, 避免遮罩出现/消失时整块闪白 ---- */
+.route-veil-enter-active,
+.route-veil-leave-active {
+    transition: opacity 0.18s ease-out;
+}
+
+.route-veil-enter-from,
+.route-veil-leave-to {
+    opacity: 0;
+}
+
+/* 遮罩退场时不再拦截点击, 页面可以立即交互 */
+.route-veil-leave-active {
+    pointer-events: none;
+}
+
+/* ---- 主题切换: 支持 View Transitions 的浏览器从开关位置做圆形揭幕,
+   不支持时由脚本直接切换(无动画), 避免全站强制过渡造成卡顿 ---- */
+::view-transition-group(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+    animation: note-theme-reveal 0.42s cubic-bezier(0.22, 0.8, 0.28, 1);
+}
+
+@keyframes note-theme-reveal {
+    from {
+        clip-path: circle(0 at var(--note-reveal-x, 50%) var(--note-reveal-y, 50%));
+    }
+    to {
+        clip-path: circle(var(--note-reveal-r, 120vmax) at var(--note-reveal-x, 50%) var(--note-reveal-y, 50%));
+    }
+}
+
+/* ---- 数字等宽: 表格/分页/统计数值刷新时不抖动 ---- */
+.el-table .cell,
+.el-pagination,
+.el-statistic__number,
+.tabular {
+    font-variant-numeric: tabular-nums;
 }
 
 /* ============================================

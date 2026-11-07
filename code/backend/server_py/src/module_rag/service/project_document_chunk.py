@@ -209,7 +209,7 @@ class ProjectDocumentChunkService:
         以目标 embedding 模型重算向量库中所有文档 chunk 向量
         (功能服务层实现: Celery 任务与 controller 直跑接口共用, 保证"零逻辑重复")
 
-        实现要点(LanceDB):
+        实现要点:
         - 按文档逐个读出元数据行并重算向量(收集阶段原表不动, 中途失败无副作用)
         - 全部收集完成后重建向量表并写回(维度变更无需特殊分支, 天然支持换模型)
         - 原 chunk id 保留, 分块与文档的引用关系不变

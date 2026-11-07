@@ -14,10 +14,12 @@
 - 禁止用真实 admin 账户执行写操作类用例(自助资料/头像等会覆盖持久数据)
 """
 
+import hashlib
 import logging
 import sys
 import time
 import uuid
+from pathlib import Path
 
 from httpx import ASGITransport, AsyncClient
 import pytest_asyncio
@@ -55,38 +57,116 @@ async def _app_lifespan():
     logger.info("app lifespan closed")
 
 
+class _MemoryStorage:
+    """内存版存储(满足 StorageInterface 协议; 非 S3 子类 → 上传走 proxy 中转路径)
+
+    测试专用: 数据全程驻留内存, 会话结束自动丢弃, 零外部依赖;
+    分片合并与服务端保存时以重算的真实 SHA-256 归位(与历史 local 实现同语义)。
+    """
+
+    def __init__(self):
+        self._objects: dict[str, bytes] = {}
+        self._uploads: dict[str, dict[int, bytes]] = {}
+        self._seq = 0
+
+    async def save(self, key, data) -> str:
+        if isinstance(data, bytes):
+            self._objects[key] = data
+        elif hasattr(data, "read"):  # io.IOBase
+            self._objects[key] = data.read()
+        elif hasattr(data, "__aiter__"):  # AsyncIterator
+            chunks = [c async for c in data]
+            self._objects[key] = b"".join(chunks)
+        else:
+            raise TypeError("Unsupported data type for saving")
+        return key
+
+    async def load(self, key: str) -> bytes:
+        return self._objects[key]
+
+    async def iter_chunks(self, key: str, chunk_size: int = 8192):
+        data = self._objects[key]
+        for i in range(0, len(data), chunk_size):
+            yield data[i : i + chunk_size]
+
+    async def delete(self, key: str) -> bool:
+        return self._objects.pop(key, None) is not None
+
+    async def exists(self, key: str) -> bool:
+        return key in self._objects
+
+    async def size(self, key: str) -> int:
+        return len(self._objects[key])
+
+    async def list(self, prefix: str = "") -> list[str]:
+        return sorted(k for k in self._objects if k.startswith(prefix))
+
+    async def create_multipart(
+        self, key: str, content_type: str = "application/octet-stream"
+    ) -> str:
+        self._seq += 1
+        uid = f"mem-upload-{self._seq}"
+        self._uploads[uid] = {}
+        return uid
+
+    async def upload_part(
+        self, key: str, upload_id: str, part_number: int, data: bytes
+    ) -> dict:
+        self._uploads[upload_id][part_number] = data
+        return {"part_number": part_number, "etag": str(len(data)), "size": len(data)}
+
+    async def list_parts(self, key: str, upload_id: str) -> list[dict]:
+        return [
+            {"part_number": n, "etag": str(len(d)), "size": len(d)}
+            for n, d in sorted(self._uploads.get(upload_id, {}).items())
+        ]
+
+    async def complete_multipart(
+        self,
+        key: str,
+        upload_id: str,
+        parts: list[dict],
+        expected_hash: str | None = None,
+    ) -> tuple[str, int, str]:
+        session = self._uploads.pop(upload_id)
+        merged = b"".join(
+            session[int(p["part_number"])] for p in sorted(parts, key=lambda x: int(x["part_number"]))
+        )
+        real_hash = hashlib.sha256(merged).hexdigest()
+        final_key = f"{real_hash}{Path(key).suffix}"
+        self._objects[final_key] = merged
+        return real_hash, len(merged), final_key
+
+    async def abort_multipart(self, key: str, upload_id: str) -> None:
+        self._uploads.pop(upload_id, None)
+
+    async def presign_put(self, key, upload_id=None, part_number=None, expires=3600):
+        return None
+
+    async def presign_get(self, key, expires=3600, download_filename=None):
+        return None
+
+
 @pytest_asyncio.fixture(scope="session", autouse=True)
-async def local_storage_override(tmp_path_factory):
-    """session 级: 全局存储替换为临时本地目录(local 实现),保证全部模块测试零外部依赖
+async def memory_storage_override():
+    """session 级: 全局存储替换为内存实现, 保证全部模块测试零外部依赖
 
     凡经统一文件服务(module_file)读写的测试(文件管理/知识库文档/用户头像等)都不依赖
-    config.dev.yaml 的 storage_type(local/s3)与外部对象存储; 测试完清理临时目录。
-    注: 直传(direct)模式测试用 FakeS3Storage 经依赖覆盖自行注入,不受本覆盖影响。
+    外部对象存储(rustfs 等); 注: 直传(direct)模式测试用 FakeS3Storage 经依赖覆盖自行注入,
+    不受本覆盖影响。
     """
-    import shutil
-
     import module_file.config.filesystem as fs_config
     from module_file.utils.multi_storage.do.storage_config import (
         StorageConfigFactory,
     )
-    from module_file.utils.multi_storage.storage_factory import StorageFactory
 
-    base_dir = tmp_path_factory.mktemp("file_storage")
     cfg = StorageConfigFactory.create(
-        "local", {"max_size": 10, "allowed_extensions": []}
+        "s3", {"max_size": 10, "allowed_extensions": [], "bucket": "test-bucket"}
     )
-    cfg.base_dir = str(base_dir)
-    local_storage = StorageFactory.create(cfg)
-
-    original_storage = fs_config.storage
-    original_config = fs_config.storage_config
-    fs_config.storage = local_storage
+    fs_config.storage = _MemoryStorage()
     fs_config.storage_config = cfg
     # service/filesystem.py 经 fs_config 模块属性读取 storage/storage_config(无独立引用)
     yield
-    fs_config.storage = original_storage
-    fs_config.storage_config = original_config
-    shutil.rmtree(base_dir, ignore_errors=True)
 
 
 def _make_client(headers: dict | None = None) -> AsyncClient:
@@ -99,7 +179,7 @@ def _make_client(headers: dict | None = None) -> AsyncClient:
 
 
 @pytest_asyncio.fixture(scope="session")
-async def test_admin(_app_lifespan, local_storage_override) -> dict:
+async def test_admin(_app_lifespan, memory_storage_override) -> dict:
     """session 级专用测试管理员: 注册新账号并绑定全局 admin 角色, 测完清理
 
     历史教训: 早期 client 直接复用真实 admin 账户, 头像/自助资料用例会覆盖

@@ -20,8 +20,6 @@ from module_file.do.filesystem import (
     MultipartCompleteRequest,
     EntryCreateRequest,
     UploadModeResponse,
-    MigrateRequest,
-    SyncRequest,
     BatchDeleteRequest,
     BatchDeleteResult,
     DownloadPermsRequest,
@@ -683,49 +681,6 @@ async def get_stats(
     :return: 统计信息(StorageStats)
     """
     return (await service.get_stats()).model_dump()
-
-
-@router.post(
-    "/migrate",
-    summary="存储迁移(local<->s3 物理内容搬运,切换配置前调用)",
-    response_model=dict,
-    status_code=status.HTTP_200_OK,
-)
-async def migrate_storage(
-    req: MigrateRequest,
-    current_user_id: str = Depends(require_permission("main", "file", "migrate")),
-    service: FileService = Depends(get_managed_file_service),
-) -> dict:
-    """
-    把源存储的全部物理内容搬运到目标存储(逻辑条目不变,支持断点续迁)
-    典型流程: 1.调用本接口迁移 2.修改 config storage_type 3.重启服务
-    :param req: 迁移请求(from_type/to_type)
-    :param service: 文件服务依赖注入
-    :return: 迁移结果 {total, migrated, skipped, failed}
-    """
-    return await service.migrate_storage(req)
-
-
-@router.post(
-    "/sync",
-    summary="存储同步(local<->s3 双向镜像补齐,不切换主存储)",
-    response_model=dict,
-    status_code=status.HTTP_200_OK,
-)
-async def sync_storage(
-    req: SyncRequest,
-    current_user_id: str = Depends(require_permission("main", "file", "migrate")),
-    service: FileService = Depends(get_managed_file_service),
-) -> dict:
-    """
-    把缺失的物理内容在 local/s3 间互相镜像补齐(幂等,支持中断续同; 不改变条目与主存储)
-    典型流程(如主存储 s3 想下线): 1.sync direction=to_local 补齐本地副本
-    2.修改配置 storage_type=local 3.重启即完成切换
-    :param req: 同步请求(direction/to_local|to_s3|both, dry_run 只统计不复制)
-    :param service: 文件服务依赖注入
-    :return: 同步结果 {direction, dry_run, total, details: {"local->s3"/"s3->local": {copied, skipped, failed}}}
-    """
-    return await service.sync_storage(req)
 
 
 # 将路由注册到模块应用

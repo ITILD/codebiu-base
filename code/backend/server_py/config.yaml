@@ -1,6 +1,6 @@
 # ############################# 配置分层(基线 + 覆盖文件 + 环境变量) #############################
-#   1. config.yaml       基线层(本文件, 入 git): 引导配置 + 全部业务组的零依赖默认值,
-#                        开箱即用 —— 没有覆盖文件也能直接启动(SQLite+Fakeredis+LanceDB)
+#   1. config.yaml       基线层(本文件, 入 git): 引导配置 + 全部业务组默认值(生产栈: PostgreSQL/
+#                        Redis/Milvus/S3, 本地占位地址), 真实连接在覆盖文件中覆盖
 #   2. config.**.yaml    覆盖层(gitignored): 真实数据库连接/模型种子/密钥, 只写需要覆盖的键,
 #                        嵌套 dict 深合并; 具体加载哪份由下方 config.local_file 决定
 #   3. CODEBIU_* 环境变量 键级覆盖最高优先级(容器/K8s 密钥注入, 嵌套键用双下划线):
@@ -62,7 +62,7 @@ dir:
     log:        log           # 日志
     sys_out:    sys_out       # 系统输出(导出文件等)
     temp:       temp          # 临时文件
-    db:         db            # 数据库文件(SQLite/缓存/LanceDB)
+    db:         db            # 预留目录(历史本地库文件, 生产栈不再使用)
     test:       test          # 测试资源
     model:      model         # 模型文件
     lib_third:  lib_third     # 第三方库文件
@@ -70,11 +70,15 @@ dir:
 
 # ############################# 关系库(引导级, 动态配置中心依赖它) #############################
 db_rel:
-  type: sqlite                # 零依赖默认; config.dev.yaml 覆盖为 postgres 等
-  database: temp_source\db\data.db
+  type: postgres              # 仅支持 postgres; 真实连接在 config.dev.yaml 覆盖
+  database: codebiu_base      # 库需已创建(自检只建表不建库)
+  host: 127.0.0.1
+  port: 5432
+  user: postgres
+  password: ""
 
-# ############################# 业务组零依赖默认值(首启种子, 之后以通用配置页为准) #############################
-# 只想快速启动 = 不用动这些; 换库/配模型 → 在 config.dev.yaml 覆盖同名节即可
+# ############################# 业务组默认值(首启种子, 之后以通用配置页为准) #############################
+# 换实例/改地址 → 在 config.dev.yaml 覆盖同名键即可
 
 # 默认管理员(通用引导账户, admin 组首启种子; 忘记密码时 reset_password 改 true 重启恢复)
 admin:
@@ -84,37 +88,35 @@ admin:
   email: admin@codebiu.local
   reset_password: false
 
-# 缓存库: fakeredis=零依赖本地(持久化到 db 目录); 换 Redis 在 config.dev.yaml 覆盖
+# 缓存库: Redis; 真实连接在 config.dev.yaml 覆盖
 db_cache:
-  type: fakeredis
   db: 0
-  database: temp_source\db\redis.db
+  host: 127.0.0.1
+  port: 6379
+  password: ""
 
-# 向量库: milvus=远程向量库(默认, 更换后需重建向量索引); lancedb=零依赖本地文件
+# 向量库: Milvus(远程); 更换实例后需重建向量索引
 db_vector:
-  type: milvus
   database: default
   host: http://127.0.0.1
   port: 19530
   user: root
   password: ""
 
-# 任务队列: local=进程内协程零依赖; celery 需 Redis(在 config.dev.yaml 配 broker_url)
-tasks:
-  engine: local
+# 任务队列: 统一经 Celery Redis broker 派发, 由 python src/app_task.py worker 消费
+# (broker 连接信息在 config.dev.yaml 或 系统管理→通用配置页 配置; 未配置时默认 memory://)
+tasks: {}
 
-# 文件存储: local=本地 upload 目录(仿 S3 接口); s3=S3 兼容对象存储(rustfs/MinIO/OSS)
+# 文件存储: S3 兼容对象存储(rustfs/MinIO/OSS)
 # 桶名等连接信息为动态配置(系统管理→通用配置页), 服务启动时桶不存在会自动创建;
-# 两种类型对前端完全透明: 上传走 upload-mode 探测(s3 默认预签名直传, local 走中转),
-# 下载走统一接口(s3 302 预签名直链, local 流式代理); 切换存储先 sync 同步双副本
+# 上传走 upload-mode 探测(s3 预签名直传), 下载走统一接口(302 预签名直链)
 file_system:
-  storage_type: s3              # 默认 s3; 无对象存储时改 local 即可(接口不变)
-  max_size: 10                  # 上传大小限制(MB)
-  # ---- s3 模式连接信息(rustfs 等 S3 兼容存储, 在配置页或 config.dev.yaml 填) ----
+  max_size: 10                # 上传大小限制(MB)
+  # ---- 连接信息(在配置页或 config.dev.yaml 填) ----
   # endpoint_url: http://127.0.0.1:9000
   # access_key: ""
   # secret_key: ""
-  # bucket: codebiu-base        # 桶名需符合 S3 规范(小写字母/数字/连字符/点, 无下划线)
+  # bucket: codebiu-base      # 桶名需符合 S3 规范(小写字母/数字/连字符/点, 无下划线)
   # region: us-east-1
   # secure: false
 

@@ -2,8 +2,8 @@
 任务队列服务层
 
 职责:
-    - 任务创建: 校验类型注册表 → 落库(pending) → 按引擎派发(local 后台协程 / celery 投递 broker)
-    - 状态检测: 数据库为主, celery 引擎下同时读取结果后端(AsyncResult)做对照/校正
+    - 任务创建: 校验类型注册表 → 落库(pending) → 投递 Redis broker(由 app_task.py worker 消费)
+    - 状态检测: 数据库为主, 同时读取结果后端(AsyncResult)做对照/校正
     - 生命周期管理: 取消(revoke)/重试(重新派发)/删除
 """
 from datetime import datetime, timezone
@@ -147,7 +147,7 @@ class TaskQueueService:
 
     async def create(self, data: TaskQueueCreate, user_id: str) -> TaskQueueResponse:
         """
-        创建任务并按引擎派发(local=进程内后台协程 / celery=投递 broker)
+        创建任务并投递 broker(由 app_task.py worker 异步执行)
         :param data: 任务数据(类型需在注册表内)
         :param user_id: 创建者用户ID
         :raises BusinessError: 类型未注册 / 派发不可用
@@ -169,7 +169,7 @@ class TaskQueueService:
         )
         await self.dao.add(task)
 
-        # 双引擎统一派发(仅传任务ID, 参数由执行侧从库中读取)
+        # 统一派发(仅传任务ID, 参数由执行侧从库中读取)
         try:
             task.celery_task_id = await dispatch_task(task, task_def)
             await self.dao.update(task)
@@ -180,8 +180,7 @@ class TaskQueueService:
             task.finished_at = datetime.now(timezone.utc)
             await self.dao.update(task)
             raise BusinessError(
-                f"任务派发失败, 请检查任务配置"
-                f"(celery 引擎需检查 Redis 与 worker): {exc}"
+                f"任务派发失败, 请检查任务配置(Redis broker 与 worker): {exc}"
             ) from exc
         return _to_response(task)
 

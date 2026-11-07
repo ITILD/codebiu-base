@@ -164,7 +164,7 @@ class TestScanDispatch:
             # 下次触发已推进到未来(*/5 语义: 未来 5 分钟内)
             assert refreshed.next_fire_at is not None
             assert refreshed.next_fire_at > datetime.now(timezone.utc) - timedelta(seconds=1)
-            # 任务记录真实生成(local 引擎进程内执行)
+            # 任务记录真实生成(memory broker 进程内派发)
             task = await TaskQueueDao().get(refreshed.last_task_id)
             assert task is not None
             assert task.task_type == "sys_audit_purge"
@@ -347,18 +347,3 @@ class TestScheduleApi:
     async def test_normal_user_forbidden(self, user_client):
         resp = await user_client.get("/task/schedules/list")
         assert resp.status_code == 403
-
-
-# ################ local 调度循环冒烟(启动即停, 验证可运行) ################
-class TestSchedulerLoop:
-    async def test_start_and_stop(self):
-        from module_task.tasks import scheduler as sched
-
-        sched.start_scheduler()
-        assert sched._loop_task is not None and not sched._loop_task.done()
-        await asyncio.sleep(0.05)  # 让循环跑过首轮休眠
-        await sched.stop_scheduler()
-        assert sched._loop_task is None or sched._loop_task.done()
-
-        # 唤醒未启动循环时静默(不抛异常)
-        sched.wake_scheduler()

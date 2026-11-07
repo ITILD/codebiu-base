@@ -620,34 +620,6 @@ async def delete_project_document(
 
 
 @router.post(
-    "/{document_id}/reparse",
-    summary="重新解析文档",
-    response_model=bool,
-)
-async def reparse_project_document(
-    document_id: str,
-    current_user_id: str = Depends(get_current_user_id),
-    service: ProjectDocumentService = Depends(get_project_document_service),
-) -> bool:
-    """
-    重新解析文档(同步直跑版, 仅调试用: 阻塞至解析完成才返回)
-    前端正常入口请走 /{document_id}/reparse-task(入队即返回"排队解析", 轮询进度)
-    :param document_id: 文档ID
-    :param current_user_id: 当前登录用户ID(由 token 自动解析)
-    :param service: 文档服务依赖注入
-    :return: 是否成功
-    """
-    # 权限校验: 通过文档解析所属项目
-    doc_info = await service.get_document(document_id)
-    if not doc_info:
-        raise NotFoundError("文档不存在")
-    await enforce_project_permission(
-        current_user_id, doc_info.project_id, "doc", "update"
-    )
-    # return await service.reparse_document(document_id, current_user_id)
-    return await service.parse_document(document_id, current_user_id)
-
-@router.post(
     "/{document_id}/reparse-task",
     summary="重新解析文档加入任务队列",
 )

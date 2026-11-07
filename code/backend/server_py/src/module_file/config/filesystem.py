@@ -9,9 +9,7 @@ from module_file.utils.multi_storage.do.storage_config import (
     StorageConfigFactory,
     StorageConfig,
 )
-from module_file.utils.multi_storage.do.storage_config import StorageType
 from common.config.lifespan import register_init_hook
-from common.config.path import DIR_UPLOAD
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +26,7 @@ async def init_storage_config() -> None:
     from common.config.dynamic.schemas import FileSystemSettings
 
     fs = await get_settings(FileSystemSettings)
-    cfg = StorageConfigFactory.create(str(fs.storage_type), fs.model_dump())
-    # local 未配置目录时回退到全局上传目录
-    if str(fs.storage_type) == StorageType.LOCAL and not getattr(cfg, "base_dir", None):
-        cfg.base_dir = str(DIR_UPLOAD)
-    storage_config = cfg
+    storage_config = StorageConfigFactory.create("s3", fs.model_dump())
 
 
 @register_init_hook

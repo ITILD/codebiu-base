@@ -145,7 +145,7 @@ uniform vec3 u_lotus;       // 荷瓣(--note-lotus)
 uniform vec3 u_core;        // 花蕊金(--note-lotus-core)
 uniform vec3 u_line;        // 水纹线(--note-water-line)
 uniform float u_ink_k;      // 主题墨浓因子: 亮纸 1.0(浓墨提神), 暗纸 ~0.5(夜荷剪影, 防亮墨大面积成灰盘)
-uniform float u_wash_k;     // 水意浓度因子: 亮纸 1.0(留白), 暗纸 ~2.2(避免池塘黑作一片)
+uniform float u_wash_k;     // 水意浓度因子: 亮纸 ~1.9(留白但可见水体), 暗纸 ~3.2(避免池塘黑作一片)
 uniform vec3 u_rip[8];      // 涟漪: xy=落点, z=触发时刻(与 JS RIPPLE_N 一致)
 
 const vec2 RES = vec2(${RES_X}, ${RES_Y});
@@ -446,10 +446,11 @@ function cssRGB(name: string, fallbackRgb: [number, number, number]): [number, n
 function setupGl(reducedMotion: boolean) {
   const canvas = glCanvas.value
   if (!canvas) return
-  // alpha 透明(留白处露出页面纸底)。混合结果已带 alpha(SRC_ALPHA 混合到透明底),
-  // 必须按预乘 alpha 交给浏览器合成; 若声明 premultipliedAlpha: false, 浏览器会再乘一次
-  // alpha, 水面/荷花透明度被二次衰减, 画面整体发灰、花几乎看不见
-  const gl = canvas.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: true, powerPreference: 'low-power' })
+  // alpha 透明(留白处露出页面纸底)。片元内的 over() 已完成全部图层叠加, 整屏只画一个四边形,
+  // 因此关闭 GL 混合、直接输出非预乘(straight)颜色 + alpha, 画布声明 premultipliedAlpha: false,
+  // 浏览器合成时只乘一次 alpha。若开启 SRC_ALPHA 混合, 写入帧缓冲的 alpha 会被再平方,
+  // 亮纸水面溢出成纯白(池塘"干涸"), 暗纸水面又几乎不可见
+  const gl = canvas.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false, powerPreference: 'low-power' })
   if (!gl) {
     fallback.value = true
     return
@@ -474,8 +475,6 @@ function setupGl(reducedMotion: boolean) {
     return
   }
   gl.useProgram(program)
-  gl.enable(gl.BLEND)
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
   gl.clearColor(0, 0, 0, 0)
 
   // 全屏四边形
@@ -517,8 +516,8 @@ function setupGl(reducedMotion: boolean) {
     gl.uniform3f(uInkDeep, inkGreen[0] * k, inkGreen[1] * k, inkGreen[2] * k)
     // 墨浓因子: 暗纸(墨色为亮值)把叶身面积墨压回夜荷剪影, 亮纸满浓
     gl.uniform1f(uInkK, lum > 0.5 ? 0.5 : 1.0)
-    // 水意浓度: 亮纸保持大面积留白, 暗纸加浓水面, 池塘不至黑作一片
-    gl.uniform1f(uWashK, lum > 0.5 ? 2.2 : 1.0)
+    // 水意浓度: 亮纸保持大面积留白(<2 时在浅纸底上几乎看不见水体), 暗纸加浓水面, 池塘不至黑作一片
+    gl.uniform1f(uWashK, lum > 0.5 ? 3.2 : 1.9)
     // 波光: 亮纸用品牌青绿, 暗纸用更亮的青绿, 暗水面才有一点水光
     gl.uniform3f(uGlint, ...cssRGB(lum > 0.5 ? '--note-green-deep' : '--note-green', [0.42, 0.62, 0.47]))
     gl.uniform3f(uLotus, ...cssRGB('--note-lotus', [0.91, 0.76, 0.73]))

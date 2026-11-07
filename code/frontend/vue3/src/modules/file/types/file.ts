@@ -83,20 +83,6 @@ type StorageStats = {
   used_bytes: number;
 };
 
-/** 存储迁移请求 */
-type MigrateRequest = {
-  from_type: "local" | "s3";
-  to_type: "local" | "s3";
-};
-
-/** 存储迁移结果 */
-type MigrateResult = {
-  total: number;
-  migrated: number;
-  skipped: number;
-  failed: { content_hash: string; error: string }[];
-};
-
 export { EntryStatus };
 export type {
   FileEntry,
@@ -104,6 +90,4 @@ export type {
   FileEntryDetail,
   BatchDeleteResult,
   StorageStats,
-  MigrateRequest,
-  MigrateResult,
 };

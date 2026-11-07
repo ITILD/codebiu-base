@@ -18,15 +18,12 @@ from module_file.do.filesystem import (
     EntryCreateRequest,
     UploadModeResponse,
     StorageStats,
-    MigrateRequest,
-    SyncRequest,
     BatchDeleteRequest,
     BatchDeleteResult,
     BatchDeleteItemError,
 )
 from module_file.dao.file_entry_dao import FileEntryDao
 from module_file.dao.file_content_dao import FileContentDao
-from module_file.utils.multi_storage.do.storage_config import StorageType
 # 模块属性访问(非 import 快照): 启动钩子装配 storage_config 后始终读到最新
 from module_file.config import filesystem as fs_conf
 import asyncio
@@ -43,7 +40,6 @@ from common.config.dynamic import get_settings
 from common.config.dynamic.schemas import FileSystemSettings, TokenSettings
 from pathlib import Path
 import logging
-from common.config.path import DIR_UPLOAD
 from common.enum.task import TaskStatus
 
 # 配置日志
@@ -60,25 +56,6 @@ class BusinessEntryError(ValueError):
 
     继承 ValueError 便于旧调用方兼容; 控制器层单独捕获映射为 400(而非资源不存在的404)
     """
-
-
-async def build_storage(storage_type: StorageType | str):
-    """
-    按类型构建存储实例(存储迁移/双存储搬运用,与全局单例互不影响)
-    :param storage_type: 存储类型(local/s3)
-    :return: StorageInterface 实例
-    """
-    from module_file.utils.multi_storage.do.storage_config import (
-        StorageConfigFactory,
-    )
-    from module_file.utils.multi_storage.storage_factory import StorageFactory
-
-    fs = await get_settings(FileSystemSettings)
-    cfg = StorageConfigFactory.create(str(storage_type), fs.model_dump())
-    # local 未配置目录时回退到全局上传目录(与 config/filesystem.py 保持一致)
-    if str(storage_type) == StorageType.LOCAL and not getattr(cfg, "base_dir", None):
-        cfg.base_dir = str(DIR_UPLOAD)
-    return StorageFactory.create(cfg)
 
 
 class FileService:
@@ -1471,128 +1448,3 @@ class FileService:
             used_bytes=used_bytes,
         )
 
-    @DaoRel
-    async def migrate_storage(
-        self, req: MigrateRequest, session: AsyncSession | None = None
-    ) -> dict:
-        """
-        存储迁移: 把源存储的全部物理内容搬运到目标存储(逻辑条目与物理键不变)
-        用途: 配置切换 local<->s3 前,先迁移历史数据实现无缝切换
-        :param req: MigrateRequest(from_type/to_type)
-        :return: 迁移结果 {total, migrated, skipped, failed}
-        """
-        if req.from_type == req.to_type:
-            raise ValueError("源与目标存储类型相同,无需迁移")
-        src = await build_storage(req.from_type)
-        dst = await build_storage(req.to_type)
-        contents = await self.file_content_dao.list_all(session)
-        migrated, skipped, failed = 0, 0, []
-        for c in contents:
-            # 已在目标存储的内容跳过(支持断点续迁)
-            if c.storage_type is not None and str(c.storage_type) == str(req.to_type):
-                skipped += 1
-                continue
-            try:
-                # 流式搬运(与 sync_storage 同口径, 不整文件读入内存防大文件 OOM)
-                await dst.save(
-                    c.physical_storage, src.iter_chunks(c.physical_storage, 1024 * 1024)
-                )
-                # 更新内容记录的存储类型(物理键不变)
-                await self.file_content_dao.update(
-                    c.content_hash,
-                    FileContentUpdate(storage_type=req.to_type),
-                    session,
-                )
-                migrated += 1
-            except Exception as e:
-                logger.error(f"迁移失败 {c.content_hash}: {e}")
-                failed.append({"content_hash": c.content_hash, "error": str(e)})
-        logger.info(
-            f"存储迁移完成: {req.from_type}->{req.to_type} "
-            f"migrated={migrated} skipped={skipped} failed={len(failed)}"
-        )
-        return {
-            "total": len(contents),
-            "migrated": migrated,
-            "skipped": skipped,
-            "failed": failed,
-        }
-
-    @DaoRel
-    async def sync_storage(
-        self, req: SyncRequest, session: AsyncSession | None = None
-    ) -> dict:
-        """
-        存储同步: 把缺失的物理内容在 local/s3 间互相镜像补齐(不改变主存储与记录归属)
-        与 migrate 的区别: migrate 搬运并把记录切换到目标存储(弃用旧存储);
-        sync 双向补齐使两存储各持完整副本, 之后改配置切 storage_type 即秒切
-        (如主存储 s3 想下线: 先 sync to_local 补齐本地副本, 再改配置重启)
-        :param req: 同步请求(direction/to_local|to_s3|both, dry_run)
-        :return: 同步结果 {direction, dry_run, total, details: {"local->s3"/"s3->local": {copied, skipped, failed}}}
-        """
-        if req.direction == "to_s3":
-            pairs = [(StorageType.LOCAL, StorageType.S3)]
-        elif req.direction == "to_local":
-            pairs = [(StorageType.S3, StorageType.LOCAL)]
-        else:
-            pairs = [
-                (StorageType.LOCAL, StorageType.S3),
-                (StorageType.S3, StorageType.LOCAL),
-            ]
-
-        # 按当前动态配置构建双存储实例(与全局单例互不影响)
-        storages = {
-            t: await build_storage(t) for t in (StorageType.LOCAL, StorageType.S3)
-        }
-        contents = [
-            c for c in await self.file_content_dao.list_all(session)
-            if c.physical_storage
-        ]
-        details = {}
-        for src_type, dst_type in pairs:
-            src, dst = storages[src_type], storages[dst_type]
-            copied, skipped, failed = 0, 0, []
-            for c in contents:
-                key = c.physical_storage
-                try:
-                    # 目标已存在跳过(幂等,支持中断续同)
-                    if await dst.exists(key):
-                        skipped += 1
-                        continue
-                    if not await src.exists(key):
-                        failed.append(
-                            {"physical_storage": key,
-                             "error": f"源存储 {src_type} 中不存在"}
-                        )
-                        continue
-                    if req.dry_run:
-                        copied += 1
-                        continue
-                    # 流式搬运(不整载内存; 物理键不变,两存储键一致)
-                    await dst.save(key, src.iter_chunks(key, 1024 * 1024))
-                    # 大小对账(记录有大小且目标可查时校验,防半截文件入库)
-                    if c.file_size_bytes:
-                        dst_size = await dst.size(key)
-                        if dst_size != c.file_size_bytes:
-                            raise IOError(
-                                f"同步后大小不一致: {dst_size} != {c.file_size_bytes}"
-                            )
-                    copied += 1
-                except Exception as e:
-                    logger.error(f"同步失败 {key}: {e}")
-                    failed.append({"physical_storage": key, "error": str(e)})
-            logger.info(
-                f"存储同步完成: {src_type}->{dst_type} "
-                f"copied={copied} skipped={skipped} failed={len(failed)}"
-            )
-            details[f"{src_type}->{dst_type}"] = {
-                "copied": copied,  # dry_run 时为待同步数
-                "skipped": skipped,
-                "failed": failed,
-            }
-        return {
-            "direction": req.direction,
-            "dry_run": req.dry_run,
-            "total": len(contents),
-            "details": details,
-        }

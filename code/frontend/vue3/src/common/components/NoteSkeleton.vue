@@ -7,11 +7,17 @@ interface Props {
   variant?: 'post' | 'table' | 'stat' | 'list' | 'paragraph' | 'block'
   /** 重复行数(表格行/列表行/文本行) */
   rows?: number
+  /** 表格骨架列数(默认 6, 与实际表格列宽无关, 只求视觉密度接近) */
+  columns?: number
+  /** 表格骨架是否绘制表头(嵌在真实表头下方时关闭, 避免出现双表头) */
+  withHeader?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'block',
   rows: 5,
+  columns: 6,
+  withHeader: true,
 })
 </script>
 
@@ -36,15 +42,15 @@ const props = withDefaults(defineProps<Props>(), {
 
   <!-- 表格骨架: 表头 + 若干数据行 -->
   <div v-else-if="variant === 'table'" class="w-full" aria-hidden="true">
-    <div class="flex items-center gap-3 px-3 py-2.5">
-      <div v-for="i in Math.min(rows, 6)" :key="i" class="note-sk h-3.5 flex-1" />
+    <div v-if="withHeader" class="flex items-center gap-3 px-3 py-2.5">
+      <div v-for="i in columns" :key="i" class="note-sk h-3.5 flex-1" />
     </div>
     <div
       v-for="r in rows"
       :key="r"
       class="flex items-center gap-3 border-t border-note/40 px-3 py-3"
     >
-      <div v-for="i in Math.min(rows, 6)" :key="i" class="h-3 flex-1">
+      <div v-for="i in columns" :key="i" class="h-3 flex-1">
         <div class="note-sk h-full" :class="i === 1 ? 'w-4/5' : i % 2 ? 'w-2/3' : 'w-3/4'" />
       </div>
     </div>

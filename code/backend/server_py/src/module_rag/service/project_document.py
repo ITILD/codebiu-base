@@ -621,7 +621,7 @@ class ProjectDocumentService:
                 context_token_num=50,
             )
             # 3.根据策略重分块(ragflow 合并+token 统计为纯 CPU 同步计算,
-            # local 引擎下本协程跑在 API 进程事件循环上, 挪入线程避免阻塞其他请求)
+            # 挪入线程执行避免阻塞事件循环)
             chunked_items: list[ChunkedItem] = await asyncio.to_thread(
                 self.document_chunk_service.chunk,
                 chunks=chunked,
@@ -669,7 +669,7 @@ class ProjectDocumentService:
                         source=item.source or document.name,
                         content_types=item.content_types,
                         position=item.position,
-                        # LanceModel 不支持 dict 注解, 非标元数据以 JSON 字符串存储
+                        # 向量表不支持 dict 注解, 非标元数据以 JSON 字符串存储
                         metadata=(
                             json.dumps(item.metadata, ensure_ascii=False)
                             if item.metadata else None

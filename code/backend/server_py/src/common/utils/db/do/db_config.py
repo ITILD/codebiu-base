@@ -22,23 +22,13 @@ class PostgresConfig(DBConfig, config_type="postgres"):
     password: str = Field(..., description="数据库密码")
 
 
-class SqliteConfig(DBConfig, config_type="sqlite"):
-    pass
-
-
 class RedisConfig(DBConfig, config_type="redis"):
+    # database 字段对 Redis 无意义(逻辑库走 db 索引), 置空默认保持基类校验通过
+    database: str = Field("", description="占位(Redis 用 db 索引选库)")
     db: int = Field(0, description="数据库索引")
     host: str = Field(..., description="数据库地址")
     port: int = Field(..., description="数据库端口")
     password: str | None = Field(None, description="数据库密码")
-
-
-class FakeredisConfig(DBConfig, config_type="fakeredis"):
-    pass
-
-
-class LancedbConfig(DBConfig, config_type="lancedb"):
-    pass
 
 
 class MilvusConfig(DBConfig, config_type="milvus"):

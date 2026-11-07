@@ -51,6 +51,27 @@
             "env": {
                 "PATH": "/home/here/.local/share/fnm/aliases/default/bin:${env:PATH}"
             }
+        },
+        {
+            "name": "▶ Mobile Client: flutter (自动选择设备)",
+            "type": "dart",
+            "request": "launch",
+            "program": "${workspaceFolder}/code/frontend/flutter/lib/main.dart",
+            "cwd": "${workspaceFolder}/code/frontend/flutter",
+            "env": {
+                "ANDROID_HOME": "${env:HOME}/android-sdk"
+            }
+        },
+        {
+            "name": "▶ Mobile Client: flutter (Linux 桌面窗口)",
+            "type": "dart",
+            "request": "launch",
+            "program": "${workspaceFolder}/code/frontend/flutter/lib/main.dart",
+            "cwd": "${workspaceFolder}/code/frontend/flutter",
+            "args": ["-d", "linux"],
+            "env": {
+                "ANDROID_HOME": "${env:HOME}/android-sdk"
+            }
         }
     ],
     "compounds": [
@@ -67,6 +88,14 @@
             "configurations": [
                 "▶UBUNTU Backend: app.py (server_py)",
                 "▶ Frontend: pnpm run dev (vue3)"
+            ],
+            "stopAll": true
+        },
+        {
+            "name": "后端 + 手机客户端 (ub 全栈)",
+            "configurations": [
+                "▶UBUNTU Backend: app.py (server_py)",
+                "▶ Mobile Client: flutter (自动选择设备)"
             ],
             "stopAll": true
         }

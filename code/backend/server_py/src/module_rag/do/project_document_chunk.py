@@ -31,7 +31,7 @@ class ProjectDocumentChunkBase(VectorModel):
         json_schema_extra={"milvus_dtype": "JSON"},
     )
     # 非标
-    # LanceModel 不支持 dict 注解, 聚合元数据以 JSON 字符串存储
+    # 向量表不支持 dict 注解, 聚合元数据以 JSON 字符串存储
     metadata: str | None = Field(
         None,
         description="聚合的非标元数据(JSON 字符串)",

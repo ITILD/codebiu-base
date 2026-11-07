@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProjectDocumentChunkDao:
-    """项目文档分块向量数据访问对象(LanceDB)
+    """项目文档分块向量数据访问对象(Milvus)
 
     基线说明: 仅保留稠密向量语义检索; 原 Milvus BM25 混合检索
     (AnnSearchRequest/RRFRanker)已随重型依赖裁剪移除。
@@ -40,7 +40,7 @@ class ProjectDocumentChunkDao:
             limit=limit,
         )
 
-        # LanceDB 返回 _distance(L2 距离平方, 越小越相关);
+        # 向量库返回 _distance(此处为 COSINE 距离, 越小越相关);
         # score 做 1/(1+d) 单调映射(越大越相关), 兼容原检索得分口径
         responses = [
             ProjectDocumentChunkSearchResponse(

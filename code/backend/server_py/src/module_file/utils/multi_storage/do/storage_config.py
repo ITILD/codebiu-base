@@ -1,23 +1,20 @@
-"""存储配置模型"""
+"""存储配置模型(S3 兼容对象存储)"""
 
 from pydantic import BaseModel, Field
 from enum import StrEnum
 
 
 class StorageType(StrEnum):
-    LOCAL = "local"
     S3 = "s3"
-    # MINIO = "minio"
-    # ALIYUN_OSS = "aliyun_oss"
 
 
 _STORAGE_REGISTRY: dict[str, type["StorageConfig"]] = {}
 
 
 class StorageConfig(BaseModel):
-    # 存储类型(local/s3): 工厂 create(config_type, dict) 时由 dict 自动填充,
-    # 用于运行时读取"实际生效的存储类型"(配置中心改类型需重启才重新装配, 此值不变)
-    storage_type: str | None = Field(None, description="存储类型(local/s3)")
+    # 存储类型(s3): 工厂 create(config_type, dict) 时由 dict 自动填充,
+    # 用于运行时读取"实际生效的存储类型"(配置中心改连接信息需重启才重新装配, 此值不变)
+    storage_type: str | None = Field(None, description="存储类型(s3)")
     # 字段名与 config.yaml 的 file_system.max_size 保持一致(MB)
     max_size: int = Field(10, description="单文件最大存储（MB）,默认10MB")
     # 允许的 MIME 类型列表(支持 image/* 通配),空表示不限制
@@ -54,10 +51,6 @@ class StorageConfig(BaseModel):
             if p == mime:
                 return True
         return False
-
-
-class LocalStorage(StorageConfig, config_type=StorageType.LOCAL):
-    base_dir: str | None = Field(None, description="本地存储根目录路径")
 
 
 class S3Storage(StorageConfig, config_type=StorageType.S3):

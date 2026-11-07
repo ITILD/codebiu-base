@@ -29,6 +29,7 @@ declare module 'vue-router/auto-routes' {
     '/authorization/permission': RouteRecordInfo<'/authorization/permission', '/authorization/permission', Record<never, never>, Record<never, never>>,
     '/authorization/role': RouteRecordInfo<'/authorization/role', '/authorization/role', Record<never, never>, Record<never, never>>,
     '/authorization/user': RouteRecordInfo<'/authorization/user', '/authorization/user', Record<never, never>, Record<never, never>>,
+    '/contact_message/contact_message': RouteRecordInfo<'/contact_message/contact_message', '/contact_message/contact_message', Record<never, never>, Record<never, never>>,
     '/file/': RouteRecordInfo<'/file/', '/file', Record<never, never>, Record<never, never>>,
     '/main/audit': RouteRecordInfo<'/main/audit', '/main/audit', Record<never, never>, Record<never, never>>,
     '/main/codegen': RouteRecordInfo<'/main/codegen', '/main/codegen', Record<never, never>, Record<never, never>>,
@@ -112,6 +113,10 @@ declare module 'vue-router/auto-routes' {
     }
     'src/modules/authorization/pages/user.vue': {
       routes: '/authorization/user'
+      views: never
+    }
+    'src/modules/contact_message/pages/contact_message.vue': {
+      routes: '/contact_message/contact_message'
       views: never
     }
     'src/modules/file/pages/index.vue': {

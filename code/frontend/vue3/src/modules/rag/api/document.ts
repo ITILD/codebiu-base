@@ -250,17 +250,7 @@ export const deleteRagDocument = (documentId: string) => {
 };
 
 /**
- * 重新解析文档(同步)
- * @param documentId 文档ID
- */
-export const reparseRagDocument = (documentId: string) => {
-  return http_base_server.post<boolean>(
-    `/rag/project-documents/${documentId}/reparse`
-  );
-};
-
-/**
- * 重新解析文档(异步任务队列)
+ * 重新解析文档(异步任务队列, 复杂解析统一在独立 worker 进程执行)
  * @param documentId 文档ID
  */
 export const reparseRagDocumentTask = (documentId: string) => {

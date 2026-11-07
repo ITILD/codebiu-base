@@ -3,7 +3,8 @@
   <el-aside
     v-if="isMd"
     :width="isCollapse ? '56px' : '208px'"
-    class="sidebar-note bg-note-soft transition-[width] duration-300"
+    class="sidebar-note bg-note-soft"
+    :class="{ 'is-collapsed': isCollapse, 'is-collapsing': isCollapse && !menuCollapsed }"
     self-start
     sticky
     top-16
@@ -14,17 +15,24 @@
          对百分比解析是 indefinite, el-scrollbar 内部 wrap 的 height:100% 会
          解析失败被内容撑开, 导致内部滚动条永远不出现 -->
     <div flex flex-col h-app>
-      <!-- 折叠按钮(点击切换 抽屉式收窄/展开) -->
-      <div flex p-1.5 shrink-0 :class="isCollapse ? 'justify-center' : 'justify-end'">
+      <!-- 折叠按钮(点击切换 抽屉式收窄/展开)
+           按钮用绝对定位 + transform 过渡: 展开贴右、收起居中, 与菜单胶囊左缘对齐,
+           不用 justify-center/justify-end 切换(避免瞬间跳位) -->
+      <div class="sidebar-collapse relative shrink-0">
         <el-tooltip :content="isCollapse ? '展开菜单' : '收起菜单'" placement="right">
           <el-button
-            :icon="isCollapse ? Expand : Fold"
+            class="sidebar-collapse-btn"
             circle
             size="small"
             text
             bg-note-tint
-            @click="isCollapse = !isCollapse"
-          />
+            :aria-label="isCollapse ? '展开菜单' : '收起菜单'"
+            @click="setCollapse(!isCollapse)"
+          >
+            <el-icon :size="15" class="collapse-icon" :class="{ 'is-collapsed': isCollapse }">
+              <Fold />
+            </el-icon>
+          </el-button>
         </el-tooltip>
       </div>
 
@@ -33,10 +41,10 @@
         <el-menu
           :default-active="routerStore.routerPath.now"
           :router="true"
-          :collapse="isCollapse"
+          :collapse="menuCollapsed"
           border-0
           bg-transparent
-          :class="isCollapse ? 'px-0' : 'px-2'"
+          class="sidebar-menu"
         >
           <template v-for="item in visibleMenuItems" :key="item.index">
             <el-menu-item v-if="!item.children" :index="item.index" :title="item.title">
@@ -75,8 +83,15 @@
         </el-menu>
       </el-scrollbar>
 
-      <!-- 底部品牌小注(紧凑单行, 不额外占位) -->
-      <div v-if="!isCollapse" class="note-edge-t text-[11px]" px-3 py-2 text-note-sub shrink-0>
+      <!-- 底部品牌小注(紧凑单行; 收起时淡出而非瞬间消失, 避免底部跳一下) -->
+      <div
+        class="sidebar-brand note-edge-t text-[11px]"
+        :class="{ 'is-hidden': isCollapse }"
+        px-3
+        py-2
+        text-note-sub
+        shrink-0
+      >
         记录每一份数据
       </div>
     </div>
@@ -131,8 +146,8 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, watch } from 'vue'
-import { Expand, Fold } from '@element-plus/icons-vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
+import { Fold } from '@element-plus/icons-vue'
 import { RouterStore } from '@/common/stores/router'
 import { SysSettingStore } from '@/common/stores/sys'
 import { useResponsive } from '@/common/composables/useResponsive'
@@ -148,6 +163,42 @@ const { visibleMenuItems } = useVisibleMenu()
 
 // 三档响应式折叠: 手机(<768)抽屉 / 平板(768-1023)默认折叠图标栏 / 桌面(>=1024)默认展开
 const isCollapse = ref(!isLg.value)
+
+/** 收起动画时长: 略大于侧栏宽度过渡(280ms)与子菜单收起过渡(300ms) */
+const COLLAPSE_MS = 320
+// 菜单 collapse 状态滞后于宽度动画:
+// 收起时先收掉展开的子菜单并让侧栏宽度收窄, 动画结束再切到图标模式;
+// 展开时立即切回完整模式, 文字随宽度增长逐渐露出 —— 图标位置全程不变, 不跳变
+const menuCollapsed = ref(isCollapse.value)
+let collapseTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 切换折叠(统一入口, 避免模板里直接改状态导致菜单提前切换) */
+function setCollapse(next: boolean) {
+  // 收起前先关掉已展开的子菜单: 子项高度与宽度同时收拢,
+  // 避免侧栏变窄时子项文字被裁成碎片, 也避免收完后整列图标突然上移
+  if (next) {
+    document
+      .querySelectorAll<HTMLElement>('.sidebar-note .el-sub-menu.is-opened > .el-sub-menu__title')
+      .forEach((title) => title.click())
+  }
+  isCollapse.value = next
+}
+
+watch(isCollapse, (collapsed) => {
+  if (collapseTimer) {
+    clearTimeout(collapseTimer)
+    collapseTimer = null
+  }
+  if (collapsed) {
+    collapseTimer = setTimeout(() => {
+      menuCollapsed.value = true
+      collapseTimer = null
+    }, COLLAPSE_MS)
+  } else {
+    menuCollapsed.value = false
+  }
+})
+
 // 跨断点(旋转/拉伸窗口)时重置为该档默认值
 watch(
   () => isLg.value,
@@ -155,6 +206,10 @@ watch(
     isCollapse.value = !v
   }
 )
+
+onBeforeUnmount(() => {
+  if (collapseTimer) clearTimeout(collapseTimer)
+})
 
 // 升到平板及以上时关闭移动抽屉(已由常驻侧边栏接管)
 watch(
@@ -169,14 +224,62 @@ watch(
 .sidebar-note {
   box-shadow:
     inset -1px 0 0 var(--note-edge-soft);
+  /* 收起/展开: 只动宽度, 用统一缓动; 内容裁切而非重排 */
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  will-change: width;
+  /* 菜单层级缩进统一: 一级 10px; 子级文字与父级标题同一左缘(6 + 10 + 24 + 5 ≈ 45px) */
+  --el-menu-base-level-padding: 10px;
+  --el-menu-level-padding: 29px;
 }
 
-/* 菜单项: 紧凑高度 + 统一圆角, SaaS 后台密度 */
+/* 暗色下侧栏加一层纵向微光, 与页面底拉开层次(避免整块死黑) */
+html.dark .sidebar-note {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent 46%);
+}
+
+/* 折叠按钮行: 固定高度, 内部按钮用 transform 平滑换位 */
+.sidebar-collapse {
+  height: 44px;
+}
+
+.sidebar-collapse-btn {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  transform: translateX(164px);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.18s ease;
+}
+
+.sidebar-note.is-collapsed .sidebar-collapse-btn {
+  transform: translateX(6px);
+}
+
+/* 收起/展开图标只做旋转, 不切换成另一个图标(消除图标替换闪烁) */
+.collapse-icon {
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapse-icon.is-collapsed {
+  transform: rotate(180deg);
+}
+
+/* 收起时菜单宽度跟随侧栏(EP 默认写死 64px, 会比 56px 侧栏多出 8px 造成偏移) */
+.sidebar-note :deep(.el-menu--collapse) {
+  width: 100%;
+}
+
+/* 菜单项: 紧凑高度 + 统一圆角, SaaS 后台密度
+   左右各留 6px 外边距: 激活胶囊与折叠按钮同一左缘, 视觉更整齐 */
 .sidebar-note :deep(.el-menu-item),
 .sidebar-note :deep(.el-sub-menu__title) {
   height: 36px;
   line-height: 36px;
-  margin: 1px 0;
+  margin: 1px 6px;
   font-size: 13px;
   border-radius: 6px;
   transition: background-color 0.18s ease, color 0.18s ease;
@@ -225,26 +328,57 @@ watch(
 /* 悬停: 极淡品牌底 */
 .sidebar-note :deep(.el-menu-item:hover),
 .sidebar-note :deep(.el-sub-menu__title:hover) {
-  background-color: rgb(var(--note-green-rgb) / 8%);
+  background-color: var(--note-menu-hover);
 }
 
 /* 选中: 淡品牌底 + 左侧 3px 指示条, 一眼定位当前页 */
 .sidebar-note :deep(.el-menu-item.is-active) {
-  background-color: rgb(var(--note-green-rgb) / 11%);
+  background-color: var(--note-menu-active);
   color: var(--note-accent);
   font-weight: 500;
   box-shadow: inset 3px 0 0 var(--note-green);
 }
 
-/* 收缩态: 去掉水平内边距并居中图标, 修复折叠后图标偏移不齐 */
+/* 收缩态: 去掉水平内边距并居中图标。
+   与展开态保持同一图标中心(6 + 10 + 12 = 6 + 22 = 28px), 折叠过程零位移 */
 .sidebar-note :deep(.el-menu--collapse .el-menu-item),
 .sidebar-note :deep(.el-menu--collapse .el-sub-menu__title) {
   padding-inline: 0;
   justify-content: center;
 }
 
-.sidebar-note :deep(.el-menu--collapse .el-menu-item.is-active) {
+.sidebar-note :deep(.el-menu--collapse .el-menu-item.is-active),
+.sidebar-note :deep(.el-menu--collapse .el-sub-menu.is-active > .el-sub-menu__title) {
+  background-color: var(--note-menu-active);
   box-shadow: inset 2px 0 0 var(--note-green);
+}
+
+/* 收起过程中: 菜单文字/箭头快速淡出, 只留图标随宽度收拢,
+   避免文字被侧栏边缘裁成一条条碎片 */
+.sidebar-note.is-collapsing :deep(.el-menu-item > span),
+.sidebar-note.is-collapsing :deep(.el-sub-menu__title > span),
+.sidebar-note.is-collapsing :deep(.el-sub-menu__icon-arrow) {
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
+
+.sidebar-note.is-collapsing :deep(.el-menu--inline) {
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+  pointer-events: none;
+}
+
+/* 底部品牌注: 收起时淡出, 不与宽度动画抢视觉 */
+.sidebar-brand {
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.16s ease, transform 0.24s ease;
+}
+
+.sidebar-brand.is-hidden {
+  opacity: 0;
+  transform: translateX(-6px);
+  pointer-events: none;
 }
 
 /* 移动抽屉: 触控目标放大到 44px, 并预留刘海屏底部安全区(--note-safe-b) */

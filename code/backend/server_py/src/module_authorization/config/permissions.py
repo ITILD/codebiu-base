@@ -137,7 +137,6 @@ MAIN_DEFINE = ModulePermissionDefine(
                 PermNode(name="上传/新建", code="main:file:create", menu_type="F"),
                 PermNode(name="重命名/移动", code="main:file:update", menu_type="F"),
                 PermNode(name="删除", code="main:file:delete", menu_type="F"),
-                PermNode(name="存储迁移/同步", code="main:file:migrate", menu_type="F"),
             ],
         ),
         PermNode(

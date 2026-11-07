@@ -1,9 +1,9 @@
 """
-celery 引擎周期调度 tick(REQ-012, 仅 tasks.engine=celery 时由 beat 触发)
+Celery 周期调度 tick(REQ-012, 由 beat 进程每分钟触发)
 
-设计(local/celery 双引擎同一扫描主体):
+设计:
     beat 只配一个每分钟的 tick 任务, 调度定义全部落库(task_schedule 表)热生效 ——
-    新增/启停/改周期无需改 beat 配置重启; tick 内部调用与 local 循环完全相同的
+    新增/启停/改周期无需改 beat 配置重启; tick 内部调用
     service.scan_due_and_dispatch()(到期间隔查询 + 单轮限 20 条, 多 worker 部署时
     重复触发由 next_fire_at 推进的乐观语义自然幂等收敛)。
 
@@ -12,7 +12,7 @@ celery 引擎周期调度 tick(REQ-012, 仅 tasks.engine=celery 时由 beat 触�
     celery -A src.app_task beat     # 调度触发进程(需要周期任务时额外启动, 单实例)
 
 注意: 本文件仅在 worker/beat 进程导入(app_task.py 与 celery include 列表),
-Web 进程(local 引擎)不导入, 保持零 celery 加载。
+Web 进程不导入, 保持零 celery 加载。
 """
 import logging
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(name="module_task.tasks.schedule_beat.tick_scheduled_tasks")
 def tick_scheduled_tasks() -> dict:
-    """每分钟由 beat 触发: 扫描到期调度并按当前引擎派发(空转时仅一次索引查询)"""
+    """每分钟由 beat 触发: 扫描到期调度并派发任务队列(空转时仅一次索引查询)"""
     from module_task.service.schedule import TaskScheduleService
 
     async def _tick() -> dict:
@@ -58,6 +58,6 @@ def build_beat_schedule() -> dict:
     return {
         "task-scheduler-tick": {
             "task": "module_task.tasks.schedule_beat.tick_scheduled_tasks",
-            "schedule": 60.0,  # 分钟级精度与 local 引擎对齐
+            "schedule": 60.0,  # 分钟级精度, 调度定义落库热更
         }
     }

@@ -1,8 +1,8 @@
 """向量模型层(与具体向量数据库实现解耦)
 
-类似 SQLModel 之于 sqlite/postgresql:
+类似 SQLModel 之于 postgresql:
 - VectorModel 是通用的向量表声明基类,不依赖任何具体向量库
-- 具体实现(session/impl/db_vector_lancedb)消费注册表,由 DBFactory 按配置创建
+- 具体实现(session/impl/db_vector_milvus)消费注册表,由 DBFactory 按配置创建
 """
 from pydantic import BaseModel, Field
 from typing import ClassVar

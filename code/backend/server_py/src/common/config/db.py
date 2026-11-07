@@ -25,7 +25,7 @@ from common.utils.db.utils.async_transactional import AsyncTransactional
 from redis.asyncio import Redis
 
 if TYPE_CHECKING:
-    from lancedb import AsyncConnection  # 仅类型检查时导入
+    from pymilvus import AsyncMilvusClient  # 仅类型检查时导入
 
 import logging
 
@@ -38,25 +38,24 @@ class DatabaseManager:
     def __init__(self):
         self.db_rel: DBRelationInterface | None = None
         self.db_cache: DBCacheInterface | None = None
-        # 向量库实现惰性创建: 首次访问 db_vector 属性时才加载 lancedb
+        # 向量库实现惰性创建: 首次访问 db_vector 属性时才装配实例
         self._db_vector: DBVectorInterface | None = None
         self._db_vector_config: DBConfig | None = None
         # 事务管理器(AsyncTransactional 实例, 经 call() 供 DaoRel 门面动态解析)
         self.DaoRel: AsyncTransactional | None = None
         # 异步缓存数据库连接
         self.async_cache: Redis | None = None
-        # 异步向量数据库连接  注意只能异步连接  生命周期需要运行时获取
-        self._async_vector: AsyncConnection | None = None
+        # 异步向量数据库连接  生命周期需要运行时获取
+        self._async_vector: AsyncMilvusClient | None = None
 
     @property
-    def async_vector(self) -> AsyncConnection | None:
-        """获取异步向量库连接(lancedb连接)"""
+    def async_vector(self) -> AsyncMilvusClient | None:
+        """获取异步向量库连接(milvus 连接)"""
         return self._async_vector
 
     @property
     def db_vector(self) -> DBVectorInterface | None:
-        """获取向量库实现(惰性): 未配置返回 None; 已配置时首次访问才创建实例,
-        此时才加载 lancedb SDK(连接仍由 connect() 建立)"""
+        """获取向量库实现(惰性): 未配置返回 None; 已配置时首次访问才创建实例"""
         if self._db_vector is None and self._db_vector_config is not None:
             self._db_vector = DBFactory.create_vector(self._db_vector_config)
         return self._db_vector
@@ -92,22 +91,15 @@ class DatabaseManager:
         )
 
         cache = await get_settings(DBCacheSettings)
-        if cache.type:
-            self.db_cache = DBFactory.create_cache(
-                DBConfigFactory.create(cache.type, _adapt(cache))
-            )
-            self.db_cache.connect()
-            self.async_cache = self.db_cache.async_cache
+        self.db_cache = DBFactory.create_cache(
+            DBConfigFactory.create("redis", _adapt(cache))
+        )
+        self.db_cache.connect()
+        self.async_cache = self.db_cache.async_cache
 
+        # 仅记录配置, 实现延迟到首次访问 db_vector 属性时创建
         vector = await get_settings(DBVectorSettings)
-        if vector.type in ("lancedb", "milvus"):
-            # 仅记录配置, 实现延迟到首次访问 db_vector 属性时创建(惰性加载 SDK)
-            self._db_vector_config = DBConfigFactory.create(
-                vector.type, _adapt(vector)
-            )
-        elif vector.type:
-            # 旧库遗留的已移除后端类型(如 milvus): 忽略并在日志中提示
-            logger.warning(f"未知的向量库类型 '{vector.type}', 已跳过(基线仅支持 lancedb)")
+        self._db_vector_config = DBConfigFactory.create("milvus", _adapt(vector))
         logger.info(
             "动态段数据库装配完成: "
             f"cache={'on' if self.db_cache else 'off'} "
@@ -122,7 +114,7 @@ class DatabaseManager:
         # 创建所有向量表(VectorModel(table=True) 注册的表),向量库需先建立连接
         if self.db_vector:
             if self._async_vector is None:
-                # 向量库连接失败(如依赖未安装)仅告警, 不拖累关系库建表与后续启动钩子
+                # 向量库连接失败仅告警, 不拖累关系库建表与后续启动钩子
                 try:
                     await self.db_vector.connect()
                     self._async_vector = self.db_vector.async_vector
@@ -137,7 +129,7 @@ class DatabaseManager:
         if self.db_vector:
             # table_create_all 可能已建立连接,避免重复连接
             if self._async_vector is None:
-                # 向量库连接失败(如 lancedb 依赖未安装)仅告警: 向量功能不可用但主服务正常启动
+                # 向量库连接失败仅告警: 向量功能不可用但主服务正常启动
                 try:
                     await self.db_vector.connect()
                     self._async_vector = self.db_vector.async_vector

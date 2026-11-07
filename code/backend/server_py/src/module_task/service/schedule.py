@@ -3,8 +3,8 @@
 
 职责:
     - 调度定义 CRUD: 校验类型注册表/触发方式(cron 或 interval 二选一) → 落库
-    - 下次触发时刻计算: 创建/启停/改周期时重算并唤醒 local 调度循环(热生效)
-    - tick 扫描派发: 查到期调度 → 复用任务队列创建/派发链路(local/celery 双引擎)
+    - 下次触发时刻计算: 创建/启停/改周期时重算(定义落库即热生效)
+    - tick 扫描派发: 查到期调度 → 复用任务队列创建/派发链路(Celery broker)
       → 回写最近一次执行快照; 完整执行历史即 task_queue 记录
 
 内存与体积约束(REQ-012 交付要求):
@@ -85,16 +85,6 @@ def _to_response(s: TaskSchedule) -> TaskScheduleResponse:
     )
 
 
-def _wake_local_scheduler() -> None:
-    """热更后唤醒 local 调度循环(立即重算休眠; celery 引擎下无循环, 静默忽略)"""
-    try:
-        from module_task.tasks.scheduler import wake_scheduler
-
-        wake_scheduler()
-    except Exception:  # noqa: BLE001  # 循环未启动/未导入属正常态, 不影响落库热更
-        pass
-
-
 class TaskScheduleService:
     def __init__(self, dao: TaskScheduleDao, task_service: TaskQueueService):
         """依赖注入构造器: 调度DAO + 任务队列服务(触发时复用其创建/派发链路)"""
@@ -141,12 +131,11 @@ class TaskScheduleService:
         if not schedule.enabled:
             schedule.next_fire_at = None
         schedule.id = await self.dao.add(schedule)
-        _wake_local_scheduler()
         return _to_response(schedule)
 
     async def update(self, schedule_id: int, data: TaskScheduleUpdate) -> TaskScheduleResponse:
         """
-        修改调度(启停/改周期即时热生效: 重算 next_fire_at 并唤醒 local 循环)
+        修改调度(启停/改周期即时热生效: 重算 next_fire_at, beat 每分钟 tick 感知)
         :raises NotFoundError: 调度不存在
         :raises BusinessError: 校验失败
         """
@@ -169,13 +158,11 @@ class TaskScheduleService:
             schedule.next_fire_at = None
         schedule.enabled = bool(data.enabled)
         await self.dao.update(schedule)
-        _wake_local_scheduler()
         return _to_response(schedule)
 
     async def delete(self, schedule_id: int) -> None:
         """删除调度定义(已派发任务不受影响)"""
         await self.dao.delete(schedule_id)
-        _wake_local_scheduler()
 
     # ################ 触发 ################
 
@@ -192,7 +179,7 @@ class TaskScheduleService:
 
     async def _fire(self, schedule: TaskSchedule, fired_at: datetime):
         """
-        触发单个调度: 复用任务队列创建/双引擎派发链路生成 task_queue 记录
+        触发单个调度: 复用任务队列创建/派发链路生成 task_queue 记录
         (payload 注入 _schedule_id 便于追溯; 派发失败不抛出, 回写快照供前端排查)
         """
         task = await self.task_service.create(
@@ -209,11 +196,11 @@ class TaskScheduleService:
         await self.dao.update(schedule)
         return task
 
-    # ################ 调度器 tick(local 循环与 celery beat 共用) ################
+    # ################ 调度器 tick(celery beat 调用) ################
 
     async def scan_due_and_dispatch(self) -> int:
         """
-        扫描到期调度并派发(local 循环每轮/celery beat 每分钟调用一次)
+        扫描到期调度并派发(celery beat 每分钟调用一次)
         :return: 本轮派发的调度数
 
         语义要点:

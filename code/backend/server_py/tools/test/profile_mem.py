@@ -23,7 +23,7 @@ LIBS: list[str] = [
     "langchain_ollama",
     "langchain_aws",
     "langgraph",
-    "pyarrow,lancedb",
+    "pyarrow",
     "numpy",
     "cv2",
     "PIL",
@@ -35,7 +35,7 @@ LIBS: list[str] = [
 
 # 启动链路最可能引入的重库(用于 trace 模式判定"是否已被加载")
 HEAVY_WATCH = [
-    "cv2", "lancedb", "pyarrow", "celery", "langgraph",
+    "cv2", "celery", "langgraph",
     "langchain_aws", "langchain_ollama", "aioboto3",
 ]
 

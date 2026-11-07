@@ -26,8 +26,12 @@
           </el-icon>
         </button>
 
-        <router-link to="/" flex items-center ml-3 sm:ml-4 md:ml-8 shrink-0 min-w-0>
-          <img :src="sysStyle.theme.isDark ? logoDark : logoLight" h-8 mr-3 alt="logo" />
+        <router-link to="/" flex items-center ml-3 sm:ml-4 md:ml-8 shrink-0 min-w-0 :aria-label="TITLE">
+          <!-- 双图叠放 + 透明度过渡: 切换主题时 Logo 交叉淡入淡出, 不再整张重载闪一下 -->
+          <span class="logo-mark" aria-hidden="true">
+            <img :src="logoLight" alt="" class="logo-img" :class="{ 'is-current': !sysStyle.theme.isDark }" />
+            <img :src="logoDark" alt="" class="logo-img" :class="{ 'is-current': sysStyle.theme.isDark }" />
+          </span>
           <!-- 手机档(<640px)只留 Logo: 品牌名 + 汉堡 + 右侧四个控件在 375px 会溢出 -->
           <span
             v-ellipsis
@@ -62,8 +66,8 @@
             flex
             items-center
             rounded
+            h-8
             px-2
-            py-1.5
             text-sm
             text-note
             hover:bg-note-tint
@@ -85,12 +89,14 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <!-- 主题切换 -->
-        <el-switch
-          v-model="sysSettingStore.sysStyle.theme.isDark"
-          aria-label="切换深色模式"
-          @change="handleThemeToggle"
-        />
+        <!-- 主题切换: 受控模式 + 圆形揭幕过渡(见 handleThemeToggle) -->
+        <span class="theme-switch-wrap" h-8 flex items-center data-theme-toggle>
+          <el-switch
+            :model-value="sysStyle.theme.isDark"
+            aria-label="切换深色模式"
+            @change="handleThemeToggle"
+          />
+        </span>
         <!-- 登录/用户 -->
         <template v-if="authState.user.id">
           <NotificationBell />
@@ -242,10 +248,82 @@ const handleRegisterSuccess = (authResponse: AuthResponse) => {
   authStore.applyUserTheme()
 }
 
-// 顶栏黑白开关: 二态切换后套用主题并同步到后端用户配置
+// 顶栏黑白开关: 二态切换后套用主题并同步到后端用户配置。
+// 支持 View Transitions 的浏览器从开关位置做圆形揭幕, 避免整页硬切导致刺眼闪屏;
+// 不支持或用户偏好减少动效时, 直接切换。
 const handleThemeToggle = (value: string | number | boolean) => {
   const theme = value ? 'dark' : 'light'
-  sysSettingStore.applyThemeValue(theme)
-  authStore.saveUserTheme(theme)
+  const apply = () => {
+    sysSettingStore.applyThemeValue(theme)
+    authStore.saveUserTheme(theme)
+  }
+
+
+  const ViewTransitionDoc = document as Document & {
+    startViewTransition?: (cb: () => Promise<void>) => { finished: Promise<void> }
+  }
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (!ViewTransitionDoc.startViewTransition || reduceMotion) {
+    apply()
+    return
+  }
+
+  // 揭幕圆心取主题开关中心, 半径覆盖到最远屏角
+  const root = document.documentElement
+  const trigger = document.querySelector<HTMLElement>('[data-theme-toggle]')
+  const rect = trigger?.getBoundingClientRect()
+  const x = rect ? rect.left + rect.width / 2 : window.innerWidth - 64
+  const y = rect ? rect.top + rect.height / 2 : 28
+  const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y)) + 24
+  root.style.setProperty('--note-reveal-x', `${x}px`)
+  root.style.setProperty('--note-reveal-y', `${y}px`)
+  root.style.setProperty('--note-reveal-r', `${radius}px`)
+
+  const cleanup = () => {
+    root.style.removeProperty('--note-reveal-x')
+    root.style.removeProperty('--note-reveal-y')
+    root.style.removeProperty('--note-reveal-r')
+  }
+
+  try {
+    const transition = ViewTransitionDoc.startViewTransition(() => {
+      apply()
+      // useDark 的 html.dark 写入在下一微任务才生效; 这里同步落类,
+      // 保证浏览器截取"新快照"时已经是目标主题, 避免 DOM 更新超时/回退闪一下
+      document.documentElement.classList.toggle('dark', theme === 'dark')
+    })
+    transition.finished.finally(cleanup)
+  } catch {
+    cleanup()
+    apply()
+  }
 }
 </script>
+
+<style scoped>
+/* Logo 交叉淡化容器: 两版 Logo 同时挂载, 只切透明度, 不触发图片重新加载 */
+.logo-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.logo-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+.logo-img.is-current {
+  opacity: 1;
+}
+</style>

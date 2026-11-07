@@ -34,7 +34,7 @@ class FileContentBase(SQLModel):
     ref_count: int = Field(default=0, description="引用计数(仅文件),上传成功后增加1")
     # === 存储类型字段 ===
     storage_type: StorageType | None = Field(
-        default=StorageType.LOCAL, description="存储类型(仅文件)"
+        default=StorageType.S3, description="存储类型(仅文件)"
     )
     # 状态
     content_status: TaskStatus | None = Field(
@@ -337,30 +337,9 @@ class StorageStats(BaseModel):
     存储统计信息(管理视图)
     """
 
-    storage_type: str = Field(..., description="当前生效的存储类型(local/s3)")
+    storage_type: str = Field(..., description="当前生效的存储类型(s3)")
     entry_total: int = Field(0, description="逻辑条目总数(含目录)")
     file_total: int = Field(0, description="文件条目数")
     folder_total: int = Field(0, description="目录条目数")
     content_total: int = Field(0, description="物理内容记录数(按内容哈希去重后)")
     used_bytes: int = Field(0, description="物理存储总占用(字节,去重后)")
-
-
-class MigrateRequest(BaseModel):
-    """
-    存储迁移请求(把旧存储的物理内容搬运到新存储,逻辑条目不变)
-    """
-
-    from_type: StorageType = Field(..., description="源存储类型(旧数据所在存储)")
-    to_type: StorageType = Field(..., description="目标存储类型(迁移目的地)")
-
-
-class SyncRequest(BaseModel):
-    """
-    存储同步请求(把缺失的物理内容在两存储间互相镜像补齐,不改变主存储与条目归属)
-    """
-
-    direction: Literal["to_local", "to_s3", "both"] = Field(
-        "both",
-        description="同步方向: to_s3=本地镜像到S3 / to_local=S3镜像到本地 / both=双向补齐",
-    )
-    dry_run: bool = Field(False, description="只统计待同步数量,不实际复制")

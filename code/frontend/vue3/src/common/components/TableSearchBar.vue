@@ -39,8 +39,8 @@ export interface SearchField {
   <div page-card mb-3>
     <div flex flex-wrap items-center gap-x-3 gap-y-2>
       <!-- 筛选字段区 -->
-      <div v-for="field in visibleFields" :key="field.prop" flex items-center gap-1.5>
-        <span text-xs text-note-sub whitespace-nowrap>{{ field.label }}</span>
+      <div v-for="field in visibleFields" :key="field.prop" class="search-field" flex items-center gap-1.5>
+        <span class="search-field__label" text-xs text-note-sub whitespace-nowrap>{{ field.label }}</span>
 
         <!-- 文本输入框: 回车/清空后触发搜索 -->
         <el-input
@@ -144,3 +144,24 @@ const handleReset = () => {
   emit('reset')
 }
 </script>
+
+<style scoped>
+/* 手机档: 每个筛选字段独占一行, 标签固定起始宽度 + 控件铺满剩余宽度,
+   使各行的控件左右边缘统一对齐(桌面端仍按字段配置的固定宽度排布) */
+@media (max-width: 767px) {
+  .search-field {
+    width: 100%;
+  }
+
+  .search-field__label {
+    min-width: 52px;
+    flex-shrink: 0;
+  }
+
+  .search-field :deep(.el-input),
+  .search-field :deep(.el-select) {
+    flex: 1 1 auto;
+    width: auto !important;
+  }
+}
+</style>

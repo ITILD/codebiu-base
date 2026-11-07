@@ -88,13 +88,6 @@ async def server_start():
 async def server_end():
     """服务关闭流程:释放数据库等资源"""
     logger.info("server_end...")
-    # 停止 local 周期调度循环(REQ-012; 未启动时静默)
-    try:
-        from module_task.tasks.scheduler import stop_scheduler
-
-        await stop_scheduler()
-    except Exception:  # noqa: BLE001
-        pass
     # 刷出审计缓冲剩余记录(REQ-009)后再关闭数据库连接
     from common.middleware.audit import audit_recorder
 

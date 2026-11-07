@@ -221,16 +221,19 @@ export type { ProTableColumn, ProTableDensity, ProTableRow } from './useProTable
       </template>
     </div>
 
-    <!-- 平板/桌面表格 -->
-    <div v-else class="w-full min-w-0" :class="tableClass">
+    <!-- 平板/桌面表格
+         加载态不用 v-loading 转圈遮罩(会先闪出"暂无数据"再跳成数据行):
+         首屏无数据时在表体位置铺骨架行, 有数据刷新时只在表头顶部走细进度条 -->
+    <div v-else class="pro-table__table relative w-full min-w-0" :class="tableClass" :aria-busy="loading">
+      <div v-if="loading" class="pro-table__progress" aria-hidden="true" />
       <el-table
         ref="tableRef"
-        v-loading="loading"
         :data="data"
         :size="tableSize"
         :row-key="rowKey"
         stripe
         class="w-full"
+        :class="{ 'is-initial-loading': loading && data.length === 0 }"
         @selection-change="handleSelectionChange"
       >
         <el-table-column
@@ -352,7 +355,16 @@ export type { ProTableColumn, ProTableDensity, ProTableRow } from './useProTable
         </el-table-column>
 
         <template #empty>
-          <el-empty :description="t('pt_empty')" :image-size="72" />
+          <!-- 首屏加载: 铺骨架行, 不再先展示"暂无数据" -->
+          <div v-if="loading" class="pro-table__skeleton w-full" aria-hidden="true">
+            <NoteSkeleton
+              variant="table"
+              :rows="4"
+              :columns="Math.max(visibleColumns.length + (selectable ? 1 : 0) + (hasActions ? 1 : 0), 4)"
+              :with-header="false"
+            />
+          </div>
+          <el-empty v-else :description="t('pt_empty')" :image-size="72" />
         </template>
       </el-table>
     </div>
@@ -545,6 +557,63 @@ defineExpose({
 </script>
 
 <style scoped>
+/* 刷新中的细进度条: 贴在表头顶部, 不遮挡内容、不闪转圈图标 */
+.pro-table__progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgb(var(--note-green-rgb) / 12%);
+  pointer-events: none;
+}
+
+.pro-table__progress::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--note-green), transparent);
+  transform: translateX(-100%);
+  animation: pro-table-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes pro-table-progress {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+/* 首屏骨架: 占满表体, 与真实行高接近, 数据到达时只做轻微高度变化 */
+.pro-table__table :deep(.el-table.is-initial-loading .el-table__empty-block) {
+    justify-content: flex-start;
+    align-items: stretch;
+    min-height: 180px;
+    padding: 0;
+}
+
+.pro-table__table :deep(.el-table.is-initial-loading .el-table__empty-text) {
+    width: 100%;
+    line-height: normal;
+    padding: 0 4px;
+}
+
+/* 表格行数据渐显: 从骨架切换到真实行时不再硬切 */
+.pro-table__table :deep(.el-table__body tbody tr) {
+    animation: pro-table-row-in 0.18s ease-out both;
+}
+
+@keyframes pro-table-row-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
 /* 平板(768-1023): 取消固定列后收窄单元格内边距, 降低横向拥挤 */
 .pro-table--tablet :deep(.el-table .cell) {
   padding-left: 8px;

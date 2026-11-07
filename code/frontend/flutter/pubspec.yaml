@@ -1,0 +1,26 @@
+name: codebiu
+description: CodeBiu 客户端（手机 / PC 桌面同构，统一手机尺寸界面）
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  dio: ^5.7.0
+  provider: ^6.1.2
+  shared_preferences: ^2.3.3
+  # 知识库文档上传需要系统文件选择器（白名单已登记：doc/dev/01-开发指南.md）
+  file_picker: ^13.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

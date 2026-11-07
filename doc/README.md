@@ -9,6 +9,7 @@
 | 项目级 | `doc/` | 需求登记册/需求卡、需求分析、总体架构、权限模型、跨端开发规范、测试报告 | 单个模块的接口/表/组件细节 |
 | 后端级 | `code/backend/server_py/doc/` | 后端七类目录分层、配置初始化、Alembic 迁移、权限接入、AI 能力、性能、依赖、版本记录 | 前端页面/样式规范 |
 | 前端级 | `code/frontend/vue3/doc/` | 目录与自动路由、HTTP/复用设施、视觉主题、样式写入、响应式、菜单权限、版本记录 | 后端表结构/迁移脚本 |
+| 客户端级 | `code/frontend/flutter/doc/` | 跨端客户端开发部署、目录结构、四层分层方案、代码规范、新成员与 AI 协作指南、版本记录 | 后端表结构/迁移脚本 |
 | 运维级 | `deveops/` | 环境准备、Docker 部署、构建发布、配置/数据库初始化、跨版本升级、备份恢复 | 业务功能设计 |
 
 **单一事实来源**：同一主题只在一层写详细内容，其他层只放链接，禁止复制两份。
@@ -42,6 +43,7 @@
 | :--- | :--- | :--- |
 | 后端 `server_py` | [doc/README.md](../code/backend/server_py/doc/README.md) · [README_AI.md](../code/backend/server_py/README_AI.md) | 开发指南、配置与初始化、数据库迁移、权限接入、AI、性能、依赖；AI 硬规则与改动清单 |
 | 前端 `vue3` | [doc/README.md](../code/frontend/vue3/doc/README.md) · [README_AI.md](../code/frontend/vue3/README_AI.md) | 开发指南、视觉主题、样式写入、响应式、权限与菜单；AI 硬规则与改动清单 |
+| 客户端 `flutter` | [doc/README.md](../code/frontend/flutter/doc/README.md) · [README_AI.md](../code/frontend/flutter/README_AI.md) | 开发部署、目录结构、四层分层方案、代码规范、新成员与 AI 协作指南；AI 硬规则与改动清单 |
 | 部署运维 `deveops` | [README.md](../deveops/README.md) | 部署、构建、发布、初始化、跨版本升级、备份恢复 |
 | AI 全局 | [README_AI.md](../README_AI.md) | 全局工作流与分层规则总入口 |
 
@@ -53,7 +55,7 @@
 
 ## 5. 文档维护规则
 
-1. **先判断层级**：跨端 → 根 `doc/`；后端 → `server_py/doc/`；前端 → `vue3/doc/`；部署 → `deveops/`。
+1. **先判断层级**：跨端 → 根 `doc/`；后端 → `server_py/doc/`；前端 → `vue3/doc/`；跨端客户端 → `flutter/doc/`；部署 → `deveops/`。
 2. **AI 规范分层**：全局流程留根 `README_AI.md`，技术硬规则下沉到子项目 `README_AI.md`。
 3. **链接用相对路径**，移动文件时同步修正引用；提交前用链接检查或 grep 校验。
 4. **历史记录不改写**：登记册变更记录保留原文，新增记录追加在末尾。
@@ -75,6 +77,6 @@
 
 | 阶段 | 说明 |
 | :--- | :--- |
-| 基线版本 v1.0.0 | 通用底座：健康检测/数据监测/字典/通用配置、注册登录 JWT/用户角色部门/Casbin 权限、虚拟文件系统、模型配置/LLM/重排/OCR/语音、知识库问答、MinerU 文档解析、local+Celery 双引擎任务、模板示例 |
+| 基线版本 v1.0.0 | 通用底座：健康检测/数据监测/字典/通用配置、注册登录 JWT/用户角色部门/Casbin 权限、虚拟文件系统、模型配置/LLM/重排/OCR/语音、知识库问答、MinerU 文档解析、Celery 异步任务、模板示例 |
 | 按需扩展 | 智能体、邮件、个人小站、生活工具、地理空间、图数据库、网页搜索等按 [后端开发指南](../code/backend/server_py/doc/dev/01-开发指南.md) 新建模块 |
 | 版本升级 | 见 [版本升级与数据库迁移](../deveops/运维手册/版本升级与数据库迁移.md) |

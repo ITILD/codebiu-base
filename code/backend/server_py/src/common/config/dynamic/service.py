@@ -130,7 +130,13 @@ class SettingsService:
         if hit and now - hit[0] <= self._TTL:
             return hit[1]
         row = await self._dao.get(group)
-        value = schema.model_validate(row.value if row else {})
+        stored = row.value if row else {}
+        if stored:
+            # 兼容历史遗留键: 库中已删除字段的旧值不再参与校验(extra=forbid 会整组 400),
+            # 下次 update 落库时自然清洗掉
+            declared = schema.model_fields.keys()
+            stored = {k: v for k, v in stored.items() if k in declared}
+        value = schema.model_validate(stored)
         self._cache[group] = (now, value)
         return value
 
