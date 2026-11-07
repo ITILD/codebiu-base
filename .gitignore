@@ -14,8 +14,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# 锚定到根目录，避免误伤 Flutter 客户端 code/frontend/flutter/lib 等子项目源码
+/lib/
+/lib64/
 parts/
 sdist/
 var/
