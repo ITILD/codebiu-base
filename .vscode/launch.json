@@ -63,6 +63,14 @@
             }
         },
         {
+            "name": "▶ WIN Mobile Client: flutter (Windows 桌面窗口)",
+            "type": "dart",
+            "request": "launch",
+            "program": "${workspaceFolder}/code/frontend/flutter/lib/main.dart",
+            "cwd": "${workspaceFolder}/code/frontend/flutter",
+            "args": ["-d", "windows"]
+        },
+        {
             "name": "▶ Mobile Client: flutter (Linux 桌面窗口)",
             "type": "dart",
             "request": "launch",
@@ -96,6 +104,14 @@
             "configurations": [
                 "▶UBUNTU Backend: app.py (server_py)",
                 "▶ Mobile Client: flutter (自动选择设备)"
+            ],
+            "stopAll": true
+        },
+        {
+            "name": "后端 + 手机客户端 (win 全栈)",
+            "configurations": [
+                "▶ WIN Backend: app.py (server_py)",
+                "▶ WIN Mobile Client: flutter (Windows 桌面窗口)"
             ],
             "stopAll": true
         }
