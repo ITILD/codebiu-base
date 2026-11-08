@@ -7,7 +7,8 @@ from module_authorization.service.user import UserService
 from module_authorization.service.token import TokenService
 from module_authorization.dependencies.user import get_user_service
 from module_authorization.dependencies.token import get_token_service
-from module_contact.service.verify_code import VerifyCodeService, get_verify_code_service
+from module_contact.dependencies.notification import get_notification_service
+from module_contact.service.notification import NotificationService
 
 # 不做业务验证：oauth2_scheme 不验证 Token 的有效性、过期时间或签名。它只负责“搬运”字符串。
 # OAuth2 scheme(tokenUrl 指向 OAuth2 标准响应端点,Swagger Authorize 才能自动提取令牌)
@@ -17,10 +18,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/authorization/auth/token")
 async def get_auth_service(
     user_service: UserService = Depends(get_user_service),
     token_service: TokenService = Depends(get_token_service),
-    verify_code_service: VerifyCodeService = Depends(get_verify_code_service),
+    notification_service: NotificationService = Depends(get_notification_service),
 ):
-    """AuthService工厂函数(注入用户/令牌/验证码服务, 验证码由 module_contact 提供邮件/短信触达)"""
-    return AuthService(user_service, token_service, verify_code_service)
+    """AuthService工厂函数(注入用户/令牌/通知中心服务, 邮件/短信验证码统一经 module_contact 收发)"""
+    return AuthService(user_service, token_service, notification_service)
 
 
 async def get_current_user(

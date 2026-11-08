@@ -2,7 +2,7 @@
 
 from module_authorization.do.token import TokenResponseFull
 from module_authorization.do.user import UserResponse
-from pydantic import BaseModel,Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AuthResponse(BaseModel):
@@ -42,7 +42,7 @@ class PasswordChange(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """注册请求模型(相比用户创建数据增加邮箱验证码字段)"""
+    """注册请求模型(相比用户创建数据增加邮箱/短信验证码字段)"""
     username: str = Field(..., max_length=50, description="用户名")
     password: str = Field(..., max_length=255, description="密码")
     email: str | None = Field(default=None, max_length=100, description="邮箱")
@@ -51,16 +51,28 @@ class RegisterRequest(BaseModel):
     code: str | None = Field(
         default=None, max_length=10, description="邮箱验证码(开启注册邮箱验证时必填)"
     )
+    phone_code: str | None = Field(
+        default=None, max_length=10, description="手机验证码(开启注册短信验证时必填)"
+    )
 
 
 class RegisterCodeRequest(BaseModel):
-    """注册邮箱验证码发送请求模型"""
-    email: str = Field(..., max_length=100, description="接收验证码的邮箱")
+    """注册验证码发送请求模型(邮箱/手机号二选一)"""
+    email: str | None = Field(default=None, max_length=100, description="接收验证码的邮箱")
+    phone: str | None = Field(default=None, max_length=20, description="接收验证码的手机号")
+
+    @model_validator(mode="after")
+    def _require_one_target(self) -> "RegisterCodeRequest":
+        """邮箱与手机号至少填写一个"""
+        if not self.email and not self.phone:
+            raise ValueError("请填写邮箱或手机号")
+        return self
 
 
 class RegisterConfigResponse(BaseModel):
-    """注册流程配置响应模型(前端据此决定是否展示验证码输入)"""
+    """注册流程配置响应模型(前端据此决定是否展示对应验证码输入)"""
     email_verify: bool = Field(default=False, description="注册是否需要邮箱验证码")
+    sms_verify: bool = Field(default=False, description="注册是否需要短信验证码")
 
 
 class LoginCodeRequest(BaseModel):

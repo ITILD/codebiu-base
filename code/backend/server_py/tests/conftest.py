@@ -13,6 +13,7 @@
 - 测试数据一律带时间戳唯一后缀,测完清理,不依赖执行顺序
 - 禁止用真实 admin 账户执行写操作类用例(自助资料/头像等会覆盖持久数据)
 """
+from __future__ import annotations
 
 import hashlib
 import logging
@@ -22,6 +23,7 @@ import uuid
 from pathlib import Path
 
 from httpx import ASGITransport, AsyncClient
+import pytest
 import pytest_asyncio
 
 # Windows 下切换 Selector 事件循环(psycopg 异步模式不支持 ProactorEventLoop,
@@ -55,6 +57,28 @@ async def _app_lifespan():
         logger.info("app lifespan started (tables/casbin/admin ready)")
         yield
     logger.info("app lifespan closed")
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _disable_register_verify(_app_lifespan):
+    """测试环境关闭注册邮箱/短信验证开关
+
+    生产/开发动态配置可能已开启注册验证码; 测试批量注册账户时不应依赖真实
+    SMTP/短信通道, 故在会话内把认证服务读取的两个开关固定为关闭(不改数据库)。
+    """
+    from module_authorization.service import auth as auth_module
+
+    patcher = pytest.MonkeyPatch()
+
+    async def _always_false() -> bool:
+        return False
+
+    patcher.setattr(auth_module, "email_verify_enabled", _always_false)
+    patcher.setattr(auth_module, "sms_verify_enabled", _always_false)
+    try:
+        yield
+    finally:
+        patcher.undo()
 
 
 class _MemoryStorage:

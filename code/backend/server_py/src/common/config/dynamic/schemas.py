@@ -68,6 +68,9 @@ class SmsSettings(SettingsGroup):
         title="通知模板 CODE",
         description="通知中心短信模板(REQ-011, 模板需含 ${title} 变量); 为空时通知短信自动降级站内",
     )
+    use_for_register: bool = Field(
+        False, title="注册需短信验证", description="开启后注册需先获取手机验证码(与邮箱验证可同时开启)"
+    )
 
     _secret_fields = frozenset({"access_key_secret"})
 

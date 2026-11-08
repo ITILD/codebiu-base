@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
-import 'core/app_core.dart';
-import 'core/settings.dart';
-import 'providers/agent_provider.dart';
-import 'providers/auth_provider.dart';
-import 'providers/chat_provider.dart';
-import 'providers/rag_provider.dart';
-import 'ui/pages/auth_gate.dart';
-import 'ui/theme.dart';
+import 'common/app_core.dart';
+import 'common/settings.dart';
+import 'common/theme.dart';
+import 'modules/agent/providers/agent_provider.dart';
+import 'modules/ai/providers/chat_provider.dart';
+import 'modules/authorization/providers/auth_provider.dart';
+import 'modules/main/pages/auth_gate.dart';
+import 'modules/rag/providers/rag_provider.dart';
 
 /// 应用根组件
 class CodeBiuApp extends StatelessWidget {

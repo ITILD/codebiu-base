@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:codebiu/core/services/local_assistant.dart';
+import 'package:codebiu/common/services/local_assistant.dart';
 
 void main() {
   group('LocalAssistant', () {

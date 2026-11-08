@@ -2,6 +2,15 @@
 
 > 发版/变更记录按时间倒序追加；不改写历史条目。
 
+## 未发布（2026-11-08）
+
+**重构：目录结构向 Vue3 对齐**
+- `lib/` 调整为 `common/` + `modules/<模块>/{api,types,providers,pages}`；模块名与 `vue3/src/modules/*`、后端 `src/module_*` 同名（`authorization` / `ai` / `agent` / `rag` / `main`）
+- 原 `core/`、`ui/`、`providers/` 按业务域拆入对应模块；主题、设置、常量、拦截器、错误中文化、AppCore 组合根归入 `common/`
+- 仅调整路径与相对 import，功能与界面不变；README、README_AI、doc/dev 01~03、REQ-017 文档同步更新
+
+**验证**：当前开发机未安装 Flutter SDK，未执行 `flutter analyze` / `flutter test`；已用脚本校验全部 144 条 import 路径可解析
+
 ## 0.2.0（2026-11-07）
 
 **重构：对话即入口（基线形态）**

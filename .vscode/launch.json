@@ -71,6 +71,13 @@
             "args": ["-d", "windows"]
         },
         {
+            "name": "▶ WIN Mobile Client: flutter run (终端)",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "\"D:\\a_code_lib\\flutter\\bin\\flutter.bat\" run -d windows",
+            "cwd": "${workspaceFolder}/code/frontend/flutter"
+        },
+        {
             "name": "▶ Mobile Client: flutter (Linux 桌面窗口)",
             "type": "dart",
             "request": "launch",

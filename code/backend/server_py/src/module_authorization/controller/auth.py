@@ -29,7 +29,7 @@ from module_authorization.do.auth import (
     RegisterConfigResponse,
     RegisterRequest,
 )
-from module_authorization.config.register import email_verify_enabled
+from module_authorization.config.register import email_verify_enabled, sms_verify_enabled
 from common.config.dynamic import get_settings
 from common.config.dynamic.schemas import LoginSecuritySettings
 
@@ -140,20 +140,23 @@ async def get_my_permissions(
 
 @router.get("/register-config", summary="获取注册流程配置")
 async def get_register_config() -> RegisterConfigResponse:
-    """返回注册流程配置(是否开启邮箱验证码),供前端决定注册弹窗是否展示验证码输入"""
-    return RegisterConfigResponse(email_verify=await email_verify_enabled())
+    """返回注册流程配置(邮箱/短信验证码开关),供前端决定注册弹窗是否展示对应验证码输入"""
+    return RegisterConfigResponse(
+        email_verify=await email_verify_enabled(),
+        sms_verify=await sms_verify_enabled(),
+    )
 
 
-@router.post("/register/code", summary="发送注册邮箱验证码")
+@router.post("/register/code", summary="发送注册验证码(邮箱或手机号)")
 async def send_register_code(
     code_request: RegisterCodeRequest,
     auth_service: AuthService = Depends(get_auth_service),
 ) -> bool:
-    """向指定邮箱发送注册验证码:仅开启 email.use_for_register 时可用,
-    同一邮箱60秒内限发一次,验证码5分钟内有效且校验通过后立即失效
+    """向指定邮箱或手机号发送注册验证码:对应通道开关开启时可用,
+    同一目标60秒内限发一次,验证码5分钟内有效且校验通过后立即失效
     """
-    # 未开启邮箱验证/发送过于频繁/邮件发送失败抛 ValueError, 由全局处理器映射为 400
-    return await auth_service.send_register_code(code_request.email)
+    # 未开启对应验证/发送过于频繁/通道发送失败抛 ValueError, 由全局处理器映射为 400
+    return await auth_service.send_register_code(code_request.email, code_request.phone)
 
 
 @router.post("/register", summary="注册用户")
@@ -163,11 +166,16 @@ async def register_user(
 ) -> AuthResponse:
     """注册新用户并直接返回登录态:校验用户名唯一(重复时报400)
     密码加密存储,首个注册用户自动引导为全局管理员,成功返回 access/refresh 双令牌与用户信息
-    开启邮箱验证(email.use_for_register)时需先调 /register/code 获取验证码并随请求提交
+    开启邮箱验证(email.use_for_register)时需先调 /register/code 获取验证码并随 code 提交;
+    开启短信验证(sms.use_for_register)时需先获取手机验证码并随 phone_code 提交
     """
     # 用户名重复/验证码错误等校验失败抛 ValueError, 由全局处理器映射为 400
-    user_create = UserCreate(**register_request.model_dump(exclude={"code"}))
-    return await auth_service.register(user_create, register_request.code)
+    user_create = UserCreate(
+        **register_request.model_dump(exclude={"code", "phone_code"})
+    )
+    return await auth_service.register(
+        user_create, register_request.code, register_request.phone_code
+    )
 
 @router.get("/login-policy", summary="获取登录流程配置")
 async def get_login_policy() -> LoginPolicyResponse:

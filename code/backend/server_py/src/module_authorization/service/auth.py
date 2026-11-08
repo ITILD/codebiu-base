@@ -20,9 +20,10 @@ from module_authorization.do.auth import AuthResponse, AuthLogoutRequest, SelfPr
 from common.config.db import db_cache
 from common.config.dynamic import get_settings
 from common.config.dynamic.schemas import LoginSecuritySettings, TokenSettings
-from module_authorization.config.register import email_verify_enabled
-# 邮件/短信触达与验证码能力由 module_contact 提供(注册验证码收发经依赖注入调用)
-from module_contact.service.verify_code import VerifyCodeService
+from module_authorization.config.register import email_verify_enabled, sms_verify_enabled
+# 邮件/短信触达与验证码能力由 module_contact 通知中心统一提供
+from module_contact.dao.notification import ContactMessageDao, ContactSubscriptionDao
+from module_contact.service.notification import NotificationService
 
 import logging
 
@@ -36,29 +37,32 @@ class AuthService:
         self,
         user_service: UserService,
         token_service: TokenService,
-        verify_code_service: VerifyCodeService | None = None,
+        notification_service: NotificationService | None = None,
     ):
         """
         初始化认证服务
         :param user_service: 用户服务对象
         :param token_service: 令牌服务对象
-        :param verify_code_service: 验证码服务对象(module_contact 提供, 默认取全局单例)
+        :param notification_service: 通知中心服务(module_contact 提供, 默认新建实例)
         """
         self.user_service = user_service
         self.token_service = token_service
-        self.verify_code_service = verify_code_service or VerifyCodeService()
+        self.notification_service = notification_service or NotificationService(
+            ContactMessageDao(), ContactSubscriptionDao()
+        )
         # 登录安全策略(REQ-014): 无状态服务, 默认新建
         self.login_security = LoginSecurityService()
 
     async def register(
-        self, user_create: UserCreate, code: str | None = None
+        self, user_create: UserCreate, code: str | None = None, phone_code: str | None = None
     ) -> AuthResponse:
         """
         用户注册
         :param user_create: 用户创建数据
         :param code: 邮箱验证码(开启注册邮箱验证 email.use_for_register 时必填)
+        :param phone_code: 手机验证码(开启注册短信验证 sms.use_for_register 时必填)
         :return: 注册成功的用户信息
-        :raises: ValueError 如果用户名已存在/邮箱验证码缺失或错误/密码不符合强度策略
+        :raises: ValueError 如果用户名已存在/验证码缺失或错误/密码不符合强度策略
         """
         # 密码强度策略(REQ-014, 开启时注册与改密两处生效)
         sec = await get_settings(LoginSecuritySettings)
@@ -66,27 +70,45 @@ class AuthService:
             error = password_policy_error(user_create.password, sec)
             if error:
                 raise ValueError(error)
+        # 验证码统一由通知中心校验(邮件/短信通道按目标自动路由)
         if await email_verify_enabled():
             if not user_create.email:
                 raise ValueError("注册需要邮箱验证, 请填写邮箱")
-            await self.verify_code_service.verify(user_create.email, code, scene="register")
+            await self.notification_service.verify_code(user_create.email, code, scene="register")
+        if await sms_verify_enabled():
+            if not user_create.phone:
+                raise ValueError("注册需要短信验证, 请填写手机号")
+            await self.notification_service.verify_code(
+                user_create.phone, phone_code, scene="register"
+            )
         user = await self.user_service.add(user_create)
         if not user:
             raise ValueError("用户创建失败")
         # 创建令牌响应
         return await self._create_token_response_full(user)
 
-    async def send_register_code(self, email: str) -> bool:
+    async def send_register_code(
+        self, email: str | None = None, phone: str | None = None
+    ) -> bool:
         """
-        发送注册邮箱验证码(需开启注册邮箱验证 email.use_for_register)
-        :param email: 接收验证码的邮箱
+        发送注册验证码(邮箱或手机号; 对应通道需开启注册验证开关)
+        :param email: 接收验证码的邮箱(开启 email.use_for_register 时可用)
+        :param phone: 接收验证码的手机号(开启 sms.use_for_register 时可用)
         :return: 是否发送成功
-        :raises: ValueError 如果未开启邮箱验证/发送过于频繁/邮件发送失败
+        :raises: ValueError 如果对应通道未开启/目标缺失/发送过于频繁/发送失败
         """
-        if not await email_verify_enabled():
+        if email and await email_verify_enabled():
+            target = email
+        elif phone and await sms_verify_enabled():
+            target = phone
+        elif email:
             raise ValueError("未开启注册邮箱验证")
-        # 生成/冷却/发送/落缓存统一由 module_contact 验证码服务管理
-        return await self.verify_code_service.send(email, scene="register")
+        elif phone:
+            raise ValueError("未开启注册短信验证")
+        else:
+            raise ValueError("请填写邮箱或手机号")
+        # 生成/冷却/发送/落缓存统一由通知中心验证码服务管理
+        return await self.notification_service.send_code(target, scene="register")
 
     async def login(self, username: str, password: str, code: str | None = None) -> AuthResponse:
         """
@@ -117,7 +139,7 @@ class AuthService:
         if sec.mfa_enabled:
             if not user.email:
                 raise ValueError("账户未配置邮箱, 无法完成登录二次验证, 请联系管理员")
-            await self.verify_code_service.verify(user.email, code, scene="login")
+            await self.notification_service.verify_code(user.email, code, scene="login")
 
         # 登录成功清空失败计数
         if sec.lock_enabled:
@@ -139,7 +161,7 @@ class AuthService:
         user = await self.user_service.get_by_username(username)
         if not user or not user.email:
             raise ValueError("用户不存在或未配置邮箱")
-        return await self.verify_code_service.send(user.email, scene="login")
+        return await self.notification_service.send_code(user.email, scene="login")
 
     async def _create_token_response_full(self, user: User) -> AuthResponse:
         """

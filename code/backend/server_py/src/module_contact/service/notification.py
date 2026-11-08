@@ -29,6 +29,7 @@ from module_contact.do.notification import (
 )
 from module_contact.service.email import EmailService, get_email_service
 from module_contact.service.sms import SmsService, get_sms_service
+from module_contact.service.verify_code import VerifyCodeService, get_verify_code_service
 from module_contact.utils.notification_hub import notification_hub
 
 logger = logging.getLogger(__name__)
@@ -43,17 +44,40 @@ class NotificationService:
         subscription_dao: ContactSubscriptionDao,
         email_service: EmailService | None = None,
         sms_service: SmsService | None = None,
+        verify_code_service: VerifyCodeService | None = None,
     ):
         """
         :param message_dao: 站内信DAO
         :param subscription_dao: 订阅DAO
         :param email_service: 邮件通道(默认全局单例; 测试可注入打桩)
         :param sms_service: 短信通道(默认全局单例; 测试可注入打桩)
+        :param verify_code_service: 验证码服务(默认全局单例; 认证等业务方经本服务统一调用)
         """
         self.message_dao = message_dao
         self.subscription_dao = subscription_dao
         self.email_service = email_service or get_email_service()
         self.sms_service = sms_service or get_sms_service()
+        self.verify_code_service = verify_code_service or get_verify_code_service()
+
+    # ################ 验证码(注册/登录等业务方统一入口) ################
+
+    async def send_code(self, target: str, scene: str = "register") -> bool:
+        """发送验证码(邮箱/手机号按目标格式自动路由到邮件/短信通道)
+        :param target: 接收验证码的邮箱或手机号
+        :param scene: 业务场景(缓存键隔离, 如 register/login)
+        :return: 是否发送成功
+        :raises ValueError: 发送过于频繁/目标格式不支持/通道发送失败
+        """
+        return await self.verify_code_service.send(target, scene=scene)
+
+    async def verify_code(self, target: str, code: str | None, scene: str = "register") -> None:
+        """校验验证码(通过后立即失效)
+        :param target: 接收验证码的邮箱或手机号
+        :param code: 用户提交的验证码
+        :param scene: 业务场景(与发送时一致)
+        :raises ValueError: 验证码缺失/错误或已过期
+        """
+        await self.verify_code_service.verify(target, code, scene=scene)
 
     # ################ 发送 ################
 

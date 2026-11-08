@@ -21,23 +21,30 @@
 
 ## 代码入口速查
 
+> 目录与 [vue3/src](../../vue3/src) 对齐：业务代码在 `lib/modules/<模块>/`（`api / types / providers / pages`），跨模块基础设施在 `lib/common/`。模块名与后端 `src/module_*` 同名。
+
 | 能力 | 文件 |
 | :--- | :--- |
-| 服务定位器（Dio/设置/会话/业务服务） | `lib/core/app_core.dart` |
-| 服务器地址 / AI 模式 / 主题持久化 | `lib/core/settings.dart` |
-| 登录会话与令牌存储 | `lib/core/session.dart` |
-| 认证拦截（Bearer 注入 + 401 刷新重放） | `lib/core/services/auth_interceptor.dart` |
-| 登录/注册/资料/密码 API | `lib/core/services/auth_service.dart` |
-| 对话 API（SSE 流式 + 非流式回退） | `lib/core/services/ai_service.dart` |
-| 模型列表 API | `lib/core/services/ai_service.dart`（`chatModels`） |
-| 离线本地助手 | `lib/core/services/local_assistant.dart` |
-| 错误信息中文化 | `lib/core/services/api_error.dart` |
-| 认证/对话状态 | `lib/providers/auth_provider.dart` · `lib/providers/chat_provider.dart` |
-| 知识库/智能体状态 | `lib/providers/rag_provider.dart` · `lib/providers/agent_provider.dart` |
-| 知识库/智能体 API | `lib/core/services/rag_service.dart` · `lib/core/services/agent_service.dart` |
-| 主题（自然笔记色系 + 明暗） | `lib/ui/theme.dart` |
-| 宽屏手机壳（限宽 460） | `lib/ui/theme.dart`（`PhoneShell`） |
-| 页面 | `lib/ui/pages/`：对话主页 `chat_page.dart`（抽屉+头像菜单+**新功能入口卡片**）· 知识库 `knowledge_page.dart` · 文档 `kb_project_page.dart` · 智能体 `agent_page.dart` · 登录/注册/模型选择/资料/密码/设置 |
+| 服务定位器（Dio/设置/会话/业务服务） | `lib/common/app_core.dart` |
+| 服务器地址 / AI 模式 / 主题持久化 | `lib/common/settings.dart` |
+| 常量（默认地址/限宽） | `lib/common/constants.dart` |
+| 登录会话与令牌存储 | `lib/modules/authorization/session.dart` |
+| 认证拦截（Bearer 注入 + 401 刷新重放） | `lib/common/services/auth_interceptor.dart` |
+| 登录/注册/资料/密码 API | `lib/modules/authorization/api/auth_service.dart` |
+| 认证/用户状态 | `lib/modules/authorization/providers/auth_provider.dart` |
+| 用户资料模型 | `lib/modules/authorization/types/user.dart` |
+| 认证响应模型 | `lib/modules/authorization/types/auth.dart` |
+| 对话 API（SSE 流式 + 非流式回退） | `lib/modules/ai/api/ai_service.dart` |
+| 模型列表 API | `lib/modules/ai/api/ai_service.dart`（`chatModels`） |
+| 对话状态与动作 | `lib/modules/ai/providers/chat_provider.dart` |
+| 对话数据类型 | `lib/modules/ai/types/`（`chat_message` / `conversation` / `model_config`） |
+| 离线本地助手 | `lib/common/services/local_assistant.dart` |
+| 错误信息中文化 | `lib/common/services/api_error.dart` |
+| 知识库状态 / API / 类型 | `lib/modules/rag/providers/rag_provider.dart` · `api/rag_service.dart` · `types/kb_project.dart` |
+| 智能体状态 / API | `lib/modules/agent/providers/agent_provider.dart` · `api/agent_service.dart` |
+| 主题（自然笔记色系 + 明暗） | `lib/common/theme.dart` |
+| 宽屏手机壳（限宽 460） | `lib/common/theme.dart`（`PhoneShell`） |
+| 页面 | 对话 `modules/ai/pages/chat_page.dart`（抽屉+头像菜单+**新功能入口卡片**）· 知识库 `modules/rag/pages/` · 智能体 `modules/agent/pages/agent_page.dart` · 登录/注册/资料/密码 `modules/authorization/pages/` · 模型选择 `modules/ai/pages/model_picker_page.dart` · 登录门/设置 `modules/main/pages/` |
 | 桌面窗口尺寸（420×880） | `linux/runner/my_application.cc` · `windows/runner/main.cpp` · `macos/Runner/MainFlutterWindow.swift` |
 | Android 明文传输与网络权限 | `android/app/src/main/AndroidManifest.xml` |
 | iOS 允许 HTTP 后端 | `ios/Runner/Info.plist`（NSAppTransportSecurity） |
