@@ -1,7 +1,10 @@
-"""智能体模块权限声明(REQ-013)
+"""智能体模块权限声明(REQ-013/REQ-018)
 
 agent 域节点:
 - agent:manage 助手管理(后台管理页, 默认不授予, 管理员在角色管理中分配)
+- skill:invoke Skill 调试台(直接调起任意 Skill; 默认不授予, 仅管理员/调试场景,
+  对话入口的工具调用不检查此权限——那走 rag:chat:write 的对话授权链)
+- skill:manage Skill 资产管理(内置同步/发布治理; 默认不授予)
 - 对话能力沿用 rag:chat:write(智能体对话与知识库问答同属"AI 助手"入口)
 """
 
@@ -16,7 +19,7 @@ AGENT_DEFINE = ModulePermissionDefine(
     name="智能体",
     icon="MagicStick",
     order_num=35,
-    description="AI 助手与智能体框架: 自建助手/Skill 注册表/工具调用循环",
+    description="AI 助手与能力平台: Skill 注册表/统一运行时/智能体编排",
     nodes=[
         PermNode(
             name="助手管理",
@@ -31,8 +34,25 @@ AGENT_DEFINE = ModulePermissionDefine(
                 PermNode(name="删除", code="agent:manage:delete", menu_type="F"),
             ],
         ),
+        PermNode(
+            name="Skill 管理",
+            code="agent:skill",
+            menu_type="C",
+            path="/agent/skills",
+            order_num=2,
+            children=[
+                # 按钮级权限码须 3 段(dom:obj:act)与 require_permission 对齐
+                PermNode(name="查询", code="agent:skill:read", menu_type="F"),
+                PermNode(name="发布治理", code="agent:skill:update", menu_type="F"),
+                PermNode(
+                    name="调用调试",
+                    code="agent:skill:invoke",
+                    menu_type="F",
+                ),
+            ],
+        ),
     ],
-    # 自建助手登录即可, 管理节点默认不授予
+    # 自建助手登录即可; 管理节点与调试台默认不授予
     default_policies=[],
 )
 

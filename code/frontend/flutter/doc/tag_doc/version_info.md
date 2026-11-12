@@ -2,6 +2,16 @@
 
 > 发版/变更记录按时间倒序追加；不改写历史条目。
 
+## 未发布（2026-11-11）
+
+**契约对齐：AI 能力平台（REQ-018，flutter 端最小适配）**
+- `/agent/skills` 适配新响应（Manifest 视图）：技能多选 value 改用全局键 `key`（如 `sys.web_search`）、label 用展示名 `name`；存量旧短名（不含 "."）已保存值在编辑回显时原样展示、可移除（后端兼容解析，不报错）
+- 技能选择项展示 nature 徽标（static=规则 / ai=模型 / hybrid=混合）；`agent_callable=false`（不可对话调用）的技能在选择器中禁用
+- `/agent/agents` 新增字段解析：`agent_kind`（chat/job，job 类显示「任务」徽标，不做 job 管理）与 `decision_mode`（rule/model/hybrid）；列表技能副标题按键回显展示名
+- 新增 `test/agent_model_test.dart`（模型 fromJson 单测）
+
+**验证**：`flutter analyze` 0 issue、`flutter test` 全过、分层越界检查无输出
+
 ## 未发布（2026-11-08）
 
 **重构：目录结构向 Vue3 对齐**

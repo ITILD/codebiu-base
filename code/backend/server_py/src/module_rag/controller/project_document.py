@@ -669,5 +669,42 @@ async def reparse_project_document_task(
 
 
 
+@router.post(
+    "/{document_id}/ingest",
+    summary="文档解析入库(REQ-018 能力平台链路)",
+)
+async def ingest_project_document(
+    document_id: str,
+    body: dict | None = None,
+    current_user_id: str = Depends(get_current_user_id),
+    service: ProjectDocumentService = Depends(get_project_document_service),
+) -> dict:
+    """经 kb_ingest_agent(static_agent)解析入库: doc_parse → doc_chunk_index 编排,
+    零模型环境按 BM25-only 降级入库(degraded 标记, CA-06);
+    与对话/队列入口共用同一 SkillRuntime 实现, 全程可在 skill_invocation 追溯
+
+    :param body: {mode?: auto/inline}(默认 auto: 批处理优先 queued)
+    :return: {job_run_id, status, task_id?}(inline 完成时含步骤聚合结果)
+    """
+    from module_agent.service.agent_job import AgentJobService
+    from module_agent.service.skill_runtime import SkillContext
+
+    body = body or {}
+    doc_info = await service.get_document(document_id)
+    if not doc_info:
+        raise NotFoundError("文档不存在")
+    await enforce_project_permission(current_user_id, doc_info.project_id, "doc", "update")
+    return await AgentJobService().submit(
+        "sys.kb_ingest_agent",
+        {"documents": [{"document_id": document_id}]},
+        SkillContext(
+            user_id=current_user_id,
+            project_ids=[doc_info.project_id],
+            entry="web",
+        ),
+        mode=str(body.get("mode") or "auto"),
+    )
+
+
 # 注册路由
 module_app.include_router(router, prefix="/project-documents", tags=["项目文档管理"])

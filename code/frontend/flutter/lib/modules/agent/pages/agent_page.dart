@@ -92,12 +92,34 @@ class _AgentPageState extends State<AgentPage> {
                     children: [
                       for (final s in provider.skills)
                         FilterChip(
-                          label: Text(s.displayName,
-                              style: const TextStyle(fontSize: 12)),
-                          selected: skills.contains(s.name),
-                          onSelected: (v) => setSheet(() {
-                            v ? skills.add(s.name) : skills.remove(s.name);
-                          }),
+                          label: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(s.name,
+                                  style: const TextStyle(fontSize: 12)),
+                              if (_natureLabel(s.nature) != null) ...[
+                                const SizedBox(width: 5),
+                                _natureBadge(
+                                    s.nature, Theme.of(ctx).colorScheme),
+                              ],
+                            ],
+                          ),
+                          selected: skills.contains(s.key),
+                          onSelected: s.agentCallable
+                              ? (v) => setSheet(() {
+                                    v ? skills.add(s.key) : skills.remove(s.key);
+                                  })
+                              : null,
+                        ),
+                      // 存量旧短名（不含 "."）等注册表外的已存值：原样回显，可移除
+                      for (final v in skills
+                          .where((v) =>
+                              !provider.skills.any((s) => s.key == v))
+                          .toList())
+                        InputChip(
+                          label: Text(v, style: const TextStyle(fontSize: 12)),
+                          onDeleted: () =>
+                              setSheet(() => skills.remove(v)),
                         ),
                     ],
                   ),
@@ -246,6 +268,10 @@ class _AgentPageState extends State<AgentPage> {
                           style: const TextStyle(
                               fontSize: 14.5, fontWeight: FontWeight.w600)),
                     ),
+                    if (a.agentKind == 'job') ...[
+                      const SizedBox(width: 6),
+                      _tag(scheme, '任务', scheme.tertiary),
+                    ],
                     if (a.isBuiltin) ...[
                       const SizedBox(width: 6),
                       _tag(scheme, '内置', scheme.onSurfaceVariant),
@@ -260,7 +286,7 @@ class _AgentPageState extends State<AgentPage> {
                   child: Text(
                     a.skills.isEmpty
                         ? (a.description ?? '—')
-                        : '技能：${a.skills.join(' / ')}',
+                        : '技能：${a.skills.map(provider.skillLabel).join(' / ')}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -328,6 +354,31 @@ class _AgentPageState extends State<AgentPage> {
       child: Text(text,
           style: TextStyle(
               fontSize: 10.5, color: color, fontWeight: FontWeight.w600)),
+    );
+  }
+
+  /// 技能实现性质徽标文案：static=规则 / ai=模型 / hybrid=混合
+  String? _natureLabel(String nature) => switch (nature) {
+        'static' => '规则',
+        'ai' => '模型',
+        'hybrid' => '混合',
+        _ => null,
+      };
+
+  Widget _natureBadge(String nature, ColorScheme scheme) {
+    final label = _natureLabel(nature);
+    if (label == null) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              fontSize: 9.5,
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600)),
     );
   }
 }

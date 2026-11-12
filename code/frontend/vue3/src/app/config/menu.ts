@@ -17,7 +17,7 @@ import {
   HomeFilled, UserFilled,
   Monitor, ChatDotRound, Setting,
   Files, Collection, FolderOpened,
-  Timer, Search, MagicStick,
+  Timer, Search, MagicStick, Operation,
 } from '@element-plus/icons-vue'
 
 /** 末级菜单项(分组下的子项, 对应一个具体页面) */
@@ -73,7 +73,7 @@ export const menuItems: MenuItem[] = [
     index: '/ai',
     icon: markRaw(ChatDotRound),
     title: 'AI 能力',
-    desc: '对话、知识库与智能体编排, 以及模型与助手配置。',
+    desc: '对话、知识库与智能体能力编排, 以及模型与助手配置。',
     children: [
       // 三个使用页与系统配置页同为分组末级子项, 页面内不再有内页导航
       {
@@ -99,6 +99,14 @@ export const menuItems: MenuItem[] = [
         home: true,
         icon: markRaw(MagicStick),
         desc: '注册智能体、编排技能与全局视图。',
+      },
+      {
+        // 能力中心(REQ-018): 技能清单/调试/调用观测登录可见, 调试与自定义管理按权限位收口(页面内 403 优雅处理)
+        index: '/agent/skills',
+        title: '能力中心',
+        home: true,
+        icon: markRaw(Operation),
+        desc: '技能清单、调试台、调用观测与编排 Job。',
       },
       {
         index: '/ai/model_config',

@@ -22,6 +22,7 @@ declare module 'vue-router/auto-routes' {
     '/[..all]': RouteRecordInfo<'/[..all]', '/:ll(.*)', { ll: ParamValue<true> }, { ll: ParamValue<false> }>,
     '/admin': RouteRecordInfo<'/admin', '/admin', Record<never, never>, Record<never, never>>,
     '/agent/manage': RouteRecordInfo<'/agent/manage', '/agent/manage', Record<never, never>, Record<never, never>>,
+    '/agent/skills': RouteRecordInfo<'/agent/skills', '/agent/skills', Record<never, never>, Record<never, never>>,
     '/ai/assistant': RouteRecordInfo<'/ai/assistant', '/ai/assistant', Record<never, never>, Record<never, never>>,
     '/ai/model_config': RouteRecordInfo<'/ai/model_config', '/ai/model_config', Record<never, never>, Record<never, never>>,
     '/authorization/casbin': RouteRecordInfo<'/authorization/casbin', '/authorization/casbin', Record<never, never>, Record<never, never>>,
@@ -29,7 +30,6 @@ declare module 'vue-router/auto-routes' {
     '/authorization/permission': RouteRecordInfo<'/authorization/permission', '/authorization/permission', Record<never, never>, Record<never, never>>,
     '/authorization/role': RouteRecordInfo<'/authorization/role', '/authorization/role', Record<never, never>, Record<never, never>>,
     '/authorization/user': RouteRecordInfo<'/authorization/user', '/authorization/user', Record<never, never>, Record<never, never>>,
-    '/contact_message/contact_message': RouteRecordInfo<'/contact_message/contact_message', '/contact_message/contact_message', Record<never, never>, Record<never, never>>,
     '/file/': RouteRecordInfo<'/file/', '/file', Record<never, never>, Record<never, never>>,
     '/main/audit': RouteRecordInfo<'/main/audit', '/main/audit', Record<never, never>, Record<never, never>>,
     '/main/codegen': RouteRecordInfo<'/main/codegen', '/main/codegen', Record<never, never>, Record<never, never>>,
@@ -87,6 +87,10 @@ declare module 'vue-router/auto-routes' {
       routes: '/agent/manage'
       views: never
     }
+    'src/modules/agent/pages/skills.vue': {
+      routes: '/agent/skills'
+      views: never
+    }
     'src/modules/ai/pages/assistant.vue': {
       routes: '/ai/assistant'
       views: never
@@ -113,10 +117,6 @@ declare module 'vue-router/auto-routes' {
     }
     'src/modules/authorization/pages/user.vue': {
       routes: '/authorization/user'
-      views: never
-    }
-    'src/modules/contact_message/pages/contact_message.vue': {
-      routes: '/contact_message/contact_message'
       views: never
     }
     'src/modules/file/pages/index.vue': {

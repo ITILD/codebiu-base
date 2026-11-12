@@ -25,25 +25,27 @@
         <el-select
           v-model="form.skills"
           multiple
+          filterable
           collapse-tags
           collapse-tags-tooltip
           class="w-full"
           placeholder="不选则为纯对话助手"
         >
+          <!-- 选项 value 用全局键(sys.web_search), 旧存量短名值不匹配选项时回显原值 -->
           <el-option
             v-for="s in skills"
-            :key="s.name"
-            :label="s.display_name"
-            :value="s.name"
+            :key="s.key"
+            :label="s.name"
+            :value="s.key"
           >
             <span flex items-center justify-between gap-3>
-              <span>{{ s.display_name }}</span>
+              <span>{{ s.name }}</span>
               <span v-ellipsis text-xs opacity-50 truncate max-w-50>{{ s.description }}</span>
             </span>
           </el-option>
         </el-select>
       </el-form-item>
-      <el-form-item v-if="(form.skills ?? []).includes('rag_qa')" label="默认知识库">
+      <el-form-item v-if="hasRagQaSkill" label="默认知识库">
         <el-select
           v-model="form.default_project_ids"
           multiple
@@ -113,6 +115,12 @@ const emptyForm = (): AgentCreateReq & { is_public: boolean } => ({
   is_public: false,
 })
 const form = ref(emptyForm())
+
+/** 是否选中知识库问答技能(新全局键 sys.rag_qa 与旧存量短名 rag_qa 均兼容) */
+const hasRagQaSkill = computed(() => {
+  const selected = form.value.skills ?? []
+  return selected.includes('rag_qa') || selected.includes('sys.rag_qa')
+})
 
 /** 加载技能与知识库选项(仅一次) */
 const loadOptions = async () => {

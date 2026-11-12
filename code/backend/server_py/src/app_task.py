@@ -44,6 +44,7 @@ from common.config.tasks import app as celery_app
 # 导入任务注册(Worker 进程必须导入任务模块, 否则对应任务无法被路由执行)
 from module_task.tasks import demo, maintenance, schedule_beat  # noqa: F401
 from module_rag.tasks import project_document, project_document_chunk  # noqa: F401
+from module_agent import tasks as agent_tasks  # noqa: F401 (REQ-018: skill_execute / agent_job_execute)
 
 logger = logging.getLogger(__name__)
 
@@ -161,13 +162,17 @@ if __name__ == "__main__":
     # Windows 推荐 solo 池(单进程顺序消费); 生产环境可换 prefork/gevent 并调大 concurrency
     # 节点名携带 PID: 同机多开多个 worker 实例互不冲突, 竞争消费同一队列
     node_name = f"task_worker@{socket.gethostname()}#{os.getpid()}"
+    # 队列监听(REQ-018 批次 2): 默认同时消费 批处理队列 + 会话交互队列;
+    # 高保障部署拆独立 worker —— 交互专用: WORKER_QUEUES=q_interactive;
+    # 批处理专用: WORKER_QUEUES=task_queue(交互流量与夜间批量物理隔离)
+    worker_queues = os.environ.get("WORKER_QUEUES", "task_queue,q_interactive")
     celery_app.worker_main(
         [
             "worker",
             "--loglevel=info",
             "--pool=solo",
             "--concurrency=1",
-            "--queues=task_queue",
+            f"--queues={worker_queues}",
             f"--hostname={node_name}",
         ]
     )

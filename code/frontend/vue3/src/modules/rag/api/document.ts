@@ -259,6 +259,28 @@ export const reparseRagDocumentTask = (documentId: string) => {
   );
 };
 
+/** 能力平台入库编排返回(REQ-018: job Agent 断点续跑/降级语义) */
+export interface DocumentIngestJob {
+  /** job 运行ID(可在技能中心-编排 Job 页查询详情/断点续跑) */
+  job_run_id: string;
+  status: string;
+  task_id: string | null;
+  /** true 表示已有进行中的编排直接复用, 未重复派发 */
+  reused?: boolean;
+};
+
+/**
+ * 解析入库(能力平台): 提交文档走 AI 能力平台 doc_parse → 建索引 编排
+ * 与旧「重新解析」双轨并存; 幂等(进行中的编排直接复用)
+ * @param documentId 文档ID
+ */
+export const ingestRagDocument = (documentId: string) => {
+  return http_base_server.post<DocumentIngestJob>(
+    `/rag/project-documents/${documentId}/ingest`,
+    {}
+  );
+};
+
 /**
  * 获取支持上传的文件格式列表
  */

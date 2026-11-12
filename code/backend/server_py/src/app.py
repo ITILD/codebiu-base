@@ -40,6 +40,10 @@ from module_task.config import permissions as task_permissions  # noqa: F401
 from module_contact.controller import notification
 # # 智能体模块(AI 助手: Skill 注册表 + tool-calling 执行循环 + 自建助手, REQ-013)
 from module_agent.controller import agent as agent_controller  # noqa: F401
+# # 智能体模块: 能力平台(Skill 统一运行时/调用观测/job 编排, REQ-018)
+from module_agent.controller import skill as agent_skill_controller  # noqa: F401
+# # AI 模块: 能力注册表视图(static_func + ai_model 合一解析, REQ-018)
+from module_ai.controller import capability as ai_capability_controller  # noqa: F401
 
 
 if __name__ == "__main__":

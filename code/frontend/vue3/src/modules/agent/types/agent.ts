@@ -1,5 +1,6 @@
 // src/modules/agent/types/agent.ts
-// 智能体模块类型定义(REQ-013): 助手 CRUD / 技能清单 / 对话请求
+// 智能体模块类型定义(REQ-013): 助手 CRUD / 对话请求
+// 技能清单类型(Skill Manifest 视图)见 ./skill.ts(REQ-018 起旧 name/display_name/capability 契约已下线)
 
 /** 智能体(助手)信息 */
 export interface AgentInfo {
@@ -17,14 +18,6 @@ export interface AgentInfo {
   is_builtin: boolean
   created_at: string
   updated_at: string
-}
-
-/** 技能注册表清单项 */
-export interface SkillInfo {
-  name: string
-  display_name: string
-  description: string
-  capability: 'read' | 'write'
 }
 
 /** 创建智能体请求 */

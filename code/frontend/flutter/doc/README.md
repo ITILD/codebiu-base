@@ -1,14 +1,6 @@
 # 客户端文档导航（flutter）
 
-> 本目录只放**Flutter 客户端实现与客户端约束**；跨端需求、总体架构、权限模型、开发治理规范在根目录 [doc/](../../../../doc/README.md)。AI 协作规则见 [README_AI.md](../README_AI.md)；后端规则见 [server_py/README_AI.md](../../../backend/server_py/README_AI.md)；Web 前端规则见 [vue3/README_AI.md](../../vue3/README_AI.md)。
-
-## 文档分层
-
-| 层 | 位置 | 内容 |
-| :--- | :--- | :--- |
-| 项目级 | [doc/](../../../../doc/README.md) | 需求登记册、需求分析、总体架构、权限设计、跨端规范 |
-| 客户端级 | 本目录 | 开发部署、目录结构、分层方案、代码规范、新成员与 AI 指南、版本记录 |
-| 运维级 | [deveops/](../../../../deveops/README.md) | 服务端构建、Docker 部署、发布与升级 |
+> 本目录只放**Flutter 客户端实现与客户端约束**。文档分层归属、跨层主题矩阵与防冗余规则统一见 [文档总索引](../../../../doc/README.md)（唯一事实来源，本文件不重复定义）。AI 协作规则见 [README_AI.md](../README_AI.md)；后端规则见 [server_py/README_AI.md](../../../backend/server_py/README_AI.md)；Web 前端规则见 [vue3/README_AI.md](../../vue3/README_AI.md)。
 
 ## 客户端文档
 

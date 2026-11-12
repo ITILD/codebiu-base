@@ -91,6 +91,12 @@ class TaskQueue(TaskQueueBase, table=True):
         max_length=64,
         description="Celery AsyncResult ID(用于读取 broker/backend 侧真实状态)",
     )
+    invocation_id: str | None = Field(
+        default=None,
+        index=True,
+        max_length=64,
+        description="关联的 skill_invocation.invocation_id(REQ-018 三入口双向追溯)",
+    )
     started_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True)),

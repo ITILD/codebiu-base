@@ -11,7 +11,8 @@ from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage
 
 from module_agent.do.agent import AgentCreate, AgentUpdate
 from module_agent.dao.agent import AgentDao
-from module_agent.skills.registry import SKILLS
+from module_agent.service import skill_runtime as _skill_runtime
+from module_agent.skills.registry import SKILL_REGISTRY
 from module_agent.service.agent import BUILTIN_AGENT_ID, BUILTIN_CHAT_ID
 from module_rag.dao.conversation import ConversationDao
 from module_rag.do.conversation import ConversationCreate
@@ -65,10 +66,11 @@ def _tool_call_chunk(name: str, args_json: str, call_id: str) -> AIMessageChunk:
     )
 
 
-async def _stub_web_search(args, ctx) -> str:
-    """web_search 技能桩: 记录上下文并返回固定结果"""
+async def _stub_web_search(skill_input: dict, ctx, caps, progress) -> dict:
+    """web_search 技能桩(REQ-018 impl 契约): 记录上下文并返回固定结果"""
     _stub_web_search.last_ctx = ctx
-    return f"搜索结果: {args.query}"
+    await progress(50, "搜索中")
+    return {"text": f"搜索结果: {skill_input['query']}", "total": 1}
 
 
 _stub_web_search.last_ctx = None
@@ -79,7 +81,7 @@ def stub_llm(monkeypatch):
     """打桩模型解析与 LLM 构造(默认两轮: 工具调用→答案), 返回 FakeLLM 供用例改写"""
     fake = _FakeLLM(
         rounds=[
-            [_tool_call_chunk("web_search", '{"query": "hello"}', "call_1")],
+            [_tool_call_chunk("sys_web_search", '{"query": "hello"}', "call_1")],
             [AIMessageChunk(content="最终"), AIMessageChunk(content="答案")],
         ]
     )
@@ -93,7 +95,12 @@ def stub_llm(monkeypatch):
 
     monkeypatch.setattr(UserModelService, "resolve_model", _resolve)
     monkeypatch.setattr(UserModelService, "get_llm_by_user_id", _get_llm)
-    monkeypatch.setattr(SKILLS["web_search"], "func", _stub_web_search)
+    # REQ-018: 技能实现经 SkillRuntime impl 缓存注入桩(对话链路全程走运行时)
+    monkeypatch.setitem(
+        _skill_runtime._impl_cache,
+        "module_agent.skills.builtin.web_search:run",
+        _stub_web_search,
+    )
     return fake
 
 
@@ -111,13 +118,18 @@ async def clean_agent_state(test_admin: dict):
 
 
 async def test_skills_endpoint(client):
-    """技能清单: 内置 4 只读技能, 接口登录可访问"""
+    """技能清单(Manifest 视图): 4 只读技能 + 双 Skill 样板, 登录可访问(W-9)"""
     resp = await client.get("/agent/skills")
     assert resp.status_code == 200
     data = resp.json()
-    names = {s["name"] for s in data}
-    assert {"web_search", "ocr_image", "file_search", "rag_qa"} <= names
-    assert all(s["capability"] == "read" for s in data)
+    by_key = {s["key"]: s for s in data}
+    assert {"sys.web_search", "sys.ocr_image", "sys.file_search", "sys.rag_qa"} <= set(by_key)
+    # 4 个迁移技能保持只读语义
+    assert all(
+        by_key[k]["side_effects"] == "read"
+        for k in ("sys.web_search", "sys.ocr_image", "sys.file_search", "sys.rag_qa")
+    )
+    assert by_key["sys.web_search"]["nature"] == "static"
 
 
 async def test_builtin_agents_seeded(client):
@@ -127,7 +139,7 @@ async def test_builtin_agents_seeded(client):
     agents = {a["id"]: a for a in resp.json()}
     assert BUILTIN_CHAT_ID in agents and BUILTIN_AGENT_ID in agents
     assert agents[BUILTIN_CHAT_ID]["skills"] == []
-    assert agents[BUILTIN_AGENT_ID]["skills"] == list(SKILLS.keys())
+    assert agents[BUILTIN_AGENT_ID]["skills"] == list(SKILL_REGISTRY.keys())
     assert agents[BUILTIN_AGENT_ID]["is_builtin"] is True
 
 
@@ -263,17 +275,17 @@ async def test_chat_tool_call_roundtrip(test_admin, stub_llm):
         )
         by_type = {e.stream_event_type.value for e in events}
         assert "tool_call" in by_type and "answer" in by_type
-        # 工具调用事件: data 结构化载荷 + 结果文本
+        # 工具调用事件: data 结构化载荷 + 结果文本(tool 名为注册表键 '.'→'_')
         call_events = [e for e in events if e.stream_event_type.value == "tool_call"]
-        assert any(e.data and e.data.get("tool_name") == "web_search" for e in call_events)
+        assert any(e.data and e.data.get("tool_name") == "sys_web_search" for e in call_events)
         assert any("搜索结果: hello" in e.content for e in call_events)
         # 最终答案为流式增量拼接
         answer = "".join(e.content for e in events if e.stream_event_type.value == "answer")
         assert answer == "最终答案"
 
-        # bind_tools 挂载了全部注册技能
+        # bind_tools 挂载了全部注册技能(agent_callable 全量)
         assert stub_llm.bound_tools is not None
-        assert len(stub_llm.bound_tools) == len(SKILLS)
+        assert len(stub_llm.bound_tools) == len(SKILL_REGISTRY)
 
         # 第二轮收到的消息尾部为 ToolMessage 回填(含工具结果)
         round2 = stub_llm.snapshots[1]
@@ -322,7 +334,7 @@ async def test_chat_max_rounds_guard(test_admin, stub_llm):
     """防失控: 持续要求工具调用时, 最后一轮强制直出答案"""
     # 7 轮工具调用 + 第 8 轮强制无工具(direct_answer 路径)
     stub_llm.rounds = [
-        [_tool_call_chunk("web_search", '{"query": "q"}', f"call_{i}")]
+        [_tool_call_chunk("sys_web_search", '{"query": "q"}', f"call_{i}")]
         for i in range(7)
     ]
     conversation_id = await _make_conversation(test_admin["id"], BUILTIN_AGENT_ID)

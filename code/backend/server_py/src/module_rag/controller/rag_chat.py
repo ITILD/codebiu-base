@@ -38,7 +38,7 @@ async def parse_temp_file_endpoint(
     :param file: 上传的临时文件
     :return: {file_name, content, chars, truncated}
     """
-    return await rag_chat_service.parse_temp_file(file)
+    return await rag_chat_service.parse_temp_file(file, current_user_id)
 
 @router.post("/{conversation_id}/chat", summary="流式聊天(SSE, AG-UI 协议)")
 async def chat_stream(

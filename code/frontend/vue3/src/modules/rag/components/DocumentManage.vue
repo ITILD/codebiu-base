@@ -102,7 +102,7 @@
       </el-table-column>
       <!-- 操作列: 目录行=打开/重命名/删除; 文件行=文档操作(需 document_id, 旧数据未登记时仅展示提示)
            写操作按钮按项目权限位隐藏: 重命名/编辑/重新解析需档位>=2, 删除需档位>=3(v4 5.3) -->
-      <el-table-column label="操作" min-width="280" align="center">
+      <el-table-column label="操作" min-width="340" align="center">
         <template #default="{ row }">
           <template v-if="row.is_directory">
             <el-button size="small" type="primary" plain @click="handleOpen(row)">打开</el-button>
@@ -116,6 +116,11 @@
                 @click="handleDownload(row)">下载</el-button>
             </el-tooltip>
             <el-button v-if="canWrite" size="small" type="warning" plain @click="handleReparse(row)">重新解析</el-button>
+            <el-tooltip content="走 AI 能力平台编排: doc_parse → 建索引, 支持断点续跑" placement="top">
+              <el-button v-if="canWrite" size="small" type="success" plain @click="handleIngest(row)">
+                解析入库(能力平台)
+              </el-button>
+            </el-tooltip>
             <el-button v-if="canWrite" size="small" plain @click="handleEdit(row)">编辑</el-button>
             <el-button v-if="canDelete" size="small" type="danger" plain @click="handleDelete(row)">删除</el-button>
           </template>
@@ -188,6 +193,7 @@ import {
   updateRagDocument,
   deleteRagDocument,
   reparseRagDocumentTask,
+  ingestRagDocument,
   checkRagParseModels,
   getSupportedFileTypes,
   type RagFileEntry,
@@ -538,6 +544,37 @@ const handleReparse = async (row: RagFileEntry) => {
     fetchData()
   } catch (error) {
     console.log('取消或失败:', error)
+  }
+}
+
+// 解析入库(能力平台): 提交 doc_parse → 建索引 编排(幂等, 进行中直接复用; 失败可在技能中心断点续跑)
+const router = useRouter()
+const handleIngest = async (row: RagFileEntry) => {
+  if (!row.document_id) return
+  try {
+    await ElMessageBox.confirm(
+      `确定将文档"${row.name}"提交能力平台解析入库吗？将按 doc_parse → 建索引 编排执行。`,
+      '解析入库(能力平台)',
+      { type: 'info', confirmButtonText: '提交', cancelButtonText: '取消' }
+    )
+    const res = await ingestRagDocument(row.document_id)
+    ElMessage.success(res.reused ? '已有进行中的入库编排, 直接复用' : '已提交入库编排')
+    // 刷新列表(编排入库后状态联动更新)
+    fetchData()
+    // 跳转入口: 技能中心-编排 Job 页查看运行详情(断点续跑/降级观测)
+    ElMessageBox.confirm(
+      `已提交入库编排(运行ID: ${res.job_run_id.slice(0, 8)}…), 是否前往技能中心查看运行详情？`,
+      '解析入库',
+      { type: 'success', confirmButtonText: '查看详情', cancelButtonText: '留在本页' }
+    ).then(() => {
+      router.push({ path: '/agent/skills', query: { tab: 'jobs', run: res.job_run_id } })
+    }).catch(() => {})
+  } catch (error) {
+    // 取消确认正常静默; 真实请求失败提示后端错误信息
+    if (error instanceof Error) {
+      console.error('提交入库编排失败:', error)
+      ElMessage.error(error.message)
+    }
   }
 }
 

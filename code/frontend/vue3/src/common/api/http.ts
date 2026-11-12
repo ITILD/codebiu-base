@@ -197,7 +197,10 @@ class HttpClient {
         // FastAPI detail 解析统一收敛到 httpError.ts(detail 字符串/422 数组)
         msg = parseFastApiDetail(await response.json()) ?? msg;
       } catch { }
-      throw new Error(msg);
+      // 附加 HTTP 状态码(不改 message, 便于调用方按状态分支处理, 如 403 权限提示)
+      const error = new Error(msg) as Error & { status?: number };
+      error.status = response.status;
+      throw error;
     }
     // 检查是否为 204 No Content 不需要返回任何实体内容
     if (response.status === 204) return null;

@@ -34,6 +34,14 @@ class AgentProvider extends ChangeNotifier {
     }
   }
 
+  /// 技能值显示名：注册表内按全局键取展示名；旧短名（不含 "."）等未知值原样返回
+  String skillLabel(String value) {
+    for (final s in skills) {
+      if (s.key == value) return s.name;
+    }
+    return value;
+  }
+
   Future<String?> create(AgentInfo agent) async {
     try {
       await _core.agent.create(agent);

@@ -208,6 +208,10 @@ __marimo__/
 code/other/template/server_base_py/uv.lock
 code/backend/server_py/nuitka-crash-report.xml
 
+# App 打包产物与工具缓存
+deveops/运维脚本/app_realse/dist/
+deveops/运维脚本/app_realse/.cache/
+
 node_modules
 
 template_source

@@ -12266,7 +12266,7 @@
 	            if (ct.partName && normalizeSnapshotPath(ct.partName).toLowerCase() == lowerPath)
 	                return ct.contentType ?? "";
 	        }
-	        const match = /\.([^.\/]+)$/.exec(lowerPath);
+	        const match = /\.([^./]+)$/.exec(lowerPath);
 	        const extension = match?.[1] ?? "";
 	        if (!extension)
 	            return "";
@@ -13186,12 +13186,12 @@
 	                    .map(item => this.revisionMetadata(item, item.localName == "del" ? "delete" : "insert"));
 	                if (paragraphMarkRevisions.length) {
 	                    paragraph.props = {
-	                        ...(paragraph.props ?? {}),
+	                        ...paragraph.props,
 	                        paragraphMarkRevisions: [...(paragraph.props?.paragraphMarkRevisions ?? []), ...paragraphMarkRevisions]
 	                    };
 	                }
 	                if (paragraphMarkRevisions.some(item => item.kind == "delete"))
-	                    paragraph.props = { ...(paragraph.props ?? {}), deletedParagraphMark: true };
+	                    paragraph.props = { ...paragraph.props, deletedParagraphMark: true };
 	                const background = paragraph.cssStyle["background-color"];
 	                this.parseDefaultProperties(c, paragraph.cssStyle);
 	                if (background == null)
@@ -13473,7 +13473,7 @@
 	                const hps = globalXmlParser.element(child, "hps");
 	                const hpsVal = hps ? globalXmlParser.intAttr(hps, "val", null) : null;
 	                if (hpsVal != null)
-	                    result.cssStyle = { ...(result.cssStyle ?? {}), fontSize: `${hpsVal / 2}pt` };
+	                    result.cssStyle = { ...result.cssStyle, fontSize: `${hpsVal / 2}pt` };
 	            }
 	        }
 	        return result;
@@ -14291,7 +14291,7 @@
 	            }
 	        }
 	        if (hasTextBody)
-	            result.props = { ...(result.props ?? {}), ...this.parseDmlTextBoxProperties(bodyPr) };
+	            result.props = { ...result.props, ...this.parseDmlTextBoxProperties(bodyPr) };
 	        return result;
 	    }
 	    parseDmlShapeProperties(elem, style) {
@@ -14656,7 +14656,7 @@
 	        this.parseTableCellVerticalText(elem, cell);
 	    }
 	    addStructuralRevision(element, node, kind) {
-	        element.props = { ...(element.props ?? {}), revision: this.revisionMetadata(node, kind) };
+	        element.props = { ...element.props, revision: this.revisionMetadata(node, kind) };
 	    }
 	    addFormatRevision(element, node, kind, currentPropertiesNode) {
 	        const oldPropertiesNode = globalXmlParser.elements(node)[0];
@@ -14668,14 +14668,14 @@
 	            .map(property => ({ property, before: before[property], after: after[property] }));
 	        const revision = { ...this.revisionMetadata(node, kind), formatChanges };
 	        const formatRevisions = [...(element.props?.formatRevisions ?? []), revision];
-	        element.props = { ...(element.props ?? {}), formatRevisions };
+	        element.props = { ...element.props, formatRevisions };
 	    }
 	    captureFormatProperties(node) {
 	        const result = {};
 	        if (!node)
 	            return result;
 	        for (const property of globalXmlParser.elements(node)) {
-	            if (/PrChange$/.test(property.localName))
+	            if (property.localName.endsWith('PrChange'))
 	                continue;
 	            result[property.localName] = this.serializeFormatProperty(property);
 	        }

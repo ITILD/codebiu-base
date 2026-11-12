@@ -21,7 +21,10 @@ from module_ai.utils.llm.types import ModelType, RoleType
 from module_agent.dao.agent import AgentDao
 from module_agent.do.agent import Agent
 from module_agent.service.agent import DEFAULT_AGENT_PROMPT, DEFAULT_CHAT_PROMPT
-from module_agent.skills.registry import SKILLS, SkillContext
+from module_agent.service.skill_runtime import SkillContext
+from module_agent.skills.adapter import build_agent_tools
+from module_agent.skills.manifest import tool_name_to_uid
+from module_agent.skills.registry import get_skill
 from module_rag.do.chat_message import ChatMessageCreate
 from module_rag.do.rag_chat import StreamEventType, StreamOne
 from module_rag.service.chat_message import ChatMessageService
@@ -66,20 +69,11 @@ class AgentRunnerService:
     # ── 工具构建 ──
 
     @staticmethod
-    def _build_tool(skill_name: str, ctx: SkillContext) -> BaseTool:
-        """按技能定义与运行上下文构建 LangChain 工具(closure 捕获, 无全局态)"""
-        skill = SKILLS[skill_name]
-
-        async def _run(**kwargs: Any) -> str:
-            args = skill.args_model(**kwargs)
-            return await skill.func(args, ctx)
-
-        return StructuredTool.from_function(
-            coroutine=_run,
-            name=skill.name,
-            description=skill.description,
-            args_schema=skill.args_model,
-        )
+    def _build_tools(agent: Agent, ctx: SkillContext) -> list[BaseTool]:
+        """按 agent 勾选的技能从注册表构建工具(REQ-018: 经 Tool Adapter 路由
+        SkillRuntime, 失败按 error_class 固定文案回填, W-10);
+        skills=[] 为明确无技能(传 [], 与 None=全量区分)"""
+        return build_agent_tools(list(agent.skills), ctx)
 
     # ── 历史重建 ──
 
@@ -151,14 +145,13 @@ class AgentRunnerService:
         if not prompt:
             prompt = DEFAULT_AGENT_PROMPT if agent.skills else DEFAULT_CHAT_PROMPT
         skill_ctx = SkillContext(
-            user_id=user_id, default_project_ids=agent.default_project_ids or []
+            user_id=user_id,
+            project_ids=agent.default_project_ids or [],
+            conversation_id=conversation_id,
+            entry="agent",
         )
-        tools = [
-            self._build_tool(name, skill_ctx)
-            for name in agent.skills
-            if name in SKILLS
-        ]
-
+        # skills=[] 表示明确不挂载任何工具(与 None=全量区分)
+        tools = self._build_tools(agent, skill_ctx)
         history = await self._load_history(conversation_id)
         # 本轮消息列表: 系统提示 + 历史 + 当前问题(工具调用轮在尾部追加)
         messages: list = [SystemMessage(content=prompt), *history, HumanMessage(content=raw_message)]
@@ -250,7 +243,7 @@ class AgentRunnerService:
             if not tool_calls:
                 return  # 无工具调用: 答案已流式输出完毕
 
-            # 逐个执行工具并回填
+            # 逐个执行工具并回填(REQ-018: 工具经 Tool Adapter 闭包 → SkillRuntime)
             for tc in tool_calls:
                 name = tc.get("name", "") or ""
                 args = tc.get("args") or {}
@@ -259,8 +252,13 @@ class AgentRunnerService:
                         args = json.loads(args)
                     except json.JSONDecodeError:
                         args = {}
-                skill = SKILLS.get(name)
-                display = skill.display_name if skill else name
+                tool_obj = next((t for t in tools if t.name == name), None)
+                # 展示信息从工具 metadata 直取 Manifest(多级命名空间免反解析)
+                manifest = getattr(tool_obj, "metadata", None) or {}
+                manifest = manifest.get("skill_manifest") if isinstance(manifest, dict) else None
+                if manifest is None:
+                    manifest = get_skill(tool_name_to_uid(name))
+                display = manifest.name if manifest else name
                 args_brief = json.dumps(args, ensure_ascii=False)[:300]
                 yield StreamOne(
                     content=f"调用工具 {display}: {args_brief}",
@@ -269,14 +267,14 @@ class AgentRunnerService:
                         "tool_name": name,
                         "display_name": display,
                         "arguments": args,
-                        "capability": skill.capability.value if skill else "read",
+                        "nature": manifest.nature if manifest else "static",
                     },
                 )
                 try:
-                    if skill is None:
+                    if tool_obj is None:
                         raise ValueError(f"未注册的技能: {name}")
-                    validated = skill.args_model(**args)
-                    result = await skill.func(validated, ctx)
+                    # StructuredTool 闭包内已完成参数校验/调用/失败文案(W-10)
+                    result = str(await tool_obj.ainvoke(dict(args)))
                 except Exception as e:  # 工具失败降级为错误文本, 循环继续
                     logger.warning(f"技能 {name} 执行失败: {e}")
                     result = f"工具执行失败: {e}"

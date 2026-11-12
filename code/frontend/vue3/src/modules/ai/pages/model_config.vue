@@ -3,6 +3,8 @@
     <!-- 水墨页头 -->
     <InkPageHead title="模型配置" sub="大模型的统一配置与测试" seal="芯" />
 
+    <el-tabs v-model="activeTab">
+      <el-tab-pane label="模型配置" name="configs">
     <!-- 统一搜索栏: 多字段筛选 -->
     <TableSearchBar
       v-model="queryParams"
@@ -99,6 +101,48 @@
         :total="total" layout="total, prev, pager, next"
         @size-change="fetchData" @current-change="fetchData" />
     </div>
+      </el-tab-pane>
+
+      <!-- 能力注册表(REQ-018): static_func 与 ai_model 双源合一视图 -->
+      <el-tab-pane label="能力注册表" name="capabilities" lazy>
+        <div mb-3 flex items-center gap-2>
+          <span text-xs text-note-sub>
+            静态函数(代码注册表)与模型能力(三作用域解析)双源合一; 技能声明的能力键在此核对解析结果
+          </span>
+          <div flex-1 />
+          <el-button :loading="capabilitiesLoading" size="small" @click="loadCapabilities">刷新</el-button>
+        </div>
+        <template v-for="group in capabilityGroups" :key="group.kind">
+          <div mt-2 mb-2 flex items-center gap-2>
+            <span text-sm font-medium>{{ group.title }}</span>
+            <span text-xs text-note-sub>{{ group.items.length }} 项</span>
+          </div>
+          <el-table :data="group.items" stripe w-full>
+            <el-table-column label="能力键" min-width="160" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span font-mono text-xs>{{ row.capability_key }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
+            <el-table-column label="可用性" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.available ? 'success' : 'danger'" size="small">
+                  {{ row.available ? '可用' : '不可用' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="绑定模型配置" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.model_config_id" font-mono text-xs>{{ row.model_config_id }}</span>
+                <span v-else text-note-sub>-</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+        <el-empty v-if="!capabilitiesLoading && !capabilities.length" description="暂无能力注册数据" />
+      </el-tab-pane>
+    </el-tabs>
 
     <!-- 编辑/创建对话框(子组件自持表单状态, 保存成功后刷新列表) -->
     <ModelConfigFormDialog ref="formDialogRef" :is-admin="isAdmin" @saved="fetchData" />
@@ -111,6 +155,8 @@
 
 <script setup lang="ts">
 import { deleteModelConfig, listModelConfigs, revectorizeChunks, getRevectorizeStatus } from '../api/model_config'
+import { listAiCapabilities } from '../api/capability'
+import type { AiCapabilityItem } from '../types/capability'
 import type { PaginationParams, PaginationResponse } from '@/common/types/common'
 import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
 import { useAuthStore } from '@/common/stores/auth'
@@ -335,6 +381,43 @@ const handleSuggestApplied = (payload: { modelId: string, suggest: RerankScoreSu
   }
   tableData.value[idx] = { ...tableData.value[idx], extra: mergedExtra, check_result: checkResult }
 }
+
+// ################ 能力注册表(REQ-018) ################
+const activeTab = ref('configs')
+const capabilitiesLoading = ref(false)
+const capabilitiesLoaded = ref(false)
+const capabilities = ref<AiCapabilityItem[]>([])
+
+/** 分组展示: 静态函数在前, 模型能力在后, 其余形态归"其他" */
+const capabilityGroups = computed(() => {
+  const pick = (kinds: string[]) => capabilities.value.filter(c => kinds.includes(c.kind))
+  return [
+    { kind: 'static_func', title: '静态函数(static_func)', items: pick(['static_func']) },
+    { kind: 'ai_model', title: '模型能力(ai_model)', items: pick(['ai_model']) },
+    { kind: 'other', title: '其他(feature/none)', items: pick(['feature', 'none']) },
+  ].filter(g => g.items.length > 0)
+})
+
+/** 拉取能力注册表(页签首次激活时懒加载) */
+const loadCapabilities = async () => {
+  try {
+    capabilitiesLoading.value = true
+    capabilities.value = await listAiCapabilities()
+    capabilitiesLoaded.value = true
+  }
+  catch (error) {
+    console.error('获取能力注册表失败:', error)
+    ElMessage.error('获取能力注册表失败')
+  }
+  finally {
+    capabilitiesLoading.value = false
+  }
+}
+
+// lazy 页签首次切入时加载能力注册表
+watch(activeTab, (tab) => {
+  if (tab === 'capabilities' && !capabilitiesLoaded.value) loadCapabilities()
+})
 
 // ################ 删除 ################
 /** 删除模型配置 */

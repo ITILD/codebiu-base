@@ -101,14 +101,25 @@ async def dispatch_task(task, task_def: TaskTypeDef) -> str:
     :return: celery_task_id
     :raises Exception: 投递失败(调用方负责回写任务失败状态)
     """
-    from common.config.tasks import app as celery_app
+    from common.config.tasks import (
+        DEFAULT_QUEUE,
+        INTERACTIVE_PRIORITY_THRESHOLD,
+        INTERACTIVE_QUEUE,
+        app as celery_app,
+    )
 
     # 仅传任务ID保持消息轻量, 参数由 worker 从库读取;
-    # priority 走 Redis 分级子队列, 数值越大越先被 worker 消费
+    # 物理队列路由(REQ-018 批次 2): 会话交互类(priority>=7, 如对话附件解析)走
+    # q_interactive 独立队列, 批量任务积压不影响用户在等的交互任务; 其余走默认队列
+    queue = (
+        INTERACTIVE_QUEUE
+        if (task.priority or 0) >= INTERACTIVE_PRIORITY_THRESHOLD
+        else DEFAULT_QUEUE
+    )
     async_result = celery_app.send_task(
         task_def.celery_task,
         args=[task.id],
-        queue="task_queue",
+        queue=queue,
         priority=task.priority,
     )
     return async_result.id

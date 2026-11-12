@@ -10,8 +10,12 @@ import logging
 from common.utils.fastapi_ex.exceptions import BusinessError, NotFoundError
 from module_agent.dao.agent import AgentDao
 from module_agent.do.agent import Agent, AgentCreate, AgentResponse, AgentUpdate
-from module_agent.skills import builtin as builtin_skills  # noqa: F401 (导入即注册)
-from module_agent.skills.registry import SKILLS, list_skill_infos
+from module_agent.skills import registry as _skills_collection  # noqa: F401 (导入即收集注册全部 Skill)
+from module_agent.skills.registry import (
+    SKILL_REGISTRY,
+    get_skill,
+    list_skill_infos,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +41,12 @@ class AgentService:
 
     @staticmethod
     def _validate_skills(skills: list[str]) -> None:
-        """技能名单必须全部在注册表中"""
-        unknown = [s for s in skills if s not in SKILLS]
+        """技能名单必须全部在注册表中(旧短名自动映射 sys 命名空间)"""
+        unknown = [s for s in skills if get_skill(s) is None]
         if unknown:
-            raise BusinessError(f"未知技能: {', '.join(unknown)}(可选: {', '.join(SKILLS)})")
+            raise BusinessError(
+                f"未知技能: {', '.join(unknown)}(可选: {', '.join(SKILL_REGISTRY)})"
+            )
 
     # ── 查询 ──
 
@@ -146,10 +152,23 @@ class AgentService:
                 "全能智能体",
                 "挂载全部只读技能(联网搜索/图片OCR/文件检索/知识库问答)",
                 DEFAULT_AGENT_PROMPT,
-                list(SKILLS.keys()),
+                list(SKILL_REGISTRY.keys()),
             ),
         ):
-            if await self.agent_dao.get(agent_id) is not None:
+            existed = await self.agent_dao.get(agent_id)
+            if existed is not None:
+                # 内置 Agent 以代码为源: 播种时刷新名称/描述/技能名单
+                # (REQ-018 后技能键为 {ns}.{key}, 旧短名存量行随种子升级)
+                if (
+                    existed.skills != skills
+                    or existed.name != name
+                    or existed.description != description
+                ):
+                    existed.skills = skills
+                    existed.name = name
+                    existed.description = description
+                    await self.agent_dao.update(existed)
+                    logger.info(f"内置智能体已刷新: {name}({agent_id})")
                 continue
             await self.agent_dao.add(
                 Agent(

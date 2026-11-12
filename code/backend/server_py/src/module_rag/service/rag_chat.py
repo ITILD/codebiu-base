@@ -494,10 +494,12 @@ class RagChatService:
     # 临时文件(会话附件, 不入知识库)
     # ──────────────────────────────────────────────
 
-    async def parse_temp_file(self, file) -> dict:
-        """解析会话临时文件为文本(不入知识库/向量): 纯文本直读, 版式/图片走 MinerU。
+    async def parse_temp_file(self, file, user_id: str = "") -> dict:
+        """解析会话临时文件为文本(不入知识库/向量): 纯文本直读, 版式/图片走 doc_parse Skill。
 
-        全程异步(上传读取分片 await, 解析走异步 MinerU 客户端), 不阻塞其他请求。
+        版式/图片分支经 SkillRuntime 调 sys.doc_parse(interactive 优先级,
+        REQ-018 批次 2): 与知识库入库/调试台同一条运行链路, 附件解析在
+        skill_invocation 可追溯; 超时按 inline 硬超时约束(超上限文件已前置拒绝)。
 
         :param file: 上传的文件对象(UploadFile)
         :return: {file_name, content, chars, truncated}
@@ -509,7 +511,6 @@ class RagChatService:
 
         import aiofiles
 
-        from module_office.service.document_parse import DocumentParseService
         from module_rag.do.project_document import DocType
 
         name = file.filename or "未命名"
@@ -544,18 +545,40 @@ class RagChatService:
                 except UnicodeDecodeError:
                     text = data.decode("utf-8", errors="replace")
         else:
-            # 版式/图片: 落临时文件 → MinerU 异步解析 → markdown
+            # 版式/图片: 落临时文件 → doc_parse Skill(interactive, 同链路可追溯) → markdown
+            from module_agent.service.skill_runtime import SkillContext, SkillRuntime
+
             tmp_dir = tempfile.mkdtemp(prefix="rag_temp_file_")
             tmp_path = _Path(tmp_dir) / f"src.{ext}"
             try:
                 async with aiofiles.open(tmp_path, "wb") as fp:
                     await fp.write(data)
-                text = await DocumentParseService().file2markdown(tmp_path)
+                envelope = await SkillRuntime().invoke(
+                    "sys.doc_parse",
+                    {
+                        "file_path": str(tmp_path),
+                        "filename": name,
+                        "size_hint": len(data),
+                    },
+                    SkillContext(
+                        user_id=user_id, priority_class="interactive", entry="agent"
+                    ),
+                    mode="inline",  # 附件场景同步等待结果; 超上限文件已前置拒绝
+                    timeout_s=90,
+                )
+            except BusinessError:
+                raise
             except Exception as e:
                 logger.warning(f"临时文件解析失败 {name}: {e}")
                 raise BusinessError(f"文件解析失败: {e}") from e
             finally:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+            if envelope.get("status") != "succeeded":
+                error = envelope.get("error") or {}
+                raise BusinessError(
+                    f"文件解析失败: {error.get('message') or '未知错误'}"
+                )
+            text = str((envelope.get("result") or {}).get("markdown") or "")
 
         text = text.strip()
         if not text:

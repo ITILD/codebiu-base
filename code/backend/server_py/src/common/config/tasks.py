@@ -25,6 +25,15 @@ except Exception:
 BROKER_URL: str = conf_tasks.get("broker_url", "memory://")
 RESULT_BACKEND: str = conf_tasks.get("result_backend", "cache+memory://")
 
+# 物理队列拆分(REQ-018 批次 2):
+# - task_queue: 常规批处理队列(夜间批量/重解析/重向量化等)
+# - q_interactive: 会话交互队列(对话附件解析等用户在等的任务, priority>=7 自动路由)
+# 单 worker 可同时监听两队列(默认); 生产高保障部署可将 q_interactive 拆独立 worker
+# 进程(仅监听交互队列), 使交互流量不受批量任务积压影响
+DEFAULT_QUEUE = "task_queue"
+INTERACTIVE_QUEUE = "q_interactive"
+INTERACTIVE_PRIORITY_THRESHOLD = 7  # priority >= 该值路由交互队列
+
 _celery_app = None  # Celery 实例缓存(首次访问 app 时才创建)
 
 

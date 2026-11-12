@@ -1,6 +1,6 @@
 # codebiu_base — AI 协作指南（总入口）
 
-> 本文件只保留**全局工作流与跨端规则**；后端/前端技术硬规则见 [后端 AI 规则](code/backend/server_py/README_AI.md) · [前端 AI 规则](code/frontend/vue3/README_AI.md)。项目定位见 [README.md](README.md)，文档分层见 [doc/README.md](doc/README.md)。
+> 本文件只保留**全局工作流与跨端规则**；后端/前端/客户端技术硬规则见 [后端 AI 规则](code/backend/server_py/README_AI.md) · [前端 AI 规则](code/frontend/vue3/README_AI.md) · [客户端 AI 规则](code/frontend/flutter/README_AI.md)。项目定位见 [README.md](README.md)；**文档分层归属与防冗余规则见 [文档总索引](doc/README.md)**。
 
 ## 1. 项目定位
 
@@ -23,7 +23,7 @@
 | 客户端 | [flutter/README_AI.md](code/frontend/flutter/README_AI.md) | 四层单向依赖（ui→providers→services→models）、provider 状态、SSE 流式、主题与多端壳 |
 | 运维 | [deveops/README.md](deveops/README.md) | 部署、首次初始化、跨版本数据库升级、回滚 |
 
-同一规则只在一层写详细内容；根文件只做摘要 + 链接。
+同一规则只在一层写详细内容；根文件只做摘要 + 链接。**文档（而非规则）的归属层、跨层主题矩阵与防冗余校验清单，统一以 [doc/README.md](doc/README.md) 为唯一事实来源**，本文件不重复维护。
 
 ## 3. 工作流：从需求到代码
 
@@ -52,7 +52,7 @@ AI 默认全自动：填卡→给方案请批准→开发→交付，用户只�
 5. **密钥**：`config.yaml` 入 git 且**严禁真实密钥**；真实密钥只放 `config.dev.yaml`（gitignored）或 `CODEBIU_*` 环境变量。
 6. **依赖**：先 grep 复用 → 确认无 500MB+ 大库 → 后端 `pyproject.toml` / 前端 `package.json` 同步登记 → 重库惰性加载/分包。
 7. **数据库演进**：改表必须写 Alembic 增量脚本；启动只建缺失表/打基线，不自动 upgrade；生产升级前备份。
-8. **文档分层**：跨端 → `doc/`；后端 → `server_py/doc/`；前端 → `vue3/doc/`；部署运维 → `deveops/`；禁止同一内容复制两份。
+8. **文档分层**：归属层与跨层主题矩阵以 [文档总索引](doc/README.md) 为唯一事实来源（跨端 → `doc/`；后端 → `server_py/doc/`；前端 → `vue3/doc/`；客户端 → `flutter/doc/`；部署运维 → `deveops/`）；同一内容禁止复制两份，落盘后必须在该层导航登记。根展示页 `README.md` 与 `README.en.md` 为双语镜像，任何一侧的章节/截图/链接变更必须在同一次改动中同步另一侧。
 9. **交付同步**：代码、登记册状态、需求卡、相关文档一起更新；文档变更也在「变更记录」留痕。
 
 ## 5. 关键文件索引（跨端）
@@ -92,7 +92,17 @@ pnpm run build
 - [ ] 前端 `pnpm run build` 通过；后端 `import app` 无报错
 - [ ] 代码符合 [代码规范](doc/03-规范/代码规范.md) 与对应子项目 `README_AI.md`
 - [ ] 登记册、需求卡、相关文档已同步；文档变更已记入「变更记录」
+- [ ] 新增/移动文档已登记到所属层导航，并通过 [文档总索引](doc/README.md) §6 的防冗余自检（未复制跨层内容、相对链接可解析）
 
 ## 8. 文档地图
 
-根文档按 01-入门 / 02-设计文档 / 03-规范 / 04-测试报告 分目录，完整导航（含「何时读」）见 [doc/README.md](doc/README.md)。
+文档体系共 5 层 + AI 规则层，**分层归属、跨层主题矩阵、完整清单与防冗余规则全部见 [文档总索引](doc/README.md)**（唯一事实来源）：
+
+| 层 | 入口 |
+| :--- | :--- |
+| 项目级 | [doc/README.md](doc/README.md)（总索引 / 需求台账 / 架构 / 权限 / 规范 / 测试报告） |
+| 后端 | [server_py/doc/README.md](code/backend/server_py/doc/README.md) |
+| Web 前端 | [vue3/doc/README.md](code/frontend/vue3/doc/README.md) |
+| 客户端 | [flutter/doc/README.md](code/frontend/flutter/doc/README.md) |
+| 运维 | [deveops/README.md](deveops/README.md) |
+| 展示页 | [README.md](README.md)（简中）· [README.en.md](README.en.md)（English，镜像同步） |
