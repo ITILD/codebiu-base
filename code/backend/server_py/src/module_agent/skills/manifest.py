@@ -151,7 +151,8 @@ class SkillManifest(BaseModel):
     script: dict[str, Any] | None = Field(
         default=None,
         description="script/python_script 类型专用(批次 3): {language: 'python'|'bash'|'node', "
-        "code: '脚本内容', env_allowed: [显式放行的环境变量名]}; "
+        "code: '入口脚本内容', files: {相对路径: 伴随文件内容}(协作模块/模板/Schema, "
+        "社区包多文件脚本树), env_allowed: [显式放行的环境变量名]}; "
         "沙箱执行器内建: 子进程 + 空环境 + 临时工作目录 + 硬超时 + 输出截断, "
         "stdin=JSON(input), stdout 末行 JSON 解析为结果(否则整体作为 text)",
     )

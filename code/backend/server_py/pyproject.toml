@@ -67,6 +67,7 @@ dependencies = [
     # 联系方式触达(module_contact): 邮件验证码(SMTP)/短信验证码(httpx 直连阿里云)
     "aiosmtplib>=5.1.2",
     "rich>=15.0.0",
+    "defusedxml>=0.7.1",
 ]
 
 [dependency-groups]

@@ -95,15 +95,30 @@ def _safe_extract(zip_bytes: bytes) -> dict[str, str]:
 def _build_package_manifests(
     package_name: str, files: dict[str, str]
 ) -> tuple[SkillManifest, dict[str, SkillManifest], dict[str, str]]:
-    """拆解包为 Manifest 集合: (main prompt, {脚本名: script manifest}, references)"""
+    """拆解包为 Manifest 集合: (main prompt, {脚本名: script manifest}, references)
+
+    社区包标准形态(Anthropic Agent Skills): SKILL.md(指令) + scripts/(协作脚本树):
+    - scripts/ 顶层可执行文件 → 独立 script Skill(入口);
+      树内其余文件(office/ 共享包、templates/、Schema) 作为伴随文件(files)
+      随入口落沙箱根目录, 相对 import 可解析
+    - references/ 与 reference-docs/ 均视为知识资产(官方两种目录名兼容)
+    """
     meta, instructions = parse_skill_md(files["SKILL.md"])
     name = str(meta.get("name") or package_name)
     version = str(meta.get("version") or "1")
     description = str(meta.get("description") or f"社区 Skill 包 {name}")
 
-    references = {k: v for k, v in files.items() if k.startswith("references/")}
-    scripts = {k: v for k, v in files.items() if k.startswith("scripts/")}
-    if len(scripts) > MAX_SCRIPT_PER_PACKAGE:
+    references = {
+        k: v for k, v in files.items()
+        if k.startswith("references/") or k.startswith("reference-docs/")
+    }
+    scripts_tree = {k: v for k, v in files.items() if k.startswith("scripts/")}
+    top_level = sorted(
+        k for k in scripts_tree
+        if len(PurePosixPath(k).parts) == 2  # scripts/<file> 顶层
+        and PurePosixPath(k).name != "__init__.py"
+    )
+    if len(top_level) > MAX_SCRIPT_PER_PACKAGE:
         raise BusinessError(f"脚本数量超过上限 {MAX_SCRIPT_PER_PACKAGE}")
 
     # 渐进式披露: references 清单注入指令尾部(模型按需向用户索取内容)
@@ -140,16 +155,21 @@ def _build_package_manifests(
     )
 
     script_manifests: dict[str, SkillManifest] = {}
-    for rel, code in sorted(scripts.items()):
+    for rel in top_level:
         stem = PurePosixPath(rel).stem
-        language = _SCRIPT_LANG_BY_EXT.get(PurePosixPath(rel).suffix)
+        suffix = PurePosixPath(rel).suffix
+        language = _SCRIPT_LANG_BY_EXT.get(suffix)
         if language is None:
-            raise BusinessError(f"不支持的脚本类型: {rel}(可选 {sorted(set(_SCRIPT_LANG_BY_EXT.values()))})")
+            continue  # 顶层未知类型跳过(树内伴随文件不受限)
+        # 伴随文件 = 脚本树其余文件(去 scripts/ 前缀, 保持 office/ 等相对结构)
+        companion = {
+            k[len("scripts/"):]: v for k, v in scripts_tree.items() if k != rel
+        }
         script_manifests[stem] = SkillManifest(
             namespace=f"pack.{package_name}",
             key=stem,
             name=f"{name} · {stem}",
-            description=str(meta.get(f"script_{stem}_description") or f"包 {name} 的 {stem} 脚本(沙箱执行)"),
+            description=f"包 {name} 的 {stem} 脚本(沙箱执行, 含 {len(companion)} 个伴随文件)",
             skill_type="python_script" if language == "python" else "script",
             nature="static",
             impl_ref=f"skill_hub:pack.{package_name}.{stem}",
@@ -166,7 +186,10 @@ def _build_package_manifests(
             # 脚本副作用边界仅沙箱声明, 默认不暴露给对话(管理员可改 DB 注册表后重启)
             side_effects="external",
             agent_callable=False,
-            script={"language": language, "code": code, "origin": f"skill_hub:{package_name}"},
+            script={
+                "language": language, "code": scripts_tree[rel],
+                "files": companion, "origin": f"skill_hub:{package_name}",
+            },
         )
     return main, script_manifests, references
 
@@ -199,6 +222,10 @@ class SkillHubService:
 
     async def import_package(self, zip_bytes: bytes, user_id: str) -> dict:
         files = _safe_extract(zip_bytes)
+        return await self._import_files(files, user_id)
+
+    async def _import_files(self, files: dict[str, str], user_id: str | None) -> dict:
+        """按标准包文件集导入(zip 解析与目录发现共用)"""
         meta, _ = parse_skill_md(files["SKILL.md"])
         raw_name = str(meta.get("name") or "")
         if not _PACKAGE_NAME_PATTERN.match(raw_name or ""):
@@ -323,6 +350,85 @@ class SkillHubService:
                 row.deprecated = True
             await session.commit()
         return {"namespace": namespace, "status": "deprecated"}
+
+
+# 社区包发现源目录(用户自管理: 放置含 SKILL.md 的包目录即被启动发现加载;
+# server_py/temp_source/skills/ —— 位于 gitignore 的 temp_source 内,
+# 不随仓库分发, 用户自行决定放哪些标准包)
+PRESET_SKILLS_DIR = "temp_source/skills"
+# 目录发现收集的文本后缀白名单(社区包纯文本资产; 二进制不入包)
+_TEXT_SUFFIXES = {
+    ".py", ".sh", ".js", ".md", ".txt", ".xml", ".xsd", ".xslt", ".xhtml", ".html",
+    ".css", ".json", ".yaml", ".yml", ".csv", ".tsv", ".ini", ".cfg", ".rnc", ".wsdl",
+}
+
+
+def _collect_package_dir(package_dir) -> dict[str, str]:
+    """收集标准包目录为 {相对路径: 文本内容}(仅约定目录与文本白名单)"""
+    from pathlib import Path
+
+    root = Path(package_dir)
+    if not (root / "SKILL.md").is_file():
+        raise BusinessError(f"目录缺少 SKILL.md: {root}")
+    files: dict[str, str] = {}
+    total = 0
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        allowed = (
+            rel == "SKILL.md" or rel == "LICENSE.txt"
+            or rel.startswith(("scripts/", "references/", "reference-docs/"))
+        )
+        if not allowed:
+            continue  # 非约定目录不收(防夹带)
+        if path.suffix.lower() not in _TEXT_SUFFIXES:
+            logger.warning("预置包发现: 跳过非白名单文本文件 %s/%s", root.name, rel)
+            continue
+        total += path.stat().st_size
+        if total > MAX_PACKAGE_BYTES:
+            raise BusinessError(f"包 {root.name} 内容超过 {MAX_PACKAGE_BYTES // 1024 // 1024}MB 上限")
+        files[rel] = path.read_text(encoding="utf-8")
+    return files
+
+
+async def discover_local_packages(root_dir: str | None = None) -> dict:
+    """本地目录发现加载: 扫描预置目录下每个含 SKILL.md 的子目录并导入(幂等)
+
+    「用当前项目发现加载」: 保留社区包原生目录结构放入 server_py/temp_source/skills/
+    (用户自管理发现源, gitignore 内不随仓库分发), 启动时自动发现 → 走与 zip 导入
+    完全相同的拆解注册链路(pack.* 命名空间, 同表同治); 已存在的包跳过(幂等),
+    需更新时先经管理端删除。用户放置哪些包即加载哪些(自行决定)。
+    """
+    from pathlib import Path
+
+    root = Path(root_dir or PRESET_SKILLS_DIR)
+    if not root.is_dir():
+        return {"discovered": 0, "imported": [], "skipped": [], "failed": []}
+    service = SkillHubService()
+    imported, skipped, failed = [], [], []
+    for package_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        if not (package_dir / "SKILL.md").is_file():
+            continue
+        name = package_dir.name
+        try:
+            files = _collect_package_dir(package_dir)
+            outcome = await service._import_files(files, user_id=None)  # 系统预置无归属人
+            imported.append(outcome["namespace"])
+        except BusinessError as e:
+            if "已存在" in str(e):
+                skipped.append(f"pack.{name}")
+            else:
+                failed.append({"package": name, "error": str(e)})
+                logger.warning("预置包发现失败 %s: %s", name, e)
+        except Exception as e:
+            failed.append({"package": name, "error": str(e)})
+            logger.warning("预置包发现异常 %s: %s", name, e)
+    result = {"discovered": len(imported) + len(skipped) + len(failed),
+              "imported": imported, "skipped": skipped, "failed": failed}
+    if imported:
+        logger.info("预置社区包已发现加载: %s", imported)
+    return result
 
 
 async def restore_skill_hub_packages() -> dict:

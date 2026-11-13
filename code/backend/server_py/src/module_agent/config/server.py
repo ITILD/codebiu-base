@@ -43,6 +43,16 @@ async def _sync_skill_assets() -> None:
 
         logging.getLogger(__name__).warning("自定义 Skill 恢复失败(忽略): %s", e)
     try:
+        from module_agent.service.skill_hub import discover_local_packages
+
+        # 社区包发现源加载(幂等, REQ-018 标准 skill 集成):
+        # temp_source/skills/ 为用户自管理目录, 放置含 SKILL.md 的包即被加载
+        await discover_local_packages()
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("社区包发现源加载失败(忽略): %s", e)
+    try:
         from module_agent.service.skill_hub import restore_skill_hub_packages
 
         await restore_skill_hub_packages()

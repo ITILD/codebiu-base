@@ -283,9 +283,12 @@ async def test_chat_tool_call_roundtrip(test_admin, stub_llm):
         answer = "".join(e.content for e in events if e.stream_event_type.value == "answer")
         assert answer == "最终答案"
 
-        # bind_tools 挂载了全部注册技能(agent_callable 全量)
+        # bind_tools 挂载了全部可对话技能(官方脚本 Skill 默认 agent_callable=false 不计入)
         assert stub_llm.bound_tools is not None
-        assert len(stub_llm.bound_tools) == len(SKILL_REGISTRY)
+        callable_count = sum(
+            1 for m in SKILL_REGISTRY.values() if m.agent_callable
+        )
+        assert len(stub_llm.bound_tools) == callable_count
 
         # 第二轮收到的消息尾部为 ToolMessage 回填(含工具结果)
         round2 = stub_llm.snapshots[1]

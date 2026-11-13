@@ -25,7 +25,10 @@ SANDBOX_TIMEOUT_S = 60              # 沙箱硬超时兜底(invoke timeout_s 之
 _BASE_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "TZ": "Asia/Shanghai"}
 
 _INTERPRETERS: dict[str, list[str]] = {
-    "python": ["python3", "-I"],   # -I 隔离模式: 忽略用户 site/环境变量
+    # python 用当前进程解释器绝对路径(社区包依赖平台环境安装的库, 如 defusedxml);
+    # -s 隔离用户级 site、-E 忽略 PYTHON* 环境注入, 但保留脚本目录入 sys.path
+    # (伴随模块树 office/ 等相对 import 的前提); 强隔离依赖部署层容器化
+    "python": [__import__("sys").executable, "-s", "-E"],
     "bash": ["bash", "--noprofile", "--norc"],
     "node": ["node"],
 }
@@ -127,11 +130,19 @@ async def execute_in_sandbox(
 
 
 def make_script_runner(manifest):
-    """为 script/python_script Skill 生成专属执行闭包(impl 契约签名)"""
+    """为 script/python_script Skill 生成专属执行闭包(impl 契约签名)
+
+    支持社区包多文件脚本树: script.files 中的伴随文件(协作模块/模板/Schema)
+    随入口脚本落沙箱根目录(import office / templates 等相对引用可解析)
+    """
     script_spec = manifest.script or {}
     language = str(script_spec.get("language") or "python")
     code = str(script_spec.get("code") or "")
     env_allowed = list(script_spec.get("env_allowed") or [])
+    extra_files = {
+        str(rel): str(content)
+        for rel, content in (script_spec.get("files") or {}).items()
+    }
 
     async def run(skill_input: dict, ctx, caps, progress) -> dict:
         await progress(30, f"沙箱执行 {language} 脚本")
@@ -139,9 +150,13 @@ def make_script_runner(manifest):
             language, code, skill_input,
             env_allowed=env_allowed,
             timeout_s=manifest.execution.inline_timeout_s,
+            extra_files=extra_files,
         )
         await progress(100, "执行完成")
-        result.setdefault("meta", {})["sandbox"] = {"language": language, "isolated": True}
+        result.setdefault("meta", {})["sandbox"] = {
+            "language": language, "isolated": True,
+            "extra_files": len(extra_files),
+        }
         return result
 
     return run
