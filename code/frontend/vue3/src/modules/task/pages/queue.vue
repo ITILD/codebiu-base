@@ -18,7 +18,7 @@
       </div>
     </div>
 
-    <!-- 工具栏: 搜索 + 自动刷新 + 新建 -->
+    <!-- 工具栏: 搜索 + 自动刷新 + 自愈 + 新建 -->
     <div flex flex-wrap items-center gap-3>
       <TableSearchBar
         v-model="queryParams"
@@ -34,9 +34,121 @@
         </div>
       </el-tooltip>
       <div flex-1 />
+      <el-tooltip content="重派发重启遗留的排队任务 + 清扫无 worker 回写的僵尸执行任务" placement="top">
+        <el-button :loading="recovering" @click="handleRecover">
+          <el-icon mr-1><RefreshLeft /></el-icon>任务自愈
+        </el-button>
+      </el-tooltip>
       <el-button type="primary" @click="openCreateDialog">
         <el-icon mr-1><Plus /></el-icon>新建任务
       </el-button>
+    </div>
+
+    <!-- 运维面板: Celery 执行器监控 + 任务类型入队优先级热调 -->
+    <div rounded-note-md bg-note-card shadow-note>
+      <el-collapse v-model="opsPanel">
+        <el-collapse-item name="workers">
+          <template #title>
+            <div flex items-center gap-2 px-1>
+              <span font-medium>Celery 执行器</span>
+              <el-tag size="small" :type="workersData?.online ? 'success' : 'danger'" effect="light">
+                在线 {{ workersData?.online ?? 0 }}/{{ workersData?.total ?? 0 }}
+              </el-tag>
+              <span v-if="workersData?.error" text-xs text-note-sub>{{ workersData.error }}</span>
+            </div>
+          </template>
+          <div px-3 pb-3>
+            <el-table v-if="workersData?.workers?.length" :data="workersData.workers" size="small">
+              <el-table-column prop="name" label="执行器" min-width="150" show-overflow-tooltip />
+              <el-table-column label="消费队列" min-width="130">
+                <template #default="{ row }">
+                  <el-tag v-for="q in row.queues" :key="q" size="small" effect="plain" class="mr-1">
+                    {{ q }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="并发" prop="concurrency" width="70" align="center" />
+              <el-table-column label="活跃" width="70" align="center">
+                <template #default="{ row }">
+                  <span :class="row.active > 0 ? 'text-note-green font-medium' : 'text-note-sub'">
+                    {{ row.active }}
+                  </span>
+                </template>
+              </el-table-column>
+              <el-table-column label="已处理" prop="processed" width="90" align="center" />
+              <el-table-column label="PID" prop="pid" width="90" align="center" />
+              <el-table-column label="正在执行" min-width="200" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span v-if="row.active_tasks?.length" text-xs>
+                    {{ row.active_tasks.map((t: any) => t.name?.split('.').pop()).join('、') }}
+                  </span>
+                  <span v-else text-xs text-note-sub>空闲</span>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty
+              v-else
+              :description="workersData?.error ?? '没有执行器在线, 请启动 app_task.py worker'"
+              :image-size="60"
+            />
+          </div>
+        </el-collapse-item>
+        <el-collapse-item name="priority">
+          <template #title>
+            <div flex items-center gap-2 px-1>
+              <span font-medium>类型优先级</span>
+              <span text-xs text-note-sub>0~9 越大越优先, ≥7 走交互队列; 立即生效, 仅影响之后创建的任务</span>
+            </div>
+          </template>
+          <el-table :data="registry" size="small" px-3>
+            <el-table-column label="任务类型" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span>{{ row.name }}</span>
+                <el-tag v-if="row.priority_override != null" size="small" type="warning" effect="plain" class="ml-1">
+                  已覆盖
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="default_priority" label="默认" width="70" align="center">
+              <template #default="{ row }">
+                <span text-note-sub>P{{ row.default_priority ?? 0 }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="生效优先级" width="120" align="center">
+              <template #default="{ row }">
+                <el-select
+                  :model-value="row.effective_priority ?? 0"
+                  size="small"
+                  :loading="prioritySaving === row.type"
+                  @change="(val: number) => handlePriorityChange(row, val)"
+                >
+                  <el-option v-for="n in 10" :key="n" :value="n - 1" :label="`P${n - 1}`" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="消费队列" width="120" align="center">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.queue === 'q_interactive' ? 'warning' : 'info'" effect="plain">
+                  {{ row.queue }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="90" align="center">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.priority_override != null"
+                  link type="primary" size="small"
+                  @click="handlePriorityChange(row, null)"
+                >
+                  恢复默认
+                </el-button>
+                <span v-else text-xs text-note-sub>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />
+          </el-table>
+        </el-collapse-item>
+      </el-collapse>
     </div>
 
     <!-- 批量操作条: 选中后出现 -->
@@ -68,6 +180,18 @@
       <el-table-column label="类型" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">
           {{ typeName(row.task_type) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="优先级" width="80" align="center">
+        <template #default="{ row }">
+          <el-tooltip
+            v-if="row.priority >= 7"
+            content="高优先级, 路由交互队列 q_interactive"
+            placement="top"
+          >
+            <el-tag size="small" type="warning" effect="plain">P{{ row.priority }}</el-tag>
+          </el-tooltip>
+          <span v-else text-xs text-note-sub>P{{ row.priority }}</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" min-width="90" align="center">
@@ -152,7 +276,7 @@
 </template>
 
 <script setup lang="ts">
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, RefreshLeft } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
 import { useTableQuery } from '@/common/composables/useTableQuery'
@@ -162,8 +286,11 @@ import {
   deleteTask,
   getTaskRegistry,
   getTaskStats,
+  getTaskWorkers,
   listTasks,
+  recoverTasks,
   retryTask,
+  updateTaskTypePriority,
 } from '../api/task'
 import {
   statusLabels,
@@ -173,6 +300,7 @@ import {
   type TaskStats,
   type TaskStatus,
   type TaskTypeDef,
+  type TaskWorkerList,
 } from '../types'
 import { useResponsive } from '@/common/composables/useResponsive'
 import TaskCreateDialog from '../components/TaskCreateDialog.vue'
@@ -207,8 +335,61 @@ const registry = ref<TaskTypeDef[]>([])
 /** 类型编码转显示名 */
 const typeName = (type: string) => registry.value.find(t => t.type === type)?.name ?? type
 
+// ################ 运维面板: 执行器监控 + 优先级热调 + 手动自愈 ################
+const opsPanel = ref<string[]>(['workers'])
+const workersData = ref<TaskWorkerList | null>(null)
+
+/** 采集 Celery 执行器状态(broker 不可用返回 online=0, 不抛错) */
+const fetchWorkers = async () => {
+  try {
+    workersData.value = await getTaskWorkers()
+  }
+  catch (error) {
+    console.error('获取执行器状态失败:', error)
+  }
+}
+
+/** 优先级热调(P0~P9; null=清除覆盖恢复默认), 成功后以响应单条刷新注册表行 */
+const prioritySaving = ref('')
+const handlePriorityChange = async (row: TaskTypeDef, val: number | null) => {
+  prioritySaving.value = row.type
+  try {
+    const updated = await updateTaskTypePriority(row.type, val)
+    const idx = registry.value.findIndex(t => t.type === row.type)
+    if (idx >= 0) registry.value[idx] = { ...registry.value[idx], ...updated }
+    ElMessage.success(
+      val == null ? `已恢复「${row.name}」默认优先级` : `「${row.name}」生效优先级已调整为 P${val}`,
+    )
+  }
+  catch (error) {
+    console.error('调整优先级失败:', error)
+    ElMessage.error('调整优先级失败')
+  }
+  finally {
+    prioritySaving.value = ''
+  }
+}
+
+/** 手动自愈(重派发遗留 PENDING + 清扫僵尸 RUNNING) */
+const recovering = ref(false)
+const handleRecover = async () => {
+  recovering.value = true
+  try {
+    const result = await recoverTasks()
+    ElMessage.success(`自愈完成: 重派发 ${result.recovered} 项, 清扫僵尸 ${result.reaped} 项`)
+    await refreshAll()
+  }
+  catch (error) {
+    console.error('任务自愈失败:', error)
+    ElMessage.error('任务自愈失败')
+  }
+  finally {
+    recovering.value = false
+  }
+}
+
 // ################ 列表与查询(统一使用 useTableQuery) ################
-// 搜索字段配置(名称/类型/状态)
+// 搜索字段配置(名称/类型/状态/优先级)
 const searchFields: SearchField[] = [
   { prop: 'keyword', label: '名称' },
   {
@@ -216,6 +397,10 @@ const searchFields: SearchField[] = [
     options: [], // 挂载后由注册表填充
   },
   { prop: 'status', label: '状态', type: 'select', options: statusOptions },
+  {
+    prop: 'priority', label: '优先级', type: 'select',
+    options: Array.from({ length: 10 }, (_, i) => ({ label: `P${i}`, value: i })),
+  },
 ]
 
 // 分页/查询参数/表格数据/拉取/末页回退统一收口
@@ -223,16 +408,17 @@ const {
   pagination, queryParams, tableData, total, loading,
   fetchData, handleSearch, refreshAfterRemove,
 } = useTableQuery<QueueTask>(async (params) => {
-  const { keyword, task_type, status } = params
+  const { keyword, task_type, status, priority } = params
   // 空值不传递; 局部变量中转避免 TS excess property check
   const query = {
     ...params,
     keyword: (keyword as string) || undefined,
     task_type: (task_type as string) || undefined,
     status: (status as string) || undefined,
+    priority: priority ?? undefined,
   }
   return listTasks(query)
-}, { defaultQuery: { keyword: '', task_type: undefined, status: undefined } })
+}, { defaultQuery: { keyword: '', task_type: undefined, status: undefined, priority: undefined } })
 
 /** 获取状态统计 */
 const fetchStats = async () => {
@@ -259,11 +445,16 @@ const hasActive = computed(() =>
 )
 
 // 自动刷新开关: 活跃期间每 3 秒轮询(无活跃任务时自动降频到 10 秒仅刷统计)
+// 执行器监控独立 30 秒低频采集(inspect 有秒级延迟, 不适合高频)
 watch([autoRefresh, hasActive], setupPolling, { immediate: true })
+
+let workerTimer: number | undefined
 
 function setupPolling() {
   window.clearInterval(pollTimer)
+  window.clearInterval(workerTimer)
   pollTimer = undefined
+  workerTimer = undefined
   if (!autoRefresh.value) return
   const interval = hasActive.value ? 3000 : 10000
   pollTimer = window.setInterval(() => {
@@ -272,9 +463,13 @@ function setupPolling() {
     if (hasActive.value && !selectedRows.value.length) fetchData()
     else fetchStats()
   }, interval)
+  workerTimer = window.setInterval(fetchWorkers, 30_000)
 }
 
-onBeforeUnmount(() => window.clearInterval(pollTimer))
+onBeforeUnmount(() => {
+  window.clearInterval(pollTimer)
+  window.clearInterval(workerTimer)
+})
 
 // ################ 对话框/抽屉子组件编排(状态自持, open 时重置防脏数据) ################
 const createDialogRef = ref<InstanceType<typeof TaskCreateDialog>>()
@@ -451,8 +646,8 @@ const handleBatchDelete = async () => {
 
 // ################ 生命周期 ################
 onMounted(async () => {
-  // 任务类型注册表与统计为独立请求, 并行拉取(串行等待会叠加首屏时间)
-  // 加载任务类型注册表(搜索下拉 + 新建对话框), 失败仅降级下拉选项
+  // 任务类型注册表/执行器状态/统计为独立请求, 并行拉取(串行等待会叠加首屏时间)
+  // 加载任务类型注册表(搜索下拉 + 新建对话框 + 优先级热调表), 失败仅降级下拉选项
   getTaskRegistry()
     .then((r) => {
       registry.value = r
@@ -461,6 +656,7 @@ onMounted(async () => {
     .catch((error) => {
       console.error('获取任务类型注册表失败:', error)
     })
+  fetchWorkers()
   // 列表已由 useTableQuery 自动拉取, 此处补充刷新统计
   await fetchStats()
 })

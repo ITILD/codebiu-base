@@ -29,8 +29,34 @@
       </el-upload>
     </div>
 
+    <!-- 批量操作条: 勾选文件后出现(仅文档行可勾选, 目录行禁用) -->
+    <div
+      v-if="selectedRows.length"
+      class="mb-2 flex flex-wrap items-center gap-2 rounded-note-md bg-note-tint px-3 py-2"
+    >
+      <span text-sm text-note-green>已选 {{ selectedRows.length }} 篇文档</span>
+      <el-button v-if="canWrite" size="small" :loading="batchBusy" @click="handleBatchReparse">批量重新解析</el-button>
+      <el-button v-if="canDelete" size="small" type="danger" plain :loading="batchBusy" @click="handleBatchDelete">
+        批量删除
+      </el-button>
+      <el-button class="ml-auto" link size="small" @click="clearSelection">取消选择</el-button>
+    </div>
+
     <!-- 条目表格(目录+文件混合, 目录排前; 文件行携带文档级联查字段) -->
-    <el-table v-loading="loading" :data="entries" stripe w-full @row-dblclick="handleOpen">
+    <el-table
+      ref="tableRef"
+      v-loading="loading"
+      :data="entries"
+      stripe
+      w-full
+      @row-dblclick="handleOpen"
+      @selection-change="handleSelectionChange"
+    >
+      <el-table-column
+        type="selection"
+        width="44"
+        :selectable="(row: RagFileEntry) => !row.is_directory && !!row.document_id"
+      />
       <el-table-column label="名称" min-width="240" show-overflow-tooltip>
         <template #default="{ row }">
           <div flex items-center gap-2 cursor-pointer @click="handleOpen(row)">
@@ -207,7 +233,7 @@ import type { DocumentIngestProgress } from '../types'
 import type { PaginationParams } from '@/common/types/common'
 import { formatDate } from '@/common/utils/datetime'
 import { useCrudDialog } from '@/common/composables/useCrudDialog'
-import { ElMessage, ElMessageBox, type UploadRawFile } from 'element-plus'
+import { ElMessage, ElMessageBox, type TableInstance, type UploadRawFile } from 'element-plus'
 
 const props = defineProps<{
   /** 所属知识库项目ID */
@@ -592,6 +618,88 @@ const handleDelete = async (row: RagFileEntry) => {
     fetchData()
   } catch (error) {
     console.log('取消删除或删除失败:', error)
+  }
+}
+
+// ---------------- 批量操作(勾选文档行: 批量重新解析 / 批量删除) ----------------
+const tableRef = ref<TableInstance>()
+const selectedRows = ref<RagFileEntry[]>([])
+const batchBusy = ref(false)
+
+const handleSelectionChange = (rows: RagFileEntry[]) => {
+  selectedRows.value = rows
+}
+
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
+/** 批量结果汇总提示 */
+const notifyBatchResult = (results: PromiseSettledResult<unknown>[], action: string) => {
+  const ok = results.filter(r => r.status === 'fulfilled').length
+  const failed = results.length - ok
+  if (ok) ElMessage.success(`已提交${action} ${ok} 篇${failed ? `，${failed} 篇失败` : ''}`)
+  if (failed) ElMessage.error(`${failed} 篇${action}失败`)
+}
+
+/** 批量重新解析(先做模型预检, 再逐篇提交解析任务; 解析中状态由轮询接管) */
+const handleBatchReparse = async () => {
+  const targets = selectedRows.value.filter(r => r.document_id)
+  if (!targets.length) return
+  try {
+    const check = await checkRagParseModels()
+    if (!check.ok) {
+      ElMessageBox.alert(check.message || '解析所需模型未配置', '解析模型未配置', {
+        type: 'warning',
+        confirmButtonText: '知道了',
+      }).catch(() => {})
+      return
+    }
+    await ElMessageBox.confirm(
+      `确定重新解析选中的 ${targets.length} 篇文档吗？将逐篇重建向量索引。`,
+      '批量重新解析',
+      { type: 'info', confirmButtonText: '确定', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  batchBusy.value = true
+  try {
+    const results = await Promise.allSettled(
+      targets.map(t => reparseRagDocumentTask(t.document_id!)),
+    )
+    notifyBatchResult(results, '重新解析')
+    clearSelection()
+    fetchData()
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+/** 批量删除(物理文件与向量数据一并删除, 逐篇调用并汇总结果) */
+const handleBatchDelete = async () => {
+  const targets = selectedRows.value.filter(r => r.document_id)
+  if (!targets.length) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${targets.length} 篇文档吗？物理文件与向量数据将一并删除。`,
+      '批量删除',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  batchBusy.value = true
+  try {
+    const results = await Promise.allSettled(
+      targets.map(t => deleteRagDocument(t.document_id!)),
+    )
+    notifyBatchResult(results, '删除')
+    clearSelection()
+    fetchData()
+  } finally {
+    batchBusy.value = false
   }
 }
 

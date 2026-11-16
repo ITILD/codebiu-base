@@ -6,7 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from common.config.db import DaoRel
 from common.utils.fastapi_ex.exceptions import NotFoundError
 from common.utils.db.schema.pagination import PaginationParams
-from module_task.do.task import TaskQueue, TaskQueueResponse
+from module_task.do.task import TaskQueue, TaskQueueResponse, TaskTypePriority
 
 
 class TaskQueueDao:
@@ -59,6 +59,7 @@ class TaskQueueDao:
         status: str | None = None,
         task_type: str | None = None,
         user_id: str | None = None,
+        priority: int | None = None,
     ) -> list[TaskQueue]:
         """
         分页查询任务列表(创建时间倒序)
@@ -66,6 +67,7 @@ class TaskQueueDao:
         :param status: 状态精确过滤
         :param task_type: 任务类型精确过滤
         :param user_id: 创建者过滤(None 表示不过滤)
+        :param priority: 优先级精确过滤
         """
         statement = select(TaskQueue)
         conditions = []
@@ -77,6 +79,8 @@ class TaskQueueDao:
             conditions.append(TaskQueue.task_type == task_type)
         if user_id:
             conditions.append(TaskQueue.user_id == user_id)
+        if priority is not None:
+            conditions.append(TaskQueue.priority == priority)
         if conditions:
             statement = statement.where(*conditions)
         statement = (
@@ -95,6 +99,7 @@ class TaskQueueDao:
         status: str | None = None,
         task_type: str | None = None,
         user_id: str | None = None,
+        priority: int | None = None,
     ) -> int:
         """统计任务总数(与列表过滤条件一致)"""
         conditions = []
@@ -106,6 +111,8 @@ class TaskQueueDao:
             conditions.append(TaskQueue.task_type == task_type)
         if user_id:
             conditions.append(TaskQueue.user_id == user_id)
+        if priority is not None:
+            conditions.append(TaskQueue.priority == priority)
         statement = select(func.count()).select_from(TaskQueue)
         if conditions:
             statement = statement.where(*conditions)
@@ -123,3 +130,38 @@ class TaskQueueDao:
         statement = select(TaskQueue.status, func.count()).group_by(TaskQueue.status)
         result = await session.exec(statement)
         return {row[0]: row[1] for row in result.all()}
+
+    @DaoRel
+    async def get_all_priority_overrides(
+        self, session: AsyncSession | None = None
+    ) -> dict[str, int]:
+        """读取全部任务类型优先级覆盖 {task_type: priority_override}"""
+        result = await session.exec(select(TaskTypePriority))
+        return {row.task_type: row.priority_override for row in result.all()}
+
+    @DaoRel
+    async def upsert_priority_override(
+        self, task_type: str, priority: int, session: AsyncSession | None = None
+    ) -> None:
+        """写入/更新某任务类型的入队优先级覆盖"""
+        row = await session.get(TaskTypePriority, task_type)
+        if row is None:
+            session.add(
+                TaskTypePriority(task_type=task_type, priority_override=priority)
+            )
+        else:
+            row.priority_override = priority
+            session.add(row)
+        await session.flush()
+
+    @DaoRel
+    async def delete_priority_override(
+        self, task_type: str, session: AsyncSession | None = None
+    ) -> bool:
+        """删除某任务类型的优先级覆盖(回落注册表默认值); 返回是否删除了记录"""
+        row = await session.get(TaskTypePriority, task_type)
+        if row is None:
+            return False
+        await session.delete(row)
+        await session.flush()
+        return True

@@ -5,7 +5,10 @@
     - 任务创建: 校验类型注册表 → 落库(pending) → 投递 Redis broker(由 app_task.py worker 消费)
     - 状态检测: 数据库为主, 同时读取结果后端(AsyncResult)做对照/校正
     - 生命周期管理: 取消(revoke)/重试(重新派发)/删除
+    - 运维热调: 任务类型入队优先级覆盖(无需改代码/重启)
+    - 可观测: Celery 执行器(worker)在线状态采集、手动自愈
 """
+import asyncio
 from datetime import datetime, timezone
 
 from common.utils.fastapi_ex.exceptions import BusinessError, NotFoundError
@@ -17,10 +20,20 @@ from module_task.do.task import (
     TaskQueue,
     TaskQueueCreate,
     TaskQueueResponse,
+    TaskRecoverResponse,
     TaskStatsResponse,
-    TaskTypeDef,
+    TaskTypeView,
+    WorkerInfo,
+    WorkerListResponse,
 )
-from module_task.tasks import TASK_TYPES, dispatch_task, get_task_type
+from module_task.tasks import (
+    TASK_TYPES,
+    dispatch_task,
+    fail_stale_running_tasks,
+    get_task_type,
+    queue_for_priority,
+    recover_pending_tasks,
+)
 
 # 优先级取值范围(Redis 分级队列 0~9, 数值越大越优先; 越界自动夹紧)
 _PRIORITY_MIN, _PRIORITY_MAX = 0, 9
@@ -103,13 +116,18 @@ class TaskQueueService:
         keyword: str | None = None,
         status: str | None = None,
         task_type: str | None = None,
+        priority: int | None = None,
     ) -> PaginationResponse:
         """分页查询任务列表(列表项附带 Celery 状态对照)"""
         items = await self.dao.list_page(
-            pagination, keyword=keyword, status=status, task_type=task_type,
+            pagination,
+            keyword=keyword,
+            status=status,
+            task_type=task_type,
+            priority=priority,
         )
         total = await self.dao.count(
-            keyword=keyword, status=status, task_type=task_type,
+            keyword=keyword, status=status, task_type=task_type, priority=priority,
         )
         return PaginationResponse.create(
             [_read_celery_state(t) for t in items], total, pagination,
@@ -138,10 +156,124 @@ class TaskQueueService:
             + raw.get(QueueTaskStatus.REVOKED, 0),
         )
 
-    @staticmethod
-    def registry() -> list[TaskTypeDef]:
-        """任务类型注册表(供前端渲染下拉与默认模板)"""
-        return list(TASK_TYPES.values())
+    async def registry(self) -> list[TaskTypeView]:
+        """任务类型注册表(合并 DB 优先级覆盖, 供前端渲染下拉与优先级热调表)"""
+        overrides = await self.dao.get_all_priority_overrides()
+        views: list[TaskTypeView] = []
+        for t in TASK_TYPES.values():
+            override = overrides.get(t.type)
+            effective = _clamp_priority(
+                t.default_priority if override is None else override
+            )
+            views.append(
+                TaskTypeView(
+                    type=t.type,
+                    name=t.name,
+                    description=t.description,
+                    celery_task=t.celery_task,
+                    default_payload=t.default_payload,
+                    default_priority=t.default_priority,
+                    priority_override=override,
+                    effective_priority=effective,
+                    queue=queue_for_priority(effective),
+                )
+            )
+        return views
+
+    async def set_type_priority(
+        self, task_type: str, priority: int | None
+    ) -> TaskTypeView:
+        """
+        热调某任务类型的入队优先级(运维操作, 立即对之后创建的任务生效)
+        :param priority: 0~9; 传 None 表示清除覆盖, 回落注册表默认优先级
+        :raises NotFoundError: 任务类型未在注册表登记
+        """
+        if get_task_type(task_type) is None:
+            raise NotFoundError(f"任务类型 {task_type} 未在注册表登记")
+        if priority is None:
+            await self.dao.delete_priority_override(task_type)
+        else:
+            await self.dao.upsert_priority_override(
+                task_type, _clamp_priority(priority)
+            )
+        views = {v.type: v for v in await self.registry()}
+        return views[task_type]
+
+    async def workers(self) -> WorkerListResponse:
+        """
+        采集 Celery 执行器(worker)在线状态(控制 ping/stats/active 队列)
+
+        inspect 为同步阻塞调用, 放线程池执行; broker/worker 不可用时
+        返回 online=0 + error 提示而非抛异常, 便于前端展示"全部离线"。
+        """
+        def _inspect() -> WorkerListResponse:
+            from common.config.tasks import app as celery_app
+
+            try:
+                insp = celery_app.control.inspect(timeout=1.5)
+                pings = insp.ping() or {}
+                if not pings:
+                    return WorkerListResponse(
+                        total=0, online=0, error="没有执行器响应(可能均未启动)"
+                    )
+                stats = insp.stats() or {}
+                active_queues = insp.active_queues() or {}
+                active_tasks = insp.active() or {}
+            except Exception as exc:  # broker 不可达等
+                return WorkerListResponse(error=f"执行器状态采集失败: {exc}")
+
+            workers: list[WorkerInfo] = []
+            for name, pong in pings.items():
+                if not (isinstance(pong, dict) and pong.get("ok") == "pong"):
+                    continue
+                st = stats.get(name) or {}
+                pool = st.get("pool", {}) or {}
+                queues = sorted(
+                    {
+                        q.get("name")
+                        for q in (active_queues.get(name) or [])
+                        if q.get("name")
+                    }
+                )
+                running = [
+                    {
+                        "name": t.get("name", ""),
+                        "id": t.get("id", ""),
+                        "args": str(t.get("args", ""))[:200],
+                    }
+                    for t in (active_tasks.get(name) or [])
+                ]
+                workers.append(
+                    WorkerInfo(
+                        name=name,
+                        queues=queues,
+                        concurrency=int(pool.get("max-concurrency") or 0),
+                        active=len(running),
+                        processed=int(
+                            (st.get("total") or {}).get(
+                                "tasks", st.get("processed") or 0
+                            )
+                        ),
+                        uptime_seconds=None,
+                        active_tasks=running,
+                        pid=st.get("pid"),
+                    )
+                )
+            return WorkerListResponse(
+                total=len(workers), online=len(workers), workers=workers
+            )
+
+        return await asyncio.to_thread(_inspect)
+
+    async def recover(self) -> TaskRecoverResponse:
+        """
+        手动触发任务自愈(重启残留 PENDING 重派发 + 僵尸 RUNNING 归档失败)
+
+        语义与 app_task.py 启动自愈/Reaper 周期清扫一致, 用于运维即时干预。
+        """
+        recovered = await recover_pending_tasks()
+        reaped = await fail_stale_running_tasks()
+        return TaskRecoverResponse(recovered=recovered, reaped=reaped)
 
     # ################ 创建/投递 ################
 
@@ -159,11 +291,19 @@ class TaskQueueService:
                 f"任务类型 {data.task_type} 未注册(可用类型: {registered})"
             )
 
+        # 优先级解析: 显式传入 > 类型覆盖(DB 热调) > 类型注册表默认
+        if data.priority is None:
+            overrides = await self.dao.get_all_priority_overrides()
+            override = overrides.get(data.task_type)
+            effective = task_def.default_priority if override is None else override
+        else:
+            effective = data.priority
+
         task = TaskQueue(
             name=data.name,
             task_type=data.task_type,
             payload=data.payload or {},
-            priority=_clamp_priority(data.priority),
+            priority=_clamp_priority(effective),
             user_id=user_id,
             status=QueueTaskStatus.PENDING,
         )

@@ -129,7 +129,10 @@ class TaskQueueCreate(SQLModel):
     name: str = Field(max_length=200, description="任务名称")
     task_type: str = Field(max_length=50, description="任务类型(需在 TASK_TYPES 注册表中)")
     payload: dict = Field(default_factory=dict, description="任务参数 JSON")
-    priority: int = Field(default=0, description="优先级(0~9, 越界自动夹紧)")
+    priority: int | None = Field(
+        default=None,
+        description="优先级(0~9, 越界自动夹紧; 未传时按类型生效优先级=覆盖值??默认值)",
+    )
 
 
 class TaskQueueResponse(SQLModel):
@@ -177,6 +180,91 @@ class TaskTypeDef(SQLModel):
     description: str
     celery_task: str
     default_payload: dict
+    default_priority: int = Field(
+        default=0,
+        description="类型默认优先级(创建未显式指定 priority 时采用; 0~9 越大越优先)",
+    )
+
+
+class TaskTypePriority(SQLModel, table=True):
+    """任务类型入队优先级覆盖(运维热调, 不改代码即可调整某类任务的调度优先级)
+
+    同一类型仅一条记录; 删除记录即回落到注册表默认优先级。
+    仅影响"之后创建"的任务, 已入队任务不变。
+    """
+
+    __tablename__ = "task_type_priority"
+
+    task_type: str = Field(
+        primary_key=True,
+        max_length=50,
+        description="任务类型编码(对应 TASK_TYPES 注册表)",
+    )
+    priority_override: int = Field(
+        description="覆盖后的入队优先级(0~9, 越大越优先)",
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
+            nullable=False,
+        ),
+        description="最后调整时间",
+    )
+
+
+class TaskTypeView(SQLModel):
+    """任务类型视图(注册表条目 + 优先级覆盖状态, 供任务中心优先级热调表)"""
+
+    type: str
+    name: str
+    description: str
+    celery_task: str
+    default_payload: dict
+    default_priority: int
+    priority_override: int | None = Field(
+        default=None,
+        description="运维覆盖的优先级(None=未覆盖, 用默认值)",
+    )
+    effective_priority: int = Field(
+        description="当前生效的入队优先级(覆盖值 ?? 默认值)",
+    )
+    queue: str = Field(
+        description="按生效优先级路由的消费队列(priority>=7 走交互队列)",
+    )
+
+
+class WorkerInfo(SQLModel):
+    """Celery 执行器(worker)运行状态条目"""
+
+    name: str
+    queues: list[str] = Field(default_factory=list, description="消费的队列列表")
+    concurrency: int = Field(default=0, description="并发槽位数")
+    active: int = Field(default=0, description="当前活跃任务数")
+    processed: int = Field(default=0, description="累计已处理任务数")
+    uptime_seconds: float | None = Field(default=None, description="进程运行时长(秒)")
+    active_tasks: list[dict] = Field(
+        default_factory=list,
+        description="正在执行的任务(name/id/args 摘要)",
+    )
+    pid: int | None = Field(default=None, description="进程ID")
+
+
+class WorkerListResponse(SQLModel):
+    """执行器状态响应(broker 不可用时 online=0 并带错误提示, 不抛异常)"""
+
+    total: int = 0
+    online: int = 0
+    workers: list[WorkerInfo] = Field(default_factory=list)
+    error: str | None = Field(default=None, description="采集失败原因(可重试)")
+
+
+class TaskRecoverResponse(SQLModel):
+    """手动自愈结果(重派发遗留 PENDING + 清扫僵尸 RUNNING)"""
+
+    recovered: int = Field(default=0, description="重派发的遗留任务数")
+    reaped: int = Field(default=0, description="清扫归档的僵尸任务数")
 
 
 class TaskRegistryResponse(SQLModel):

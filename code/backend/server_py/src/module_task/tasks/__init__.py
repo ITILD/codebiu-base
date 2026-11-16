@@ -58,6 +58,7 @@ TASK_TYPES: dict[str, TaskTypeDef] = {
             "total_pages": 42,
             "duration": 16,
         },
+        default_priority=5,
     ),
     "rag_document_parse": TaskTypeDef(
         type="rag_document_parse",
@@ -66,6 +67,7 @@ TASK_TYPES: dict[str, TaskTypeDef] = {
                     "以任务创建者绑定的模型执行(未绑定时回退默认公共模型)",
         celery_task="module_rag.tasks.project_document.reparse_document_task",
         default_payload={"document_id": "", "force_preset_id": None},
+        default_priority=5,
     ),
     "rag_revectorize": TaskTypeDef(
         type="rag_revectorize",
@@ -74,6 +76,7 @@ TASK_TYPES: dict[str, TaskTypeDef] = {
                     "重算向量表中所有文档 chunk 向量(仅系统管理员)",
         celery_task="module_rag.tasks.project_document_chunk.revectorize_chunks_task",
         default_payload={"model_id": None},
+        default_priority=0,
     ),
     "sys_audit_purge": TaskTypeDef(
         type="sys_audit_purge",
@@ -82,6 +85,7 @@ TASK_TYPES: dict[str, TaskTypeDef] = {
                     "(REQ-012 内置示例, 建议每日凌晨执行; 保留期在 系统配置→操作审计 修改)",
         celery_task="module_task.tasks.maintenance.purge_audit_task",
         default_payload={},
+        default_priority=0,
     ),
 }
 
@@ -89,6 +93,17 @@ TASK_TYPES: dict[str, TaskTypeDef] = {
 def get_task_type(task_type: str) -> TaskTypeDef | None:
     """按类型编码查询注册表条目"""
     return TASK_TYPES.get(task_type)
+
+
+def queue_for_priority(priority: int) -> str:
+    """按优先级解析消费队列(priority>=INTERACTIVE_PRIORITY_THRESHOLD 走交互独立队列)"""
+    from common.config.tasks import DEFAULT_QUEUE, INTERACTIVE_PRIORITY_THRESHOLD, INTERACTIVE_QUEUE
+
+    return (
+        INTERACTIVE_QUEUE
+        if (priority or 0) >= INTERACTIVE_PRIORITY_THRESHOLD
+        else DEFAULT_QUEUE
+    )
 
 # ################ 统一派发 ################
 

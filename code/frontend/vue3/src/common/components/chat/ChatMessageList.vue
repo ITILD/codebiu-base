@@ -2,6 +2,7 @@
 // 通用聊天消息列表:
 // - 用户消息: 右侧苔绿气泡
 // - 助手消息: 头像 + 过程区块折叠(ProcessBlock) + 富文本正文(MarkdownContent)
+// - 正文尾部: 参考来源引用栏(AnswerSourceBar, 检索引用分组 chips + 详情抽屉)
 // - 正文操作: 复制 / 导出 Word / 导出 PDF
 // - 智能滚动: 仅当用户接近底部时跟随(阅读历史时不打扰)
 import { ref, nextTick, watch } from 'vue'
@@ -10,6 +11,7 @@ import { ElMessage } from 'element-plus'
 import MarkdownContent from './MarkdownContent.vue'
 import ProcessBlock from './ProcessBlock.vue'
 import InteractiveCard from './InteractiveCard.vue'
+import AnswerSourceBar from './AnswerSourceBar.vue'
 import { copyToClipboard, exportMarkdownToDocx, exportMarkdownToPdf } from '@/common/utils/export'
 import { StreamEventType } from '@/common/types/chat'
 import type { DisplayMessage } from '@/common/types/chat'
@@ -191,6 +193,12 @@ const handleExportPdf = async (msg: DisplayMessage) => {
             >
               <MarkdownContent :content="msg.content" :block-id="msg.id" />
             </div>
+
+            <!-- 参考来源引用栏: 检索引用按来源分组为 chips, 点击查看命中片段详情 -->
+            <AnswerSourceBar
+              :blocks="msg.blocks ?? []"
+              :streaming="msg.id === streamingMessageId"
+            />
 
             <!-- 操作: 复制 / 导出 Word / 导出 PDF / token 统计 -->
             <div

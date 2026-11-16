@@ -1,7 +1,14 @@
 // 任务队列模块 API(Celery+Redis 异步任务管理)
 import { http_base_server } from '@/common/api/http'
 import type { PaginationParams, PaginationResponse } from '@/common/types/common'
-import type { QueueTask, QueueTaskCreate, TaskStats, TaskTypeDef } from '../types'
+import type {
+  QueueTask,
+  QueueTaskCreate,
+  TaskRecoverResult,
+  TaskStats,
+  TaskTypeDef,
+  TaskWorkerList,
+} from '../types'
 
 /** 任务列表过滤参数 */
 export type TaskListParams = PaginationParams & {
@@ -11,13 +18,41 @@ export type TaskListParams = PaginationParams & {
   status?: string
   /** 任务类型过滤 */
   task_type?: string
+  /** 优先级过滤(0~9) */
+  priority?: number
 }
 
 /**
- * 查询任务类型注册表(新建任务下拉 + 默认参数模板)
+ * 查询任务类型注册表(新建任务下拉 + 默认参数模板 + 优先级热调表)
  */
 export const getTaskRegistry = () => {
   return http_base_server.get<TaskTypeDef[]>('/task/tasks/registry')
+}
+
+/**
+ * 查询 Celery 执行器(worker)在线状态(broker 不可用时返回 online=0)
+ */
+export const getTaskWorkers = () => {
+  return http_base_server.get<TaskWorkerList>('/task/tasks/workers')
+}
+
+/**
+ * 热调任务类型入队优先级(传 null 清除覆盖回落默认值)
+ * @param task_type 任务类型编码
+ * @param priority 0~9; null=清除覆盖
+ */
+export const updateTaskTypePriority = (task_type: string, priority: number | null) => {
+  return http_base_server.patch<TaskTypeDef>(
+    `/task/tasks/registry/${task_type}/priority`,
+    { priority },
+  )
+}
+
+/**
+ * 手动触发任务自愈(重派发遗留 PENDING + 清扫僵尸 RUNNING)
+ */
+export const recoverTasks = () => {
+  return http_base_server.post<TaskRecoverResult>('/task/tasks/recover')
 }
 
 /**

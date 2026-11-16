@@ -30,13 +30,21 @@ const statusOptions = (Object.keys(statusLabels) as TaskStatus[]).map(value => (
   value,
 }))
 
-/** 任务类型定义(后端注册表条目, 供新建任务下拉与默认参数模板) */
+/** 任务类型定义(后端注册表条目, 供新建任务下拉/默认参数模板/优先级热调表) */
 interface TaskTypeDef {
   type: string
   name: string
   description: string
   celery_task: string
   default_payload: Record<string, unknown>
+  /** 类型默认优先级(创建未显式指定时采用) */
+  default_priority?: number
+  /** 运维覆盖的优先级(null/未定义=未覆盖) */
+  priority_override?: number | null
+  /** 当前生效优先级(覆盖值 ?? 默认值) */
+  effective_priority?: number
+  /** 按生效优先级路由的消费队列 */
+  queue?: string
 }
 
 /** 任务记录(后端返回, 含 Celery 侧状态对照; 纯任务管理: 不含业务参数/结果) */
@@ -67,6 +75,8 @@ interface QueueTaskCreate {
   name: string
   task_type: string
   payload: Record<string, unknown>
+  /** 优先级(0~9 越大越优先; 不传时按类型生效优先级) */
+  priority?: number | null
 }
 
 /** 任务状态统计(概览卡片) */
@@ -127,6 +137,39 @@ interface TaskScheduleTriggerResult {
   schedule_id: number
 }
 
+// ################ 执行器监控与任务自愈 ################
+
+/** Celery 执行器(worker)运行状态条目 */
+interface TaskWorkerInfo {
+  name: string
+  /** 消费的队列列表 */
+  queues: string[]
+  /** 并发槽位数 */
+  concurrency: number
+  /** 当前活跃任务数 */
+  active: number
+  /** 累计已处理任务数 */
+  processed: number
+  uptime_seconds?: number | null
+  /** 正在执行的任务(name/id/args 摘要) */
+  active_tasks: Array<{ name: string; id: string; args?: string }>
+  pid?: number | null
+}
+
+/** 执行器状态响应(broker 不可用时 online=0 且带 error 提示) */
+interface TaskWorkerList {
+  total: number
+  online: number
+  workers: TaskWorkerInfo[]
+  error?: string | null
+}
+
+/** 手动自愈结果(重派发遗留 PENDING + 清扫僵尸 RUNNING) */
+interface TaskRecoverResult {
+  recovered: number
+  reaped: number
+}
+
 export {
   statusLabels,
   statusTagTypes,
@@ -141,4 +184,7 @@ export {
   type TaskScheduleSave,
   type CronPreset,
   type TaskScheduleTriggerResult,
+  type TaskWorkerInfo,
+  type TaskWorkerList,
+  type TaskRecoverResult,
 }

@@ -1,12 +1,20 @@
 """任务队列模块 task 接口层: 参数校验并调度 service"""
 
+from pydantic import BaseModel
+
 from fastapi import APIRouter, Depends, Query, status
 
 from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
 from module_authorization.dependencies.permission import require_permission
 from module_task.config.server import module_app
 from module_task.dependencies.task import get_task_queue_service
-from module_task.do.task import TaskQueueCreate, TaskQueueResponse, TaskStatsResponse
+from module_task.do.task import (
+    TaskQueueCreate,
+    TaskQueueResponse,
+    TaskRecoverResponse,
+    TaskStatsResponse,
+    WorkerListResponse,
+)
 from module_task.service.task import TaskQueueService
 
 router = APIRouter()
@@ -34,9 +42,52 @@ async def get_registry(
     service: TaskQueueService = Depends(get_task_queue_service),
 ) -> list:
     """
-    查询已注册的任务类型(前端类型下拉/默认参数模板)
+    查询已注册的任务类型(前端类型下拉/默认参数模板/优先级热调表)
     """
-    return [t.model_dump() for t in service.registry()]
+    return [t.model_dump() for t in await service.registry()]
+
+
+class TaskTypePriorityBody(BaseModel):
+    """任务类型优先级热调请求体(priority=None 表示清除覆盖回落默认)"""
+
+    priority: int | None = None
+
+
+@router.patch(
+    "/registry/{task_type}/priority",
+    summary="热调任务类型入队优先级",
+    response_model=list,
+)
+async def set_type_priority(
+    task_type: str,
+    body: TaskTypePriorityBody,
+    current_user_id: str = Depends(require_permission("task", "queue", "update")),
+    service: TaskQueueService = Depends(get_task_queue_service),
+) -> list:
+    """
+    调整某任务类型的入队优先级(0~9, 越大越优先; 传 null 清除覆盖)
+    仅影响之后创建的任务, 立即生效无需重启
+    """
+    view = await service.set_type_priority(task_type, body.priority)
+    return [view.model_dump()]
+
+
+@router.get("/workers", summary="查询Celery执行器状态", response_model=WorkerListResponse)
+async def get_workers(
+    current_user_id: str = Depends(require_permission("task", "queue", "read")),
+    service: TaskQueueService = Depends(get_task_queue_service),
+) -> WorkerListResponse:
+    """执行器在线状态/并发/活跃任务(broker 不可用时返回 online=0 而非报错)"""
+    return await service.workers()
+
+
+@router.post("/recover", summary="手动触发任务自愈", response_model=TaskRecoverResponse)
+async def recover_tasks(
+    current_user_id: str = Depends(require_permission("task", "queue", "update")),
+    service: TaskQueueService = Depends(get_task_queue_service),
+) -> TaskRecoverResponse:
+    """重派发遗留 PENDING 任务 + 清扫僵尸 RUNNING 任务(运维即时干预)"""
+    return await service.recover()
 
 
 @router.get("/stats", summary="按状态统计任务数", response_model=TaskStatsResponse)
@@ -54,6 +105,7 @@ async def list_tasks(
     keyword: str | None = Query(None, max_length=200, description="任务名称模糊搜索"),
     task_status: str | None = Query(None, alias="status", description="状态过滤(pending/running/success/failed/cancelled)"),
     task_type: str | None = Query(None, description="任务类型过滤"),
+    priority: int | None = Query(None, ge=0, le=9, description="优先级过滤(0~9)"),
     current_user_id: str = Depends(require_permission("task", "queue", "read")),
     service: TaskQueueService = Depends(get_task_queue_service),
 ) -> PaginationResponse:
@@ -61,7 +113,11 @@ async def list_tasks(
     分页查询任务列表(列表项含 Celery 状态对照字段)
     """
     return await service.list_page(
-        pagination, keyword=keyword, status=task_status, task_type=task_type,
+        pagination,
+        keyword=keyword,
+        status=task_status,
+        task_type=task_type,
+        priority=priority,
     )
 
 

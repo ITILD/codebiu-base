@@ -260,6 +260,14 @@ class HttpClient {
     });
   }
 
+  patch<T>(endpoint: string, body?: any, config?: RequestConfig): Promise<T> {
+    return this.request(endpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      ...config,
+    });
+  }
+
   /**
    * PUT 原始二进制体(不经 JSON 序列化, 分片上传等场景)
    * body 原样传给 fetch(ArrayBuffer/Blob 均为合法 BodyInit)
