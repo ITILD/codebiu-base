@@ -1,13 +1,13 @@
 # ==============================================================================
 # 后端镜像: 多阶段构建(最小体积 + 纯国内网络)
-#   builder: python:3.13-slim + uv(清华PyPI装) 按锁文件编译依赖到 /app/.venv
-#   runtime: python:3.13-slim + venv + 最小运行库(无编译器/无uv/无缓存)
+#   builder: python:3.14-slim + uv(清华PyPI装) 按锁文件编译依赖到 /app/.venv
+#   runtime: python:3.14-slim + venv + 最小运行库(无编译器/无uv/无缓存)
 # 国内源: apt=清华 / uv=清华PyPI安装 / 依赖=uv.lock 内置清华源
-# 源码不进镜像: 部署时 volume 外挂 src/(见 deveops/运维脚本/docker_dev)
+# 源码不进镜像: 部署时 volume 外挂 src/(见 deveops/运维脚本/2-主服务)
 # ==============================================================================
 
 # ---------------- 阶段 1: 依赖构建(不进最终镜像) ----------------
-FROM python:3.13-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
 # apt 换清华源(用 http: 此时还没装 ca-certificates, https 证书验证不了)
@@ -23,12 +23,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 # --frozen 严格按 uv.lock(清华源)安装, 与开发环境完全一致
 # --no-install-project 项目自身不装(源码外挂); --no-cache 不留下载缓存
-RUN uv venv --python /usr/local/bin/python3.13 .venv \
+RUN uv venv --python /usr/local/bin/python3.14 .venv \
     && uv sync --frozen --no-cache --no-install-project --no-dev \
     && find .venv -depth -type d -name '__pycache__' -exec rm -rf {} +
 
 # ---------------- 阶段 2: 运行时 ----------------
-FROM python:3.13-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai LANG=C.UTF-8
 RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
@@ -36,13 +36,14 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.o
         ca-certificates tzdata \
         libglib2.0-0 \
         libgl1 \
+        libgomp1 \
         libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# venv(其 python 链接 /usr/local/bin/python3.13, 两阶段镜像一致)
+# venv(其 python 链接 /usr/local/bin/python3.14, 两阶段镜像一致)
 COPY --from=builder /app/.venv /app/.venv
 
 WORKDIR /app
-EXPOSE 8600
-# src/ config.yaml 等运行内容由 compose volume 外挂(deveops/运维脚本/docker_dev)
+EXPOSE 6666
+# src/ config.yaml 等运行内容由 compose volume 外挂(deveops/运维脚本/2-主服务)
 CMD [".venv/bin/python", "src/app.py"]

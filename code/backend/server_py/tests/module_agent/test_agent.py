@@ -283,12 +283,20 @@ async def test_chat_tool_call_roundtrip(test_admin, stub_llm):
         answer = "".join(e.content for e in events if e.stream_event_type.value == "answer")
         assert answer == "最终答案"
 
-        # bind_tools 挂载了全部可对话技能(官方脚本 Skill 默认 agent_callable=false 不计入)
+        # bind_tools 挂载经 ToolGate 门控的可对话技能(官方脚本 Skill 默认
+        # agent_callable=false 不计入; 需知识库特性/授权项目的技能在
+        # agent.default_project_ids 为空时按门控跳过, REQ-019 §5.1)
         assert stub_llm.bound_tools is not None
         callable_count = sum(
-            1 for m in SKILL_REGISTRY.values() if m.agent_callable
+            1
+            for m in SKILL_REGISTRY.values()
+            if m.agent_callable and "knowledge_base" not in m.requires_features
         )
         assert len(stub_llm.bound_tools) == callable_count
+        # 门控跳过的技能以 STATUS 事件向用户说明原因
+        assert any(
+            e.stream_event_type.value == "status" and "不可用" in e.content for e in events
+        )
 
         # 第二轮收到的消息尾部为 ToolMessage 回填(含工具结果)
         round2 = stub_llm.snapshots[1]

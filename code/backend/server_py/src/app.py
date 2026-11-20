@@ -1,5 +1,8 @@
 """服务入口: 导入即注册全部模块路由, 并提供 uvicorn 启动入口"""
 
+# @doc-sync: doc/02-设计文档/02-总体架构与功能设计.md; doc/02-设计文档/03-权限设计.md; code/backend/server_py/doc/dev/02-目录结构.md
+# 触发: 新增/删除模块、路由挂载或权限声明变化时，同步上述文档与 doc/doc-manifest.yaml
+
 from common.config import log
 from common.config import net
 from common.config.index import conf
@@ -28,6 +31,7 @@ from module_rag.controller import (
     project_dept,
     rag_chat,
     user_model,
+    usage,
 )
 # # 知识库模块: 权限声明注册保持权限表与声明一致
 from module_rag.config import permissions as rag_permissions  # noqa: F401
@@ -35,6 +39,8 @@ from module_rag.config import permissions as rag_permissions  # noqa: F401
 from module_websearch.controller import websearch
 # # 任务队列模块(本地+Celery 双引擎, RAG 文档解析任务依赖)
 from module_task.controller import task, schedule
+# # 任务队列模块: 队列注册表(动态订阅) + 执行器运维(宿主机/容器/伸缩)
+from module_task.controller import queue as task_queue_registry, worker_ops  # noqa: F401
 from module_task.config import permissions as task_permissions  # noqa: F401
 # # 联系触达模块(验证码收发服务 + 通知中心站内信/订阅, REQ-011)
 from module_contact.controller import notification

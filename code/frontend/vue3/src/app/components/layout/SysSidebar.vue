@@ -83,11 +83,8 @@
         </el-menu>
       </el-scrollbar>
 
-      <!-- 底部: 登录态为企业控制台式用户卡(收起态仅头像), 未登录回落品牌小注
-           (紧凑单行; 收起时淡出而非瞬间消失, 避免底部跳一下) -->
-      <SidebarUserCard v-if="authState.user.id" class="shrink-0" :collapsed="isCollapse" px-3 pb-2 />
+      <!-- 底部品牌小注(紧凑单行; 收起时淡出而非瞬间消失, 避免底部跳一下) -->
       <div
-        v-else
         class="sidebar-brand note-edge-t text-[11px]"
         :class="{ 'is-hidden': isCollapse }"
         px-3
@@ -108,49 +105,46 @@
     size="min(86vw, 280px)"
     class="sidebar-drawer-note"
   >
-    <!-- 菜单占满剩余高度, 底部固定用户卡(与桌面侧栏同款, 向下弹出) -->
-    <div class="drawer-body" flex flex-col h-full>
-      <el-scrollbar flex-1 min-h-0>
-        <el-menu
-          :default-active="routerStore.routerPath.now"
-          :router="true"
-          border-0
-          bg-transparent
-          @select="sysSettingStore.sysStyle.isSidebarDrawerOpen = false"
-        >
-          <template v-for="item in visibleMenuItems" :key="item.index">
-            <el-menu-item v-if="!item.children" :index="item.index" :title="item.title">
+    <!-- 菜单滚动区(桌面底部品牌注在移动抽屉中省略, 保持简洁) -->
+    <el-scrollbar max-height="100%">
+      <el-menu
+        :default-active="routerStore.routerPath.now"
+        :router="true"
+        border-0
+        bg-transparent
+        @select="sysSettingStore.sysStyle.isSidebarDrawerOpen = false"
+      >
+        <template v-for="item in visibleMenuItems" :key="item.index">
+          <el-menu-item v-if="!item.children" :index="item.index" :title="item.title">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <template #title>
+              <span class="menu-label">
+                <span class="menu-label-text">{{ item.title }}</span>
+                <span v-if="item.system" class="menu-sys">系统</span>
+              </span>
+            </template>
+          </el-menu-item>
+
+          <el-sub-menu v-else :index="item.index" :title="item.title">
+            <template #title>
               <el-icon><component :is="item.icon" /></el-icon>
+              <span class="menu-label">
+                <span class="menu-label-text">{{ item.title }}</span>
+                <span v-if="item.system" class="menu-sys">系统</span>
+              </span>
+            </template>
+            <el-menu-item v-for="child in item.children" :key="child.index" :index="child.index" :title="child.title">
               <template #title>
                 <span class="menu-label">
-                  <span class="menu-label-text">{{ item.title }}</span>
-                  <span v-if="item.system" class="menu-sys">系统</span>
+                  <span class="menu-label-text">{{ child.title }}</span>
+                  <span v-if="child.system" class="menu-sys">系统</span>
                 </span>
               </template>
             </el-menu-item>
-
-            <el-sub-menu v-else :index="item.index" :title="item.title">
-              <template #title>
-                <el-icon><component :is="item.icon" /></el-icon>
-                <span class="menu-label">
-                  <span class="menu-label-text">{{ item.title }}</span>
-                  <span v-if="item.system" class="menu-sys">系统</span>
-                </span>
-              </template>
-              <el-menu-item v-for="child in item.children" :key="child.index" :index="child.index" :title="child.title">
-                <template #title>
-                  <span class="menu-label">
-                    <span class="menu-label-text">{{ child.title }}</span>
-                    <span v-if="child.system" class="menu-sys">系统</span>
-                  </span>
-                </template>
-              </el-menu-item>
-            </el-sub-menu>
-          </template>
-        </el-menu>
-      </el-scrollbar>
-      <SidebarUserCard v-if="authState.user.id" class="shrink-0" placement="bottom-start" pb-1 />
-    </div>
+          </el-sub-menu>
+        </template>
+      </el-menu>
+    </el-scrollbar>
   </el-drawer>
 </template>
 
@@ -159,16 +153,11 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { Fold } from '@element-plus/icons-vue'
 import { RouterStore } from '@/common/stores/router'
 import { SysSettingStore } from '@/common/stores/sys'
-import { useAuthStore } from '@/common/stores/auth'
 import { useResponsive } from '@/common/composables/useResponsive'
 import { useVisibleMenu } from '@/app/composables/useMenu'
-import SidebarUserCard from './SidebarUserCard.vue'
 
 const routerStore = RouterStore()
 const sysSettingStore = SysSettingStore()
-// 登录态: 决定侧栏底部渲染用户卡还是品牌小注
-const authStore = useAuthStore()
-const authState = authStore.authState
 // 响应式断点: 常驻侧边栏仅平板及以上显示, 折叠态跟随桌面档
 const { isMd, isLg } = useResponsive()
 const TITLE = import.meta.env.VITE_GLOB_APP_TITLE

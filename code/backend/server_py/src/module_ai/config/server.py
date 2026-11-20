@@ -114,30 +114,103 @@ async def ensure_model_config_scope_columns():
 # ############################# 默认公共模型启动 Seed #############################
 # seed 支持的配置字段(ModelConfigCreate 模型字段的白名单, enabled 为开关不属模型字段)
 _SEED_ALLOWED_FIELDS = set(ModelConfigCreate.model_fields.keys()) - {"model_type", "scope", "is_default", "is_active", "user_id"}
+# 条目自身的控制字段, 不作为模型配置/附加信息入库
+_SEED_META_KEYS = {"enabled", "model_type", "is_default", "scope", "is_active", "user_id"}
 
 
-def _load_default_models_config() -> tuple[bool, dict[str, dict]]:
+def _load_default_models_config() -> tuple[bool, list[dict]]:
     """
     从配置文件读取默认公共模型配置(default_models 节)
-    :return: (reset_models 总开关, {model_type: 配置dict}); 未配置返回 (False, {})
-    :raises: 解析失败时返回 (False, {}), 不抛出
+    支持两种写法:
+      - 列表(推荐): reset_model: true + models: [{model_type, model, is_default, ...}, ...]
+      - 旧按类型分节: chat/embeddings/... 各一个 dict(自动补 model_type)
+    :return: (reset_models 总开关, 模型配置条目列表); 未配置返回 (False, [])
+    :raises: 解析失败时返回 (False, []), 不抛出
     """
     if "default_models" not in conf or not conf.default_models:
-        return False, {}
+        return False, []
     raw = conf.default_models
     try:
-        # reset_model(reset_models) 为布尔总开关(false=启动不做任何处理); 其余仅接受 dict 类型节
-        # (布尔/None 等非法值跳过, 避免一个无效节拖垮整个默认模型 seed)
         reset_models = bool(raw.get("reset_model", raw.get("reset_models", False)))
-        sections = {
-            str(k).lower(): dict(v)
-            for k, v in raw.items()
-            if k not in ("reset_model", "reset_models") and isinstance(v, dict)
-        }
-        return reset_models, sections
+        if "models" in raw:
+            models = raw.get("models") or []
+        else:
+            models = [
+                {**dict(v), "model_type": str(k).lower()}
+                for k, v in raw.items()
+                if k not in ("reset_model", "reset_models") and isinstance(v, dict)
+            ]
+        if not isinstance(models, list):
+            logger.error("default_models.models 必须是列表, 默认公共模型 seed 已跳过")
+            return False, []
+        return reset_models, [dict(m) for m in models if isinstance(m, dict)]
     except Exception as e:
         logger.error(f"读取 default_models 配置失败: {e}")
-        return False, {}
+        return False, []
+
+
+def _build_seed_fields(section: dict) -> dict:
+    """提取可入库的模型字段; 能力描述等非模型字段并入 extra 保留(不丢配置信息)"""
+    fields = {k: v for k, v in section.items() if k in _SEED_ALLOWED_FIELDS}
+    extra = dict(section.get("extra") or {})
+    extra.update(
+        {
+            k: v
+            for k, v in section.items()
+            if k not in _SEED_ALLOWED_FIELDS and k not in _SEED_META_KEYS
+        }
+    )
+    if extra:
+        fields["extra"] = extra
+    else:
+        fields.pop("extra", None)
+    return fields
+
+
+def _group_seed_models(models: list[dict]) -> dict[str, list[dict]]:
+    """按模型类型分组并校验: 每种类型有且只有一个启用模型标记 is_default
+
+    :raises: 同类型多个默认主模型(或存在多个候选但未指定主模型)时抛出 ValueError
+    """
+    grouped: dict[str, list[dict]] = {}
+    for section in models:
+        if not section.get("enabled", False):
+            continue
+        type_name = str(section.get("model_type") or "").strip().lower()
+        if not type_name:
+            logger.warning("default_models.models 存在缺少 model_type 的条目, 已跳过")
+            continue
+        try:
+            ModelType(type_name)
+        except ValueError:
+            logger.warning(f"default_models 配置节 '{type_name}' 不是合法模型类型, 已跳过")
+            continue
+        if not section.get("model"):
+            logger.warning(f"default_models 配置节 '{type_name}' 缺少 model 字段, 已跳过")
+            continue
+        grouped.setdefault(type_name, []).append(section)
+
+    for type_name, items in grouped.items():
+        defaults = [s for s in items if s.get("is_default", False)]
+        if len(defaults) > 1:
+            msg = (
+                f"default_models 中模型类型 '{type_name}' 只能指定一个 is_default=true, "
+                f"实际指定了 {len(defaults)} 个"
+            )
+            logger.error(msg)
+            raise ValueError(msg)
+        if not defaults:
+            if len(items) == 1:
+                # 同类型仅一个模型时自动作为默认主模型
+                items[0]["is_default"] = True
+            else:
+                msg = (
+                    f"default_models 中模型类型 '{type_name}' 配置了 {len(items)} 个模型, "
+                    f"但未指定 is_default=true 的主模型"
+                )
+                logger.error(msg)
+                raise ValueError(msg)
+    return grouped
 
 
 async def _resolve_seed_owner_id() -> str:
@@ -158,11 +231,11 @@ async def _resolve_seed_owner_id() -> str:
     return "system"
 
 
-def _config_matches(existing, section: dict) -> bool:
-    """判断库中默认公共模型与配置是否一致(仅比较配置中显式写出的模型字段)"""
+def _config_matches(existing, fields: dict) -> bool:
+    """判断库中模型与配置是否一致(仅比较配置中显式写出的模型字段)"""
     return all(
         getattr(existing, k, None) == v
-        for k, v in section.items()
+        for k, v in fields.items()
         if k in _SEED_ALLOWED_FIELDS
     )
 
@@ -224,70 +297,104 @@ async def ensure_voice_server_type():
             )
 
 
+async def _seed_default_model(
+    service: ModelConfigService, owner_id: str, type_name: str, section: dict
+) -> None:
+    """补种/同步指定类型的默认主模型(原默认配置变更时转私有保留, 再建新默认)"""
+    fields = _build_seed_fields(section)
+    model_type = ModelType(type_name)
+    existing = await service.model_config_dao.get_default_by_type(type_name)
+    if existing is None:
+        create = ModelConfigCreate(
+            **fields,
+            model_type=model_type,
+            scope=ModelScope.PUBLIC,
+            is_default=True,
+            is_active=True,
+            user_id=owner_id,
+        )
+        await service.add(create)
+        logger.info(f"默认公共模型[{type_name}] 已按配置创建: {create.model}")
+    elif _config_matches(existing, fields):
+        logger.info(f"默认公共模型[{type_name}] 与配置一致, 保持不变: {existing.model}")
+    else:
+        # 与配置不一致: 旧默认转为私有保留(已绑定它的用户回退新默认), 再创建新默认
+        await service.model_config_dao.update(
+            existing.id,
+            ModelConfigUpdate(scope=ModelScope.USER, is_default=False),
+        )
+        create = ModelConfigCreate(
+            **fields,
+            model_type=model_type,
+            scope=ModelScope.PUBLIC,
+            is_default=True,
+            is_active=True,
+            user_id=owner_id,
+        )
+        await service.add(create)
+        logger.info(
+            f"默认公共模型[{type_name}] 配置变更: 原默认已转私有({existing.model}), "
+            f"新默认已创建({create.model})"
+        )
+
+
+async def _seed_public_model(
+    service: ModelConfigService, owner_id: str, type_name: str, section: dict
+) -> None:
+    """补种/同步同类型非默认公共模型(同 model 已存在则按配置更新)"""
+    fields = _build_seed_fields(section)
+    existing = await service.model_config_dao.get_public_by_type_and_model(
+        type_name, section["model"]
+    )
+    if existing is None:
+        create = ModelConfigCreate(
+            **fields,
+            model_type=ModelType(type_name),
+            scope=ModelScope.PUBLIC,
+            is_default=False,
+            is_active=True,
+            user_id=owner_id,
+        )
+        await service.add(create)
+        logger.info(f"公共模型[{type_name}] 已按配置创建: {create.model}")
+    elif _config_matches(existing, fields):
+        logger.info(f"公共模型[{type_name}] 与配置一致, 保持不变: {existing.model}")
+    else:
+        await service.update(existing.id, ModelConfigUpdate(**fields))
+        logger.info(f"公共模型[{type_name}] 配置变更已同步: {section['model']}")
+
+
 @register_init_hook
 async def ensure_default_models():
-    """启动时按 config.dev.yaml default_models 补种默认公共模型(幂等, reset_models 总开关控制)
+    """启动时按 config.dev.yaml default_models 补种/同步公共模型(幂等, reset_model 总开关控制)
 
-    - reset_models=false(或缺省): 什么都不做, 库中模型配置完全保留
-    - reset_models=true 且类型 enabled=true:
-      - 库中无该类型默认公共模型: 按配置创建(scope=public/is_default/is_active=True)
-      - 已有默认公共模型且与配置一致(配置写出的字段全部相同): 保持不变
-      - 不一致(如 model/url/api_key 变更): 原默认模型转为私有(scope=user)保留,
-        再按配置创建新的默认公共模型
-    - reset_models=true 但类型 enabled=false/未配置: 该类型不做任何处理
+    - reset_model=false(或缺省): 什么都不做, 库中模型配置完全保留
+    - reset_model=true: 按 models 列表逐条处理(enabled=false 跳过)
+      - 每种 model_type 有且只有一个 is_default=true 的主模型, 同类型可配置多个模型;
+        同类型出现多个默认主模型(或未指定)时校验失败, 本次 seed 不执行
+      - 默认主模型: 库中无则创建; 配置一致则保留; 不一致则旧默认转私有后新建
+      - 非默认模型: 库中无则创建; 已存在且配置一致则保留; 不一致则按配置更新
     """
-    reset_models, seed_config = _load_default_models_config()
-    if not reset_models or not seed_config:
+    reset_models, seed_models = _load_default_models_config()
+    if not reset_models or not seed_models:
         return
+    grouped = _group_seed_models(seed_models)
     service = ModelConfigService()
     owner_id = await _resolve_seed_owner_id()
 
-    for type_name, section in seed_config.items():
-        if not section.get("enabled", False):
-            continue
+    for type_name, items in grouped.items():
+        default_item = next(s for s in items if s.get("is_default"))
         try:
-            model_type = ModelType(type_name)
-        except ValueError:
-            logger.warning(f"default_models 配置节 '{type_name}' 不是合法模型类型, 已跳过")
-            continue
-        if not section.get("model"):
-            logger.warning(f"default_models 配置节 '{type_name}' 缺少 model 字段, 已跳过")
-            continue
-
-        fields = {k: v for k, v in section.items() if k in _SEED_ALLOWED_FIELDS}
-        existing = await service.model_config_dao.get_default_by_type(type_name)
-        try:
-            if existing is None:
-                create = ModelConfigCreate(
-                    **fields,
-                    model_type=model_type,
-                    scope=ModelScope.PUBLIC,
-                    is_default=True,
-                    is_active=True,
-                    user_id=owner_id,
-                )
-                await service.add(create)
-                logger.info(f"默认公共模型[{type_name}] 已按配置创建: {create.model}")
-            elif _config_matches(existing, section):
-                logger.info(f"默认公共模型[{type_name}] 与配置一致, 保持不变: {existing.model}")
-            else:
-                # 与配置不一致: 旧默认转为私有保留(已绑定它的用户回退新默认), 再创建新默认
-                await service.model_config_dao.update(
-                    existing.id,
-                    ModelConfigUpdate(scope=ModelScope.USER, is_default=False),
-                )
-                create = ModelConfigCreate(
-                    **fields,
-                    model_type=model_type,
-                    scope=ModelScope.PUBLIC,
-                    is_default=True,
-                    is_active=True,
-                    user_id=owner_id,
-                )
-                await service.add(create)
-                logger.info(
-                    f"默认公共模型[{type_name}] 配置变更: 原默认已转私有({existing.model}), "
-                    f"新默认已创建({create.model})"
-                )
+            await _seed_default_model(service, owner_id, type_name, default_item)
         except Exception as e:
             logger.error(f"默认公共模型[{type_name}] seed 失败: {e}")
+            continue
+        for section in items:
+            if section is default_item:
+                continue
+            try:
+                await _seed_public_model(service, owner_id, type_name, section)
+            except Exception as e:
+                logger.error(
+                    f"公共模型[{type_name}/{section.get('model')}] seed 失败: {e}"
+                )

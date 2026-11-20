@@ -9,11 +9,70 @@
         内置助手不可删除; 自建助手在 AI 助手页即可创建, 此处为全局视图
       </span>
       <div flex-1 />
+      <ViewToggle v-model="viewMode" />
       <el-button type="primary" @click="editDialogRef?.open()">
         <el-icon mr-1><Plus /></el-icon>新建助手
       </el-button>
     </div>
-    <el-table :data="agents" v-loading="loading" stripe w-full>
+
+    <!-- ===== 卡片视图 ===== -->
+    <div
+      v-if="viewMode === 'card'"
+      v-loading="loading"
+      grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3
+    >
+      <div
+        v-for="row in agents" :key="row.id"
+        flex flex-col gap-3 p-4 rounded-2xl bg-note-card shadow-note
+        hover:shadow-note-hover hover:-translate-y-0.5 note-transition
+      >
+        <div flex items-center gap-2.5>
+          <div w-10 h-10 rounded-xl bg-note-tint flex-center shrink-0>
+            <el-icon :size="20" text-note-green><MagicStick /></el-icon>
+          </div>
+          <div min-w-0 flex-1>
+            <div flex items-center gap-1.5>
+              <span v-ellipsis font-medium text-note truncate>{{ row.name }}</span>
+              <el-tag v-if="row.is_builtin" size="small" type="warning" effect="plain">内置</el-tag>
+            </div>
+            <div text-xs text-note-sub mt-0.5>{{ formatTime(row.updated_at) }}</div>
+          </div>
+        </div>
+        <p v-ellipsis:2 text-sm text-note-sub leading-relaxed line-clamp-2 min-h-10 m-0>
+          {{ row.description || '暂无描述' }}
+        </p>
+        <div flex flex-wrap gap-1 min-h-6>
+          <template v-if="row.skills.length">
+            <el-tag v-for="s in row.skills.slice(0, 3)" :key="s" size="small" effect="plain">
+              {{ skillName(s) }}
+            </el-tag>
+            <el-tag v-if="row.skills.length > 3" size="small" effect="plain" type="info">
+              +{{ row.skills.length - 3 }}
+            </el-tag>
+          </template>
+          <span v-else text-xs text-note-sub>纯对话</span>
+        </div>
+        <div flex items-center justify-between pt-2.5 border-t border-note>
+          <el-tag :type="row.is_public ? 'success' : 'info'" size="small" effect="light">
+            {{ row.is_public ? '公开' : '私有' }}
+          </el-tag>
+          <div flex items-center gap-1>
+            <el-button link type="primary" size="small" @click="editDialogRef?.open(row)">
+              编辑
+            </el-button>
+            <el-button
+              link type="danger" size="small" :disabled="row.is_builtin"
+              @click="handleDelete(row)"
+            >
+              删除
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 列表视图 ===== -->
+    <el-table v-else :data="agents" v-loading="loading" stripe w-full>
       <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">
           <span flex items-center gap-1.5>
@@ -74,9 +133,10 @@
 </template>
 
 <script setup lang="ts">
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AgentEditDialog from '../components/AgentEditDialog.vue'
+import ViewToggle from '@/common/components/ViewToggle.vue'
 import { listAllAgents, listSkills, deleteAgent } from '../api/agent'
 import type { AgentInfo, SkillInfo } from '../types'
 
@@ -84,6 +144,13 @@ const loading = ref(false)
 const agents = ref<AgentInfo[]>([])
 const skills = ref<SkillInfo[]>([])
 const editDialogRef = ref<InstanceType<typeof AgentEditDialog>>()
+
+// 视图模式(卡片/列表), 记住上次选择
+const VIEW_STORAGE_KEY = 'agent:view-mode'
+const viewMode = ref<'card' | 'list'>(
+  localStorage.getItem(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'card'
+)
+watch(viewMode, (v) => localStorage.setItem(VIEW_STORAGE_KEY, v))
 
 /** 技能全局键 → 展示名(预构建 Map, 避免模板中每个 tag 渲染都做 O(n) find)
  *  旧存量值为短名(如 web_search, 不含 '.'): Map 未命中回退原值展示, 不做转换 */

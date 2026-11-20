@@ -10,6 +10,9 @@
  * 3. 面向业务的末级页面标记 home, 会同时出现在首页入口卡: 从首页点击进入
  *    单页模式(homeLink 追加 ?bare=1), 不渲染后台侧边栏, 顶栏 Logo 返回首页;
  * 4. 新页面: 在对应分组 children 增加菜单项; 需在首页露出时加 home: true。
+ *
+ * @doc-sync: doc/02-设计文档/02-总体架构与功能设计.md; code/frontend/vue3/doc/dev/05-权限与菜单.md
+ * 触发: 菜单/权限码/首页入口变化时，同步上述文档与 doc/doc-manifest.yaml
  */
 import { markRaw } from 'vue'
 import type { Component } from 'vue'
@@ -18,6 +21,7 @@ import {
   Monitor, ChatDotRound, Setting,
   Files, Collection, FolderOpened,
   Timer, Search, MagicStick, Operation,
+  Coin, Document,
 } from '@element-plus/icons-vue'
 
 /** 末级菜单项(分组下的子项, 对应一个具体页面) */
@@ -113,6 +117,20 @@ export const menuItems: MenuItem[] = [
         title: '模型配置',
         system: true,
         desc: '大模型 / OCR / 语音的统一接入与在线自测。',
+      },
+      {
+        index: '/rag/usage',
+        title: '用量统计',
+        system: true,
+        icon: markRaw(Coin),
+        desc: '问答 token 消耗与成本的统计核算。',
+      },
+      {
+        index: '/rag/chat-records',
+        title: '对话记录',
+        system: true,
+        icon: markRaw(Document),
+        desc: '全站对话的 token/成本记录与消息查看。',
       },
       {
         index: '/ai/assistant',

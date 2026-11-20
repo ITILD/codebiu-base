@@ -1,0 +1,81 @@
+# ==============================================================================
+# 主服务 + 前端（部署目录模板，由 2-主服务/build.sh 复制到 $DEPLOY_DIR）
+# 依赖（PostgreSQL/Redis/Milvus/RustFS）请用 1-依赖环境 那套单独部署
+# 部署目录最终只有：ctl.sh  docker-compose.yml  .env  nginx/  app/
+# ==============================================================================
+
+name: ${COMPOSE_PROJECT_NAME:-codebiu-server}
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: ${COMPOSE_PROJECT_NAME}-nginx
+    ports:
+      - "${NGINX_PORT:-3002}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/html:/usr/share/nginx/html
+      - ./nginx/conf/conf.d:/etc/nginx/conf.d
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/www:/var/www/certbot
+      - ./nginx/download:/usr/share/nginx/download
+      - ./nginx/logs:/var/log/nginx
+    environment:
+      - TZ=Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 证书续期后自动加载（每 12h 检查一次）
+    command:
+      - /bin/sh
+      - -c
+      - |
+        while :; do sleep 43200 & wait $$!; nginx -s reload; done &
+        exec /docker-entrypoint.sh nginx -g 'daemon off;'
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  # ---------------- certbot：首次签发 ./ctl.sh cert，之后自动续期 ----------------
+  certbot:
+    image: certbot/certbot
+    container_name: ${COMPOSE_PROJECT_NAME}-certbot
+    profiles: ["https"]
+    volumes:
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/www:/var/www/certbot
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        trap exit TERM
+        while :; do
+          certbot renew --webroot -w /var/www/certbot --quiet \
+            --deploy-hook 'cp -L "$${RENEWED_LINEAGE}/fullchain.pem" /etc/letsencrypt/fullchain.pem; cp -L "$${RENEWED_LINEAGE}/privkey.pem" /etc/letsencrypt/privkey.pem'
+          sleep 43200 & wait $$!
+        done
+    restart: unless-stopped
+
+  server:
+    image: ${SERVER_IMAGE}
+    container_name: ${COMPOSE_PROJECT_NAME}-server
+    ports:
+      # 容器内固定 6666（config.yaml server.port），宿主端口由 .env 的 SERVER_PORT 控制
+      - "${SERVER_PORT:-3001}:6666"
+    volumes:
+      # 镜像只含 python 环境；代码/配置/运行时目录全部外挂
+      - ./app/src:/app/src
+      - ./app/public:/app/public
+      - ./app/config.yaml:/app/config.yaml
+      - ./app/config.dev.yaml:/app/config.dev.yaml
+      - ./app/rbac_model.conf:/app/rbac_model.conf
+      - ./app/alembic.ini:/app/alembic.ini
+      - ./app/alembic:/app/alembic
+      - ./app/temp_source:/app/temp_source
+      - ./app/log:/app/log
+    environment:
+      - TZ=Asia/Shanghai
+      # 限制 glibc 内存池, 多线程 Python 服务可省 10%~20% 内存
+      - MALLOC_ARENA_MAX=2
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

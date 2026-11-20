@@ -152,6 +152,14 @@ class SkillInvocation(SQLModel, table=True):
         default=None, index=True, max_length=64,
         description="queued 形态关联的 task_queue.id(双向关联)",
     )
+    agent_run_id: str | None = Field(
+        default=None, index=True, max_length=64,
+        description="五拍协议运行实例ID(REQ-019 §7: 关联 Agent 运行实例)",
+    )
+    mode_budget_hit: bool = Field(
+        default=False,
+        description="预算触顶标记(§7: 北极星下钻用, 该调用所属运行是否触顶)",
+    )
     entry: str | None = Field(default=None, max_length=30, description="触发入口: web/agent/task/debug")
     user_id: str = Field(index=True, description="调用者用户ID(资源授权范围载体, CA-08)")
     trace_id: str | None = Field(default=None, max_length=64, description="链路追踪ID")

@@ -45,6 +45,9 @@ class SkillContext(BaseModel):
     priority_class: str = Field(default="standard", description="interactive/standard/batch(服务端判定)")
     deadline_s: float | None = Field(default=None, description="软截止(秒, 超时应降级而非硬失败)")
     trace_id: str | None = Field(default=None, description="链路追踪ID")
+    run_id: str | None = Field(
+        default=None, description="Agent 运行实例ID(五拍协议 agent_run_id, 观测关联 §7)"
+    )
     entry: str = Field(default="web", description="触发入口: web/agent/task/debug")
 
 
@@ -217,17 +220,21 @@ class SkillRuntime:
         ctx: SkillContext,
         mode: str = "auto",
         timeout_s: float | None = None,
+        manifest: SkillManifest | None = None,
     ) -> dict:
         """统一调用入口(§3.2 契约; 永不抛业务异常, 结果一律走统一信封)
 
         :param timeout_s: 覆盖 inline 硬超时(仍为硬超时, CA-05;
             job 编排在 worker 内以 inline 长超时直接执行步骤, 避免嵌套排队死锁)
+        :param manifest: 已固定的 Manifest 快照(CA-09 版本固定: 会话内不因后台编辑漂移);
+            为 None 时按 skill_key 实时解析
         :return: {invocation_id, skill_key, mode, status, task_id, result, error, progress, degraded}
         """
-        try:
-            manifest = require_skill(skill_key)
-        except Exception as e:
-            return self._envelope_error(skill_key, "invalid_input", str(e))
+        if manifest is None:
+            try:
+                manifest = require_skill(skill_key)
+            except Exception as e:
+                return self._envelope_error(skill_key, "invalid_input", str(e))
 
         fingerprint = self._idempotency_fingerprint(manifest, skill_input)
         if fingerprint is not None:
@@ -529,6 +536,7 @@ class SkillRuntime:
             entry=ctx.entry,
             user_id=ctx.user_id,
             trace_id=ctx.trace_id,
+            agent_run_id=ctx.run_id,
         )
         if status == InvocationStatus.FAILED:
             row.started_at = row.finished_at = row.created_at

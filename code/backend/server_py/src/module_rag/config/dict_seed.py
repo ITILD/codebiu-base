@@ -34,6 +34,7 @@ _KB_CATEGORY_NAMES: dict[str, str] = {
     KbCategory.PERSONAL: "个人知识库",
     KbCategory.PROJECT: "项目知识库",
     KbCategory.COMPANY: "企业知识库",
+    KbCategory.TEMP: "临时知识库",
 }
 dict_seed_registry.register(
     DictTypeSeed(
@@ -73,8 +74,8 @@ _DOC_TYPE_NAMES: dict[str, str] = {
     "pdf": "PDF文档", "docx": "Word文档", "pptx": "PPT演示文稿", "xlsx": "Excel表格",
     "png": "PNG图片", "jpg": "JPG图片", "jpeg": "JPEG图片", "tiff": "TIFF图片",
     "mp3": "MP3音频", "wav": "WAV音频", "mp4": "MP4视频", "avi": "AVI视频",
-    "txt": "文本文件", "md": "Markdown文档", "csv": "CSV表格",
-    "py": "Python代码", "java": "Java代码",
+    "txt": "文本文件", "md": "Markdown文档", "csv": "CSV表格", "log": "日志文件",
+    "json": "JSON文件", "py": "Python代码", "java": "Java代码",
 }
 # 从 DocType 类常量派生全部扩展名(过滤非字符串的类属性)
 _doc_type_exts = [v for k, v in vars(DocType).items() if not k.startswith("_") and isinstance(v, str)]

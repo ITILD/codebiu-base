@@ -48,7 +48,7 @@
           <el-input-number
             v-else-if="prop.type === 'integer' || prop.type === 'number'"
             :model-value="numberOr(String(name))" class="w-full" controls-position="right"
-            @update:model-value="v => setNumber(String(name), v)"
+            @update:model-value="(v: number | undefined) => setNumber(String(name), v)"
           />
           <!-- 数组/对象: JSON 文本域 -->
           <el-input

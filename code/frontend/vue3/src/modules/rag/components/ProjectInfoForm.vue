@@ -15,7 +15,7 @@
       <div grid grid-cols-2 gap-x-3>
         <el-form-item label="分类" prop="kb_category">
           <el-select v-model="editForm.kb_category" :disabled="!perms.update" placeholder="请选择分类" w-full>
-            <el-option v-for="opt in kbCategoryOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+            <el-option v-for="opt in kbCategorySelectable" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="可见性">
@@ -39,7 +39,7 @@
 // 知识库"基本信息"编辑表单(设置抽屉 basic tab): 权限位控制字段可编辑性, 保存成功 emit saved 由父级同步标题并刷新列表
 import { reactive, ref, watch } from 'vue'
 import { updateRagProject } from '../api/project'
-import { kbCategoryOptions, type Project, type ProjectMyPerms } from '../types'
+import { kbCategorySelectable, type Project, type ProjectMyPerms } from '../types'
 import { ElMessage, type FormInstance } from 'element-plus'
 
 /** 基本信息表单数据 */

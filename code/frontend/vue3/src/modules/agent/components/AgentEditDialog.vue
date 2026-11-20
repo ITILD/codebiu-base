@@ -62,6 +62,24 @@
           />
         </el-select>
       </el-form-item>
+      <template v-if="isBuiltinChat">
+        <el-divider content-position="left">运行参数</el-divider>
+        <el-form-item label="思考档位">
+          <el-select v-model="runParams.think_level" class="w-full">
+            <el-option label="关闭" value="off" />
+            <el-option label="低" value="low" />
+            <el-option label="高" value="high" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="检索轮次">
+          <el-input-number v-model="runParams.search_rounds" :min="1" :max="5" />
+          <span ml-2 text-xs text-note-sub>检索重检的固定次数(快速按此执行)</span>
+        </el-form-item>
+        <el-form-item label="最大轮次">
+          <el-input-number v-model="runParams.max_loops" :min="1" :max="20" />
+          <span ml-2 text-xs text-note-sub>ReAct 循环上限(思考按此执行)</span>
+        </el-form-item>
+      </template>
       <el-form-item label="公开">
         <el-switch v-model="form.is_public" />
         <span ml-2 text-xs text-note-sub>公开后所有用户可在 AI 助手中使用</span>
@@ -89,7 +107,7 @@
 import { ElMessage } from 'element-plus'
 import { createAgent, updateAgent, listSkills } from '../api/agent'
 import { listMyProjects } from '@/modules/rag/api/member'
-import type { AgentInfo, SkillInfo, AgentCreateReq } from '../types'
+import type { AgentInfo, SkillInfo, AgentCreateReq, AgentUpdateReq } from '../types'
 import type { MyProject } from '@/modules/rag/types'
 
 // 保存成功后通知父级刷新列表
@@ -115,6 +133,27 @@ const emptyForm = (): AgentCreateReq & { is_public: boolean } => ({
   is_public: false,
 })
 const form = ref(emptyForm())
+
+/** 内置对话智能体: 快速 / 思考(运行参数可编辑) */
+const isBuiltinChat = computed(() =>
+  ['builtin_fast', 'builtin_thinking'].includes(agent.value?.id ?? '')
+)
+/** 当前编辑的模式档位: 思考智能体改 thinking, 快速智能体改 fast */
+const runModeKey = computed(() =>
+  agent.value?.id === 'builtin_thinking' ? 'thinking' : 'fast'
+)
+/** 运行参数表单(思考档位/检索轮次/最大轮次) */
+const runParams = ref<{
+  think_level: 'off' | 'low' | 'high'
+  search_rounds: number
+  max_loops: number
+}>({ think_level: 'off', search_rounds: 1, max_loops: 2 })
+
+/** 内置智能体的默认运行参数 */
+const defaultRunParams = (id: string) =>
+  id === 'builtin_thinking'
+    ? { think_level: 'low' as const, search_rounds: 2, max_loops: 4 }
+    : { think_level: 'off' as const, search_rounds: 1, max_loops: 2 }
 
 /** 是否选中知识库问答技能(新全局键 sys.rag_qa 与旧存量短名 rag_qa 均兼容) */
 const hasRagQaSkill = computed(() => {
@@ -152,6 +191,14 @@ const open = async (target?: AgentInfo) => {
         is_public: target.is_public,
       }
     : emptyForm()
+  // 运行参数: 读取智能体已保存的 chat_modes, 缺失时用默认值
+  const defaults = defaultRunParams(target?.id ?? '')
+  const saved = target?.chat_modes?.[runModeKey.value] ?? {}
+  runParams.value = {
+    think_level: saved.think_level ?? defaults.think_level,
+    search_rounds: saved.search_rounds ?? defaults.search_rounds,
+    max_loops: saved.max_loops ?? defaults.max_loops,
+  }
   dialogVisible.value = true
   await loadOptions()
 }
@@ -166,17 +213,25 @@ const handleSubmit = async () => {
   }
   submitting.value = true
   try {
-    const payload = {
+    const payload: AgentUpdateReq = {
       ...form.value,
       name,
       description: form.value.description?.trim() ?? '',
       default_prompt: form.value.default_prompt?.trim() ?? '',
     }
+    // 内置对话智能体: 运行参数归属智能体, 随保存写回 chat_modes
+    if (isBuiltinChat.value && agent.value) {
+      const base = agent.value.chat_modes ?? {}
+      payload.chat_modes = {
+        ...base,
+        [runModeKey.value]: { ...(base[runModeKey.value] ?? {}), ...runParams.value },
+      }
+    }
     if (isEdit.value && agent.value) {
       await updateAgent(agent.value.id, payload)
       ElMessage.success('助手已更新')
     } else {
-      await createAgent(payload)
+      await createAgent({ ...payload, name })
       ElMessage.success('助手已创建')
     }
     dialogVisible.value = false

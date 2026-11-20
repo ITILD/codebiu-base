@@ -27,14 +27,31 @@ from module_task.do.task import QueueTaskStatus, TaskTypeDef
 
 logger = logging.getLogger(__name__)
 
-# ################ worker 专用事件循环 ################
+# ################ worker 专用事件循环(惰性创建, prefork 安全) ################
 # Celery 任务函数是同步的, 每次用 asyncio.run 会创建新事件循环,
 # 而 asyncpg 连接与创建它的循环绑定(跨循环复用会崩溃)。
-# 因此 worker 进程启动时开一个常驻循环线程, 所有任务协程都提交到该循环执行,
-# 使全局连接池(db_manager.db_rel)在进程生命周期内绑定同一个循环。
+# 因此用常驻循环线程承载所有任务协程, 使连接池在进程生命周期内绑定同一循环。
+#
+# 注意: 不能在模块导入时启动循环线程 —— prefork 模式下模块在父进程导入后 fork,
+# 子进程不会继承运行中的线程, 会导致任务协程永久挂起。
+# 因此在每个进程首次执行任务时惰性创建独立事件循环(双检锁)。
 
-_worker_loop = asyncio.new_event_loop()
-threading.Thread(target=_worker_loop.run_forever, daemon=True, name="task-worker-loop").start()
+_worker_loop: asyncio.AbstractEventLoop | None = None
+_worker_loop_lock = threading.Lock()
+
+
+def _ensure_worker_loop() -> asyncio.AbstractEventLoop:
+    """惰性创建当前进程专属的事件循环(线程守护, prefork 子进程各自独立持有)"""
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        with _worker_loop_lock:
+            if _worker_loop is None or _worker_loop.is_closed():
+                loop = asyncio.new_event_loop()
+                threading.Thread(
+                    target=loop.run_forever, daemon=True, name="task-worker-loop"
+                ).start()
+                _worker_loop = loop
+    return _worker_loop
 
 
 def run_async(coro):
@@ -42,7 +59,52 @@ def run_async(coro):
     在 worker 专用事件循环中执行协程并阻塞等待结果
     (Celery 任务函数内部用; 进程内所有任务共享循环与数据库连接池)
     """
-    return asyncio.run_coroutine_threadsafe(coro, _worker_loop).result()
+    loop = _ensure_worker_loop()
+
+    async def _runner():
+        # 进程级运行时幂等初始化(见 ensure_worker_runtime): prefork 子进程首次执行任务时
+        # 各自完成 连接池/建表/权限上下文 初始化, 父进程无需也不应触达 DB
+        await ensure_worker_runtime()
+        return await coro
+
+    return asyncio.run_coroutine_threadsafe(_runner(), loop).result()
+
+
+_runtime_initialized = False
+_runtime_lock: asyncio.Lock | None = None
+
+
+async def ensure_worker_runtime() -> None:
+    """
+    进程级运行时初始化(幂等且并发安全, 由 run_async 自动触发, 入口可显式预热)
+
+    worker 进程不像 API 进程会执行 server_start, 因此首次执行任务前需完成:
+    runtime 装配(db_rel 引导/动态配置/任务快照) → 全量连接(含向量库) → 幂等建表
+    → 只读权限上下文(casbin enforcer, 任务执行时以创建者身份复检权限)。
+    """
+    global _runtime_initialized, _runtime_lock
+    if _runtime_initialized:
+        return
+    if _runtime_lock is None:
+        _runtime_lock = asyncio.Lock()
+    async with _runtime_lock:
+        if _runtime_initialized:
+            return
+        from common.runtime import init_runtime
+
+        await init_runtime()
+        from common.config.db import db_manager
+
+        await db_manager.connect_all()
+        await db_manager.table_create_all()
+        # worker 不执行 API 的模块钩子, 需显式装配任务链路依赖的模块级资源:
+        # 文档解析要按 entry_id 读取物理文件, 缺失此项时 FileService.storage 为 None
+        from module_file.config.filesystem import init_storage_config
+
+        await init_storage_config()
+        await init_worker_authorization()
+        _runtime_initialized = True
+        logger.info("worker 运行时初始化完成(连接池/建表/存储/权限上下文)")
 
 # ################ 任务类型注册表 ################
 
@@ -65,7 +127,7 @@ TASK_TYPES: dict[str, TaskTypeDef] = {
         name="知识库: 文档解析",
         description="解析项目文档: OCR/解析 → 分块策略识别 → 重分块 → 向量化 → 写入向量库;"
                     "以任务创建者绑定的模型执行(未绑定时回退默认公共模型)",
-        celery_task="module_rag.tasks.project_document.reparse_document_task",
+        celery_task="module_rag.tasks.reparse_document_task",
         default_payload={"document_id": "", "force_preset_id": None},
         default_priority=5,
     ),
@@ -105,6 +167,51 @@ def queue_for_priority(priority: int) -> str:
         else DEFAULT_QUEUE
     )
 
+# ################ 队列注册表(逻辑队列动态增减, 订阅关系的事实来源) ################
+
+
+async def enabled_registry_queues() -> set[str] | None:
+    """
+    读取注册表中启用的队列集合(动态订阅对账与派发路由共用)
+
+    :return: 启用队列名集合; 注册表不可读(表未建/DB 异常)返回 None
+             —— 调用方据此"保持现状/回落默认路由", 与"空集合=全部停用"严格区分
+    """
+    from sqlmodel import select
+
+    from module_task.do.task import TaskQueueRegistry
+
+    try:
+        async with db_manager.db_rel.session_factory() as session:
+            rows = await session.exec(
+                select(TaskQueueRegistry.queue_name).where(
+                    TaskQueueRegistry.status == "enabled"
+                )
+            )
+            return set(rows.all())
+    except Exception as exc:
+        logger.debug(f"读取队列注册表失败: {exc}")
+        return None
+
+
+async def resolve_dispatch_queue(priority: int) -> str:
+    """
+    解析任务派发目标队列: 优先级路由为基础, 队列注册表为准入闸门
+
+    规则: 优先级路由结果在注册表启用集合内 → 直投; 目标队列被停用/未登记
+    → 回落 默认队列(若启用) → 仍不可用则回落启用集合中字典序最小的队列;
+    注册表不可读(None) → 按原有优先级路由直投(向后兼容)。
+    """
+    from common.config.tasks import DEFAULT_QUEUE
+
+    queue = queue_for_priority(priority)
+    registered = await enabled_registry_queues()
+    if registered is None or queue in registered:
+        return queue
+    if DEFAULT_QUEUE in registered:
+        return DEFAULT_QUEUE
+    return min(registered)
+
 # ################ 统一派发 ################
 
 
@@ -117,20 +224,15 @@ async def dispatch_task(task, task_def: TaskTypeDef) -> str:
     :raises Exception: 投递失败(调用方负责回写任务失败状态)
     """
     from common.config.tasks import (
-        DEFAULT_QUEUE,
-        INTERACTIVE_PRIORITY_THRESHOLD,
-        INTERACTIVE_QUEUE,
         app as celery_app,
     )
+    from module_task.tasks import resolve_dispatch_queue
 
     # 仅传任务ID保持消息轻量, 参数由 worker 从库读取;
     # 物理队列路由(REQ-018 批次 2): 会话交互类(priority>=7, 如对话附件解析)走
     # q_interactive 独立队列, 批量任务积压不影响用户在等的交互任务; 其余走默认队列
-    queue = (
-        INTERACTIVE_QUEUE
-        if (task.priority or 0) >= INTERACTIVE_PRIORITY_THRESHOLD
-        else DEFAULT_QUEUE
-    )
+    # 队列注册表为准入闸门: 目标队列被停用时回落启用的默认队列(见 resolve_dispatch_queue)
+    queue = await resolve_dispatch_queue(task.priority or 0)
     async_result = celery_app.send_task(
         task_def.celery_task,
         args=[task.id],

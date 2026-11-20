@@ -69,3 +69,6 @@ async def _sync_skill_assets() -> None:
 
         logging.getLogger(__name__).warning("MCP tools 恢复失败(忽略): %s", e)
     await AgentService().seed_builtin_agents()
+    # REQ-019 模式即 Agent: 播种内置对话 Agent(builtin_fast/builtin_thinking),
+    # chat_modes 以代码 Manifest 为源只读同步
+    await AgentService().seed_builtin_chat_agents()

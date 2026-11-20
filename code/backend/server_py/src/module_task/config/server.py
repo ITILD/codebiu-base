@@ -46,4 +46,36 @@ async def seed_demo_schedule() -> None:
         logger.info("已播种内置示例调度: 审计日志周期清理(默认停用)")
 
 
+# 队列注册表内置种子(P2): 仅首启空表时播种, 此后注册表由运维全权管理
+_SEED_QUEUES = (
+    ("task_queue", "批处理队列", "常规批处理任务(夜间批量/重解析/重向量化等)"),
+    ("q_interactive", "交互队列", "会话交互任务(对话附件解析等用户在等的任务, priority>=7 自动路由)"),
+)
+
+
+@register_init_hook
+async def seed_queue_registry() -> None:
+    """
+    队列注册表播种(P2): 空表时登记两个内置物理队列, 使 worker 动态订阅对账
+    从首启即有事实来源; 非空(运维已增删)则完全不干预
+    """
+    from module_task.dao.task import TaskQueueDao
+    from module_task.do.task import QueueRegistryStatus, TaskQueueRegistry
+
+    dao = TaskQueueDao()
+    if await dao.list_queue_registry():
+        return  # 已有登记(含运维自定义), 不覆盖
+    for queue_name, name, description in _SEED_QUEUES:
+        await dao.add_queue_registry(
+            TaskQueueRegistry(
+                queue_name=queue_name,
+                name=name,
+                description=description,
+                resource_class="default",
+                status=QueueRegistryStatus.ENABLED,
+            )
+        )
+    logger.info(f"队列注册表已播种 {len(_SEED_QUEUES)} 个内置队列: {[q[0] for q in _SEED_QUEUES]}")
+
+
 logger.debug("ok...server module_task服务配置")

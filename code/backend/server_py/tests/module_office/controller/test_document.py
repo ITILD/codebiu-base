@@ -6,7 +6,8 @@
 - 缺少 file 表单字段应 422
 
 说明:
-- md/txt/py/java 等非版式格式已随轻量解析引擎一并移除, 现在统一 400 拒绝
+- txt/md 等纯文本由 text-local 本地引擎直读解析(200 返回原文);
+  .xyz 等无引擎匹配的类型仍 400 拒绝
 - 真实解析路径(远程 mineru.net / 本地 docker)依赖外部服务与 token,
   单元/契约层不覆盖, 见 tests/module_office/service/test_document_parse.py
 - app.py 主入口按设计挂载 /office 子应用; 测试内显式 import 触发路由注册
@@ -16,8 +17,6 @@ import time
 import uuid
 
 import httpx
-
-from common.config.path import DIR_TEMP
 
 # 显式触发 /office 子应用挂载与控制器路由注册
 import module_office.config.server  # noqa: F401
@@ -42,18 +41,15 @@ async def test_get_markdown_by_file_unsupported_type(client: httpx.AsyncClient):
     assert "不支持的文件类型" in resp.json()["detail"], resp.text
 
 
-async def test_get_markdown_by_file_plain_text_rejected(client: httpx.AsyncClient):
-    """纯文本格式(.md/.txt)已不随轻量引擎解析, 应 400 拒绝"""
+async def test_get_markdown_by_file_plain_text_local(client: httpx.AsyncClient):
+    """纯文本(.txt)由 text-local 引擎本地直读, 200 返回原文 markdown"""
     suffix = _suffix()
-    filename = f"parse_in_{suffix}.txt"
     resp = await client.post(
         f"{PARSE_BASE}/get-markdown-by-file",
-        files={"file": (filename, "纯文本不再支持解析".encode("utf-8"), "text/plain")},
+        files={"file": (f"parse_in_{suffix}.txt", "纯文本本地直读解析".encode("utf-8"), "text/plain")},
     )
-    assert resp.status_code == 400, resp.text
-    assert "不支持的文件类型" in resp.json()["detail"], resp.text
-    # 输入文件未进入解析流程, 兜底清理临时目录
-    (DIR_TEMP / filename).unlink(missing_ok=True)
+    assert resp.status_code == 200, resp.text
+    assert "纯文本本地直读解析" in resp.text, resp.text
 
 
 async def test_get_markdown_by_file_missing_file(client: httpx.AsyncClient):

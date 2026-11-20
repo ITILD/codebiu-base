@@ -27,6 +27,8 @@ export interface StorageMultipartInit {
   part_size: number;
   mode: 'direct' | 'proxy';
   part_urls: string[] | null;
+  /** 服务端确认的落库文件名(业务侧重名自动加序号时返回) */
+  filename?: string | null;
 }
 
 /** 业务端点适配器: 由各业务模块按自己的记录口径提供 */
@@ -42,15 +44,16 @@ export interface StorageUploadEndpoints<Ctx, R> {
     content: ArrayBuffer,
     ctx?: Ctx
   ) => Promise<MultipartPart>;
-  /** 完成分片上传(服务端对账合并+按业务口径登记) */
+  /** 完成分片上传(服务端对账合并+按业务口径登记; filename 为服务端确认的落库名) */
   complete: (
     file: File,
     uploadId: string,
     parts: MultipartPart[],
-    ctx?: Ctx
+    ctx?: Ctx,
+    filename?: string
   ) => Promise<R>;
-  /** 秒传登记(is_existing=true 时按业务口径直接建记录) */
-  instant: (file: File, contentHash: string, ctx?: Ctx) => Promise<R>;
+  /** 秒传登记(is_existing=true 时按业务口径直接建记录; filename 同上) */
+  instant: (file: File, contentHash: string, ctx?: Ctx, filename?: string) => Promise<R>;
   /** proxy 模式小文件 FormData 直传(≤max_size, 可选; 不提供则统一走分片流程) */
   smallDirect?: (file: File, ctx?: Ctx) => Promise<R>;
 }
@@ -98,9 +101,11 @@ export const createStorageUploader = <Ctx = void, R = unknown>(
     const contentHash = await sha256Hex(file);
     // 初始化会话(秒传判断+内容登记+凭证签发)
     const init = await endpoints.init(file, contentHash, ctx);
+    // 服务端确认的落库名(重名自动加序号时与本地文件名不同)
+    const resolvedName = init.filename || undefined;
     // 秒传: 相同内容已存在, 直接按业务口径建记录
     if (init.is_existing) {
-      return endpoints.instant(file, contentHash, ctx);
+      return endpoints.instant(file, contentHash, ctx, resolvedName);
     }
     const partSize = init.part_size;
     const total = Math.ceil(file.size / partSize);
@@ -122,6 +127,6 @@ export const createStorageUploader = <Ctx = void, R = unknown>(
         );
       }
     }
-    return endpoints.complete(file, init.upload_id!, parts, ctx);
+    return endpoints.complete(file, init.upload_id!, parts, ctx, resolvedName);
   };
 };

@@ -154,6 +154,18 @@ interface TaskWorkerInfo {
   /** 正在执行的任务(name/id/args 摘要) */
   active_tasks: Array<{ name: string; id: string; args?: string }>
   pid?: number | null
+  /** 出口 IP(心跳注册) */
+  ip?: string | null
+  /** 主机名/容器 hostname(心跳注册) */
+  hostname?: string | null
+  /** 执行池类型(solo/prefork/threads) */
+  pool?: string | null
+  /** 在线状态(online/offline: 心跳存活但 inspect 无响应=刚崩溃) */
+  status?: string
+  /** 启动时间(ISO, 心跳注册) */
+  started_at?: string | null
+  /** 最近心跳时间(ISO, offline 展示) */
+  last_seen?: string | null
 }
 
 /** 执行器状态响应(broker 不可用时 online=0 且带 error 提示) */
@@ -168,6 +180,118 @@ interface TaskWorkerList {
 interface TaskRecoverResult {
   recovered: number
   reaped: number
+}
+
+// ################ 队列注册表(P2: 逻辑队列动态增减) ################
+
+/** 队列注册表条目(含实时订阅 worker 数与积压深度) */
+interface TaskQueueRegistry {
+  queue_name: string
+  name: string
+  description: string | null
+  /** 租户隔离预留 */
+  tenant: string | null
+  /** 资源池分组预留 */
+  resource_class: string
+  min_replicas: number
+  max_replicas: number
+  /** enabled/disabled */
+  status: string
+  created_at: string
+  updated_at: string
+  /** 当前订阅该队列的 worker 数 */
+  subscribers: number
+  /** 队列积压消息数 */
+  backlog: number
+}
+
+/** 登记新队列请求体 */
+interface TaskQueueRegistryCreate {
+  queue_name: string
+  name?: string
+  description?: string | null
+  tenant?: string | null
+  resource_class?: string
+}
+
+/** 更新队列请求体(全可选) */
+interface TaskQueueRegistryUpdate {
+  name?: string | null
+  description?: string | null
+  tenant?: string | null
+  resource_class?: string | null
+  status?: 'enabled' | 'disabled'
+}
+
+// ################ 执行器运维(P3: 宿主机/容器/伸缩) ################
+
+/** worker 容器实时状态(agent 采集 + 心跳关联) */
+interface WorkerContainerInfo {
+  id: string
+  name: string
+  hostname: string | null
+  /** running/exited/... */
+  state: string
+  status: string
+  started_at: string | null
+  worker_name: string | null
+  worker_ip: string | null
+  worker_active: number
+  worker_queues: string[]
+}
+
+/** worker 宿主机聚合视图 */
+interface WorkerHostView {
+  id: string
+  host_name: string
+  agent_url: string
+  description: string | null
+  enabled: boolean
+  has_token: boolean
+  reachable: boolean
+  error: string | null
+  containers: WorkerContainerInfo[]
+  running: number
+  total: number
+}
+
+/** 登记宿主机请求体 */
+interface WorkerHostCreate {
+  host_name: string
+  agent_url: string
+  agent_token?: string | null
+  description?: string | null
+  enabled?: boolean
+}
+
+/** 更新宿主机请求体(全可选) */
+interface WorkerHostUpdate {
+  agent_url?: string | null
+  agent_token?: string | null
+  description?: string | null
+  enabled?: boolean | null
+}
+
+/** 副本伸缩请求体 */
+interface WorkerScaleBody {
+  replicas: number
+  force?: boolean
+  stable_seconds?: number
+  grace?: number
+}
+
+/** 伸缩操作状态(缩容为后台任务, 轮询闭环) */
+interface WorkerScaleOp {
+  op_id: string
+  host_id: string
+  host_name: string
+  from_count: number
+  to_count: number
+  /** checking/waiting_stable/draining/scaling/done/failed/aborted */
+  phase: string
+  message: string | null
+  created_at: string
+  updated_at: string
 }
 
 export {
@@ -187,4 +311,13 @@ export {
   type TaskWorkerInfo,
   type TaskWorkerList,
   type TaskRecoverResult,
+  type TaskQueueRegistry,
+  type TaskQueueRegistryCreate,
+  type TaskQueueRegistryUpdate,
+  type WorkerContainerInfo,
+  type WorkerHostView,
+  type WorkerHostCreate,
+  type WorkerHostUpdate,
+  type WorkerScaleBody,
+  type WorkerScaleOp,
 }

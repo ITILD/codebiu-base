@@ -2,15 +2,14 @@
 
 import logging
 
-import aiohttp
-import requests
+import httpx
 
 from module_ai.utils.llm.rerank.interface import Rerank
 
 logger = logging.getLogger(__name__)
 
 # 重排序接口超时(秒): 检索链路强依赖, 无超时易整体挂起
-_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=60)
+_REQUEST_TIMEOUT = 60.0
 
 
 class VllmRerank(Rerank):
@@ -42,7 +41,7 @@ class VllmRerank(Rerank):
     def rerank(self, query: str, documents: list[str], top_n: int | None = None) -> list:
         """同步文本重排序函数"""
         payload, headers = self._build_payload_and_headers(query, documents, top_n)
-        response = requests.post(self.base_url, headers=headers, json=payload)
+        response = httpx.post(self.base_url, headers=headers, json=payload, timeout=_REQUEST_TIMEOUT)
         response.raise_for_status()
         result = response.json()
         return self._result_to_list(result)
@@ -51,16 +50,13 @@ class VllmRerank(Rerank):
     async def arerank(self, query: str, documents: list[str], top_n: int | None = None) -> list:
         """异步文本重排序函数(带超时与状态校验)"""
         payload, headers = self._build_payload_and_headers(query, documents, top_n)
-        async with aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session, session.post(
-            self.base_url, headers=headers, json=payload
-        ) as response:
-            if response.status >= 400:
-                body = await response.text()
+        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+            response = await client.post(self.base_url, headers=headers, json=payload)
+            if response.status_code >= 400:
                 raise RuntimeError(
-                    f"vLLM 重排序请求失败({response.status}): {body[:500]}"
+                    f"vLLM 重排序请求失败({response.status_code}): {response.text[:500]}"
                 )
-            result = await response.json()
-            return self._result_to_list(result)
+            return self._result_to_list(response.json())
 
     # 内部辅助方法
     def _build_payload_and_headers(self, query: str, documents: list[str], top_n: int | None = None):

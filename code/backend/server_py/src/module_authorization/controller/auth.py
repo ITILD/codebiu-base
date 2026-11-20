@@ -1,8 +1,18 @@
 """权限认证模块 auth 接口层: 参数校验并调度 service"""
 
-from fastapi import APIRouter, Depends, Form, status, UploadFile, File
+from fastapi import APIRouter, Depends, Form, status, UploadFile, File, Request
 from fastapi.security import OAuth2PasswordRequestForm
-from common.utils.fastapi_ex.exceptions import UnauthorizedError
+from common.utils.fastapi_ex.exceptions import UnauthorizedError, BusinessError
+from module_file.do.filesystem import (
+    EntryCreateRequest,
+    MultipartCompleteRequest,
+    MultipartInitRequest,
+    MultipartInitResponse,
+    MultipartPartInfo,
+    UploadModeResponse,
+)
+from module_file.dependencies.filesystem import get_file_service
+from module_file.service.filesystem import FileService
 from module_authorization.do.token import (
     RefreshTokenRequest,
     TokenResponseFull,
@@ -111,6 +121,94 @@ async def upload_my_avatar(
     """
     # 文件校验失败抛 ValueError, 由全局处理器映射为 400
     return await avatar_service.upload_avatar(current_user.id, file)
+
+
+@router.get(
+    "/me/avatar/upload-mode",
+    summary="查询头像上传模式(direct预签名直传/proxy服务端中转)",
+    response_model=UploadModeResponse,
+)
+async def get_avatar_upload_mode(
+    current_user: User = Depends(get_current_user),
+    file_service: FileService = Depends(get_file_service),
+) -> UploadModeResponse:
+    """查询头像上传模式(前端上传前获取并缓存)"""
+    return file_service.get_upload_mode()
+
+
+@router.post(
+    "/me/avatar/multipart/init",
+    summary="初始化头像预签名上传(同名自动加序号)",
+    response_model=MultipartInitResponse,
+)
+async def init_avatar_multipart(
+    req: MultipartInitRequest,
+    current_user: User = Depends(get_current_user),
+    avatar_service: AvatarService = Depends(get_avatar_service),
+) -> MultipartInitResponse:
+    """
+    初始化头像上传会话(直传返回预签名URL, 中转返回分片凭证)
+    :param req: 初始化请求(文件名/大小/SHA-256)
+    :return: 会话凭证与服务端确认的落库文件名
+    """
+    return await avatar_service.init_upload(current_user.id, req)
+
+
+@router.put(
+    "/me/avatar/multipart/{upload_id}/parts/{part_number}",
+    summary="上传头像分片(proxy中转模式)",
+    response_model=MultipartPartInfo,
+)
+async def upload_avatar_part(
+    upload_id: str,
+    part_number: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    file_service: FileService = Depends(get_file_service),
+) -> MultipartPartInfo:
+    """中转上传单个分片(direct 模式前端直传对象存储,不经服务端)"""
+    content: bytes = await request.body()
+    if not content:
+        raise BusinessError("分片内容不能为空")
+    return await file_service.upload_multipart_part(upload_id, part_number, content)
+
+
+@router.post(
+    "/me/avatar/multipart/{upload_id}/complete",
+    summary="完成头像上传(合并分片并回写用户头像)",
+    response_model=dict,
+)
+async def complete_avatar_multipart(
+    upload_id: str,
+    req: MultipartCompleteRequest,
+    current_user: User = Depends(get_current_user),
+    avatar_service: AvatarService = Depends(get_avatar_service),
+) -> dict:
+    """
+    合并分片、创建头像条目并回写用户头像(自动清理旧头像)
+    :param upload_id: 分片会话凭证
+    :param req: 完成请求(文件名/分片清单)
+    :return: {"avatar": 下载路径, "entry_id": 文件条目ID}
+    """
+    return await avatar_service.complete_upload(current_user.id, upload_id, req)
+
+
+@router.post(
+    "/me/avatar/upload-complete",
+    summary="头像秒传登记(内容已存在时直接建条目)",
+    response_model=dict,
+)
+async def instant_avatar(
+    req: EntryCreateRequest,
+    current_user: User = Depends(get_current_user),
+    avatar_service: AvatarService = Depends(get_avatar_service),
+) -> dict:
+    """
+    基于已存在的内容记录创建头像条目并回写用户头像(init 返回 is_existing=True 后调用)
+    :param req: 条目创建请求(文件名/内容SHA-256/大小)
+    :return: {"avatar": 下载路径, "entry_id": 文件条目ID}
+    """
+    return await avatar_service.register_existing(current_user.id, req)
 
 
 @router.delete(

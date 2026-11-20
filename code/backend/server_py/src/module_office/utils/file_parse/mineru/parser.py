@@ -263,7 +263,8 @@ class MinerUParser(BaseParser):
         """解析 table_body html 为二维文本网格: colspan 展开保持列对齐, 行宽补齐。"""
         if not html.strip():
             return []
-        soup = BeautifulSoup(html, "lxml")
+        # html.parser 为标准库实现(免 lxml 依赖); 表格结构简单, 性能足够
+        soup = BeautifulSoup(html, "html.parser")
         rows: list[list[str]] = []
         for tr in soup.find_all("tr"):
             cells: list[str] = []

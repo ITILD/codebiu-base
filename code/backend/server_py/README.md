@@ -2,6 +2,8 @@
 
 Python 3.13 + FastAPI + SQLAlchemy 2.0(异步) + SQLModel + PostgreSQL + Milvus + Redis + Celery + S3 兼容对象存储(rustfs/MinIO)。
 
+> **AI 能力平台落点**：`module_ai` 提供 Model 供给（ai_model + static_func），`module_agent` 提供 SkillRuntime 与 Agent 编排；三层契约见 [04-AI能力平台架构设计](../../../doc/02-设计文档/04-AI能力平台架构设计.md) 与 [05-对话智能体与执行协议设计](../../../doc/02-设计文档/05-对话智能体与执行协议设计.md)。
+
 ## 快速开始
 
 ```bash
@@ -36,12 +38,12 @@ VS Code `settings.json`：
 ## 构建与部署
 
 ```bash
-# 开发镜像
-bash tools/docker_dev/build.sh
+# 在仓库根目录执行
+deveops/运维脚本/2-主服务/build.sh --up    # 主服务 + 前端
+deveops/运维脚本/3-任务队列/build.sh --up  # 任务队列
 
-# 二进制构建
-bash tools/docker_build/linux_build.sh
-bash tools/docker_build/build.sh
+# Nuitka 闭源交付镜像（可选，本地执行）
+python tools/docker_build/build.py
 ```
 
 部署、配置初始化与版本升级见 [deveops](../../../deveops/README.md)。

@@ -64,7 +64,7 @@
               <el-icon :size="30" text-note-green><ChatDotRound /></el-icon>
             </div>
             <h2 text-xl font-bold text-note>AI 助手</h2>
-            <p mt-1 text-sm text-note-sub>{{ agentMode ? `已选择「${agentName(selectedAgentId)}」，助手可自主调用技能完成任务` : '选择关联知识库，回答将基于文档内容生成' }}</p>
+            <p mt-1 text-sm text-note-sub>{{ currentAgentMeta.description }}</p>
             <div grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-8 w-full max-w-lg>
               <button
                 v-for="s in suggestions" :key="s.label"
@@ -88,12 +88,19 @@
       <!-- 输入区: 悬浮卡片式输入框(知识库/思考模式与输入同行) -->
       <div px-3 md:px-4 pb-3 md:pb-4>
         <div max-w-3xl mx-auto>
+          <!-- 禁用知识库时附件不可用(附件需入库才能被检索) -->
+          <p
+            v-if="kbMode === 'off'"
+            class="mb-1.5 px-2 text-[11px] text-note-sub"
+          >
+            知识库已禁用：附件上传不可用，历史附件也不会被检索
+          </p>
           <ChatComposer
             v-model="inputMessage"
             :is-sending="isSending"
             :attachments="tempAttachments"
             :accept="TEMP_ACCEPT"
-            :attachment-disabled="isSending || agentMode"
+            :attachment-disabled="isSending || kbMode === 'off'"
             :voice-input="true"
             @send="handleSend"
             @stop="handleStop"
@@ -101,72 +108,40 @@
             @remove-file="removeAttachment"
           >
             <template #toolbar>
-              <!-- 助手选择: 空值=仅知识库问答(原 RAG 链路), 选中后走智能体对话 -->
+              <!-- 智能体选择: 问答页只提供两个内置智能体(快速/思考), 执行方式随智能体而定 -->
               <el-select
                 v-model="selectedAgentId"
                 class="kb-select" size="small"
-                :style="{ width: agentMode ? '150px' : '118px' }"
+                style="width: 118px"
                 :disabled="isSending"
-                :placeholder="'仅知识库'"
-                title="选择助手切换对话模式"
+                placeholder="智能体"
+                title="选择智能体"
               >
-                <el-option label="仅知识库" value="" />
-                <el-option v-for="a in agents" :key="a.id" :label="a.name" :value="a.id" />
+                <el-option
+                  v-for="a in chatAgentOptions" :key="a.id"
+                  :label="a.label" :value="a.id"
+                />
               </el-select>
-              <el-select
-                v-model="selectedProjectIds" multiple collapse-tags collapse-tags-tooltip :max-collapse-tags="2"
-                class="kb-select" size="small" placeholder="关联知识库" :disabled="isSending || agentMode"
-              >
-                <el-option v-for="p in myProjects" :key="p.project_id" :label="p.project_name" :value="p.project_id" />
-              </el-select>
-              <!-- 思考模式: 快速回答/深度思考 下拉切换(胶囊触发器, 当前项带勾选) -->
-              <el-dropdown
-                trigger="click"
-                :disabled="agentMode"
-                @command="setThinkingMode"
-              >
-                <button
-                  class="think-btn"
-                  :class="{ active: deepThinking }"
-                  flex items-center gap-1 py-1 px-2.5 rounded-full border border-transparent
-                  bg-note-tint text-note-sub hover:text-note text-xs whitespace-nowrap cursor-pointer
-                  note-transition
-                  :disabled="agentMode"
-                  :title="agentMode ? '助手模式下由助手自主决策' : (deepThinking ? '当前：深度思考（更深入的推理分析）' : '当前：快速回答')"
-                >
-                  <el-icon :size="13"><component :is="deepThinking ? MagicStick : Lightning" /></el-icon>
-                  {{ deepThinking ? '思考' : '快速' }}
-                  <el-icon :size="10" class="opacity-50"><CaretBottom /></el-icon>
-                </button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="fast">
-                      <span class="mode-item">
-                        <el-icon><Lightning /></el-icon>快速
-                        <el-icon v-if="!deepThinking" class="mode-check"><Check /></el-icon>
-                      </span>
-                    </el-dropdown-item>
-                    <el-dropdown-item command="deep">
-                      <span class="mode-item">
-                        <el-icon><MagicStick /></el-icon>思考
-                        <el-icon v-if="deepThinking" class="mode-check"><Check /></el-icon>
-                      </span>
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <!-- 知识库范围: 自动 / 手动 / 禁用(三态) -->
+              <KnowledgeBasePicker
+                v-model="selectedProjectIds"
+                v-model:mode="kbMode"
+                :projects="myProjects"
+                :personal-kb="personalKb"
+                :disabled="isSending"
+              />
               <!-- 联网搜索开关: 仅保留地球图标(最通用的联网标识), 激活态白底描边 -->
               <el-tooltip
-                :content="agentMode ? '助手模式下由助手自主决定是否联网' : '开启后回答将结合实时网络搜索结果，并与知识库内容统一精排'"
+                content="开启后回答将结合实时网络搜索结果，并与知识库内容统一精排"
                 placement="top"
               >
                 <button
                   class="web-btn"
                   :class="{ active: enableWebsearch }"
                   :aria-pressed="enableWebsearch"
-                  :disabled="agentMode"
+                  :disabled="isSending"
                   :title="'联网搜索'"
-                  @click="!agentMode && (enableWebsearch = !enableWebsearch)"
+                  @click="enableWebsearch = !enableWebsearch"
                 >
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -186,6 +161,14 @@
               label="输入"
             />
           </div>
+          <!-- 本轮用量提示: 回答完成后的 token 消耗(费用明细在后台管理-用量统计查看) -->
+          <div
+            v-if="lastRoundUsage && !isSending"
+            class="mt-1.5 px-2 flex flex-wrap items-center gap-x-2 text-xs text-note-sub"
+          >
+            <span>本轮消耗 {{ lastRoundUsage.total_tokens.toLocaleString('en-US') }} tokens</span>
+            <span v-if="lastRoundUsage.model_name">· {{ lastRoundUsage.model_name }}</span>
+          </div>
         </div>
       </div>
     </section>
@@ -199,31 +182,33 @@ import { onUnmounted } from 'vue'
 // 对话页为重状态页(会话列表/流式输出/滚动位置), 缓存后切回免整页重建与重拉
 defineOptions({ name: 'RagConversation' })
 import {
-  Fold, Expand, MagicStick, ChatDotRound,
+  Fold, Expand, ChatDotRound,
   EditPen, Document, List, DataAnalysis,
-  Lightning, CaretBottom, Check,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createConversation,
-  listMyConversations,
-  listAgentConversations,
+  listAllConversations,
   getConversation,
   updateConversation,
   deleteConversation,
   listConversationMessages,
   sendRagChatAguiStream,
-  parseTempFile,
+  uploadChatAttachment,
 } from '../api/conversation'
+import { getRagDocumentIngestProgress } from '../api/document'
 import { listMyProjects } from '../api/member'
-import { listAgents, sendAgentChatAguiStream } from '@/modules/agent/api/agent'
+import { listAgents, getAgentPlan } from '@/modules/agent/api/agent'
 import type { AgentInfo } from '@/modules/agent/types'
 import ChatMessageList from '@/common/components/chat/ChatMessageList.vue'
 import ChatComposer from '@/common/components/chat/ChatComposer.vue'
 import InputLimitBar from '@/modules/ai/components/InputLimitBar.vue'
 import { countTokens, getChatInputLimit } from '@/modules/ai/api/chat'
 import { estimateTokens } from '@/modules/ai/utils/limits'
+import { getLastUsage } from '../api/usage'
+import type { LastUsage } from '../types/usage'
 import ConversationSidebar from '../components/ConversationSidebar.vue'
+import KnowledgeBasePicker from '../components/KnowledgeBasePicker.vue'
 import { i18n } from '@/common/i18n/language'
 import { useAguiMessages } from '@/common/composables/useAguiMessages'
 import { StreamEventType } from '@/common/types/chat'
@@ -253,28 +238,68 @@ const currentConversation = computed(() =>
 // ===== 知识库关联 =====
 const myProjects = ref<MyProject[]>([])
 const selectedProjectIds = ref<string[]>([])
+/** 个人问答知识库(问答附件入库): 非禁用态固定勾选, 不占用用户显式勾选 */
+const personalKb = computed(
+  () => myProjects.value.find((p) => p.kb_category === 'temp') ?? null
+)
+/** 从显式勾选中剔除个人问答知识库(它由固定勾选项代表, 避免重复计数) */
+const stripPersonalKb = () => {
+  const tempId = personalKb.value?.project_id
+  if (!tempId || !selectedProjectIds.value.includes(tempId)) return
+  selectedProjectIds.value = selectedProjectIds.value.filter((id) => id !== tempId)
+}
 
-// ===== 智能体(助手)模式 =====
-// 可见助手列表(公开+自建); 选中后对话走 /agent/chat 链路, 会话列表切到 scope=agent
+// ===== 智能体选择 =====
+// 问答页只提供两个内置智能体: 快速(固定 RAG 流程) / 思考(ReAct 智能体)
+// 执行方式与运行参数全部在智能体设置中维护, 页面不再有回答模式切换
+const AGENT_STORAGE_KEY = 'rag:agent-id'
+interface ChatAgentOption { id: string; label: string; description: string }
+const CHAT_AGENTS: ChatAgentOption[] = [
+  {
+    id: 'builtin_fast',
+    label: '快速',
+    description: '固定 RAG 流程：按固定次数检索重检后直接作答，模型不开启思考',
+  },
+  {
+    id: 'builtin_thinking',
+    label: '思考',
+    description: 'ReAct 智能体：有界多轮取证与精排融合，模型默认开启思考',
+  },
+]
 const agents = ref<AgentInfo[]>([])
-const selectedAgentId = ref('')
-const agentMode = computed(() => Boolean(selectedAgentId.value))
+const storedAgentId = localStorage.getItem(AGENT_STORAGE_KEY)
+const selectedAgentId = ref(
+  CHAT_AGENTS.some((a) => a.id === storedAgentId) ? (storedAgentId as string) : CHAT_AGENTS[0].id
+)
+// 下拉选项: 智能体详情加载后以库中名称覆盖内置文案(兜底保证两个选项始终可用)
+const chatAgentOptions = computed(() =>
+  CHAT_AGENTS.map((a) => ({
+    id: a.id,
+    label: agents.value.find((x) => x.id === a.id)?.name || a.label,
+  }))
+)
+const currentAgentMeta = computed(
+  () => CHAT_AGENTS.find((a) => a.id === selectedAgentId.value) ?? CHAT_AGENTS[0]
+)
 const agentName = (id: string) =>
-  agents.value.find((a) => a.id === id)?.name ?? '助手'
+  chatAgentOptions.value.find((a) => a.id === id)?.label
+  ?? agents.value.find((a) => a.id === id)?.name
+  ?? CHAT_AGENTS[0].label
 
-/** 加载可见助手列表(失败静默, 不阻断知识库问答) */
+/** 加载可见智能体列表(用于展示库中名称; 失败静默, 使用内置文案兜底) */
 const loadAgents = async () => {
   try {
     agents.value = await listAgents()
   } catch (error) {
-    console.error('获取助手列表失败:', error)
+    console.error('获取智能体列表失败:', error)
   }
 }
 
-// 切换助手: 中止在途流并重载对应范围的会话列表(知识库会话/智能体会话分开)
-// restoringAgent: 选中会话时程序恢复助手选择, 跳过重载避免覆盖用户点选的会话
+// 切换智能体: 中止在途流并重载会话列表(加快捷会话与思考会话分开)
+// restoringAgent: 选中会话时程序恢复智能体选择, 跳过重载避免覆盖用户点选的会话
 let restoringAgent = false
-watch(selectedAgentId, () => {
+watch(selectedAgentId, (val) => {
+  if (val) localStorage.setItem(AGENT_STORAGE_KEY, val)
   if (restoringAgent) {
     restoringAgent = false
     return
@@ -294,6 +319,8 @@ const messagePage = ref(1)
 const hasMoreMessages = ref(false)
 const loadingOlderMessages = ref(false)
 const inputMessage = ref('')
+// ===== 本轮用量提示(回答完成后查询, 仅展示 token 消耗; 费用明细在后台管理-用量统计) =====
+const lastRoundUsage = ref<LastUsage | null>(null)
 // ===== 输入 token 用量(后端权威计数 + 模型输入上限) =====
 const draftTokenCount = ref<number | null>(null)
 const chatInputLimit = ref(0)
@@ -319,23 +346,57 @@ const loadChatInputLimit = async () => {
   } catch { /* 上限未知时仅展示后端错误 */ }
 }
 const isSending = ref(false)
-const deepThinking = ref(false)
+/** 知识库范围(三态): auto=自动匹配有权限的知识库 / manual=仅勾选 / off=禁用 */
+type KbMode = 'auto' | 'manual' | 'off'
+const kbMode = ref<KbMode>('auto')
+/** 实际提交的知识库 ID: 禁用态一律为空; 个人问答知识库由后端在非禁用态自动并入
+ *  (前端不放进 project_ids, 避免破坏 auto 模式"自动匹配全部有权限知识库"的语义) */
+const effectiveProjectIds = computed(() =>
+  kbMode.value === 'off' ? [] : selectedProjectIds.value
+)
 const enableWebsearch = ref(false)
 
-/** 思考模式下拉切换: fast=快速回答, deep=深度思考 */
-const setThinkingMode = (mode: string | number | object) => {
-  deepThinking.value = mode === 'deep'
-}
 const streamingMessageId = ref<string | null>(null)
 const messageListRef = ref<InstanceType<typeof ChatMessageList>>()
 
-// ===== 临时文件附件(不入知识库, 解析后随消息回传) =====
+// ===== 附件(上传即入库个人默认临时知识库, 解析完成后问答检索自动命中) =====
 const tempAttachments = ref<ChatAttachment[]>([])
-// 附件选择框 accept: 版式文档/图片(走 MinerU) + 纯文本(直读), 与后端白名单一致
+// 附件选择框 accept: 与后端知识库白名单一致(版式文档/图片/纯文本)
 const TEMP_ACCEPT = '.pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv,.log,.json'
 const TEMP_MAX_FILES = 5
+// 附件入库进度轮询间隔与超时(解析→分块→向量化全程, 大文件耗时较长)
+const ATTACH_POLL_INTERVAL = 2000
+const ATTACH_POLL_TIMEOUT = 5 * 60 * 1000
 
-/** 选中文件 → 逐个解析(后端异步端点, 全程不阻塞其他接口) */
+/** 轮询单个附件入库进度至 completed/failed(超时按失败提示, 可继续发送) */
+const pollAttachment = (att: ChatAttachment) => {
+  const documentId = att.documentId
+  if (!documentId) return
+  const startedAt = Date.now()
+  const timer = setInterval(async () => {
+    try {
+      const res = await getRagDocumentIngestProgress(documentId)
+      if (res.parse_status === 'completed') {
+        att.status = 'ready'
+        clearInterval(timer)
+      } else if (res.parse_status === 'failed') {
+        att.status = 'error'
+        att.error = '解析入库失败(可在知识库页查看原因并重试)'
+        clearInterval(timer)
+        ElMessage.error(`「${att.name}」入库失败`)
+      } else if (Date.now() - startedAt > ATTACH_POLL_TIMEOUT) {
+        // 超时不再阻塞发送: 附件仍在后台入库, 完成后后续提问即可命中
+        att.status = 'ready'
+        clearInterval(timer)
+        ElMessage.info(`「${att.name}」入库较慢, 已转后台处理`)
+      }
+    } catch {
+      /* 单次轮询失败静默重试 */
+    }
+  }, ATTACH_POLL_INTERVAL)
+}
+
+/** 选中文件 → 逐个上传入库(存入个人默认临时知识库, 后端异步解析) */
 const handleFilesPicked = async (files: File[]) => {
   for (const f of files) {
     if (tempAttachments.value.length >= TEMP_MAX_FILES) {
@@ -349,16 +410,18 @@ const handleFilesPicked = async (files: File[]) => {
     }
     tempAttachments.value.push(att)
     try {
-      const res = await parseTempFile(f)
-      att.status = 'ready'
-      att.content = res.content
-      att.chars = res.chars
-      att.truncated = res.truncated
-      if (res.truncated) ElMessage.info(`「${f.name}」内容较长，已截断至 ${res.chars} 字符`)
+      const res = await uploadChatAttachment(f)
+      att.documentId = res.id
+      // 同名附件入库会自动加序号, 芯片展示落库名, 便于与引用来源对齐
+      if (res.name) att.name = res.name
+      if (res.parse_task_warning) ElMessage.warning(res.parse_task_warning)
+      // 首次上传会自动创建个人问答知识库, 刷新列表使其在选择器中固定勾选展示
+      if (!personalKb.value) void loadMyProjects()
+      pollAttachment(att)
     } catch (e) {
       att.status = 'error'
-      att.error = e instanceof Error ? e.message : '解析失败'
-      ElMessage.error(`「${f.name}」解析失败: ${att.error}`)
+      att.error = e instanceof Error ? e.message : '上传失败'
+      ElMessage.error(`「${f.name}」上传失败: ${att.error}`)
     }
   }
 }
@@ -400,16 +463,17 @@ const loadMyProjects = async () => {
   try {
     const res = await listMyProjects({ page: 1, size: 200 })
     myProjects.value = res.items
+    // 个人问答知识库由选择器固定勾选展示, 不进入用户显式勾选集合
+    stripPersonalKb()
   } catch (error) {
     console.error('获取知识库列表失败:', error)
   }
 }
 
-// 会话列表(默认选中最近一个; 助手模式拉取智能体会话, 知识库模式拉取知识库会话)
+// 会话列表(默认选中最近一个; 会话均由智能体驱动, 统一展示全部范围)
 const loadConversations = async () => {
   try {
-    const fetcher = agentMode.value ? listAgentConversations : listMyConversations
-    const res = await fetcher({ page: 1, size: 100 })
+    const res = await listAllConversations({ page: 1, size: 100 })
     conversations.value = res.items
     if (!currentConversationId.value && conversations.value.length > 0) {
       await selectConversation(conversations.value[0].id)
@@ -462,7 +526,7 @@ const handleCreateConversation = async () => {
     const id = await createConversation({
       title: '新对话',
       project_ids: selectedProjectIds.value,
-      agent_id: selectedAgentId.value || undefined,
+      agent_id: selectedAgentId.value,
     })
     await loadConversations()
     await selectConversation(id)
@@ -481,6 +545,7 @@ const selectConversation = async (conversationId: string) => {
   if (window.innerWidth < 768) sidebarOpen.value = false
   currentConversationId.value = conversationId
   messages.value = []
+  lastRoundUsage.value = null // 切换会话清空上一会话的本轮用量提示
   tempAttachments.value = [] // 切换会话清空未发送的附件(附件仅作用于当前会话)
   try {
     // 会话详情与历史消息为独立请求, 并行拉取(串行等待会叠加白屏时间);
@@ -492,14 +557,18 @@ const selectConversation = async (conversationId: string) => {
         size: MESSAGE_PAGE_SIZE,
       }),
     ])
-    // 恢复会话绑定的助手(智能体会话切到对应模式, 知识库会话回到仅知识库)
+    // 恢复会话绑定的智能体(仅两个内置智能体可恢复; 无绑定则沿用当前选择)
     const convAgentId = conv?.agent_id ?? ''
-    if (convAgentId !== selectedAgentId.value) {
+    if (
+      CHAT_AGENTS.some((a) => a.id === convAgentId) &&
+      convAgentId !== selectedAgentId.value
+    ) {
       restoringAgent = true
       selectedAgentId.value = convAgentId
     }
     if (conv?.project_ids?.length) {
       selectedProjectIds.value = conv.project_ids
+      stripPersonalKb()
     }
     // 历史消息(倒序接口按时间正序展示, blocks 归一化 + 交互卡片重建)
     messagePage.value = 1
@@ -600,6 +669,25 @@ const interactionDisplayText = (payload: InteractionResponsePayload): string => 
   return '（补充信息）'
 }
 
+/** 断线兜底: 以 agent_plan_item 投影覆盖实时清单(投影优先, REQ-002 §6.3) */
+const syncPlanFromProjection = async (msg: ChatMessage) => {
+  const blocks = msg.blocks ?? []
+  const block = blocks.find((b) => b.stream_event_type === StreamEventType.AGENT_PLAN)
+  const runId = String(block?.data?.run_id ?? '')
+  if (!block || !runId) return
+  try {
+    const items = await getAgentPlan(runId)
+    block.data = {
+      ...(block.data ?? {}),
+      items: items.map((it) => ({ ...it, id: it.item_id })),
+    }
+    // 触发列表重渲染(块对象为引用, 需替换数组引用)
+    msg.blocks = [...blocks]
+  } catch {
+    // 兜底失败不打扰用户: 已有实时清单仍然可用
+  }
+}
+
 /** 发起一次 AG-UI 流式请求(普通提问 / 交互响应续跑共用)
  * userBlocks: 用户消息附件标记(temp_file 块, 气泡上方渲染附件芯片, 历史恢复同样生效) */
 const startStream = async (
@@ -648,6 +736,7 @@ const startStream = async (
     },
     onError: (error: string) => {
       if (!stopRequested) assistantMsg.content += `\n\n> [错误] ${error}`
+      void syncPlanFromProjection(assistantMsg)
     },
     onComplete: () => {
       loadConversations()
@@ -672,22 +761,23 @@ const startStream = async (
     ) {
       assistantMsg.content = stopRequested ? '（已停止生成）' : '（未收到回复，请重试）'
     }
+    // 本轮用量提示: 后端在流结束后旁路落库, 延迟查询避免读到旧记录
+    if (assistantMsg.content && currentConversationId.value && !stopRequested) {
+      lastRoundUsage.value = null
+      window.setTimeout(() => {
+        getLastUsage(currentConversationId.value!)
+          .then((u) => {
+            if (mySeq === streamSeq && u) lastRoundUsage.value = u
+          })
+          .catch(() => { /* 用量提示失败静默, 不影响聊天 */ })
+      }, 1500)
+    }
     messageListRef.value?.scrollToBottom(true)
   }
 
   try {
-    // 助手模式走智能体执行循环(tool-calling), 其余走知识库问答链路(行为不变)
-    const convAgentId = currentConversation.value?.agent_id ?? ''
-    const agentId = agentMode.value ? (selectedAgentId.value || convAgentId) : ''
-    if (agentId) {
-      await sendAgentChatAguiStream(
-        currentConversationId.value,
-        { message: request.message ?? '', agent_id: agentId },
-        streamCallbacks,
-      )
-    } else {
-      await sendRagChatAguiStream(currentConversationId.value, request, streamCallbacks)
-    }
+    // 执行方式由所选智能体决定(快速=固定 RAG / 思考=ReAct), 统一走知识库问答链路
+    await sendRagChatAguiStream(currentConversationId.value, request, streamCallbacks)
   } catch {
     if (!stopRequested) assistantMsg.content += '\n\n> [发送失败，请重试]'
   } finally {
@@ -700,7 +790,7 @@ const handleSend = async () => {
   const message = inputMessage.value.trim()
   if (!message || isSending.value) return
   if (tempAttachments.value.some((a) => a.status === 'parsing')) {
-    ElMessage.warning('附件解析中，请稍候再发送')
+    ElMessage.warning('附件入库中，请稍候再发送')
     return
   }
   // 输入上限前置拦截: 超出对话模型 input_tokens 时不发送
@@ -710,8 +800,8 @@ const handleSend = async () => {
     )
     return
   }
-  // 仅携带解析成功的附件; 发送即消费(内容经 SystemMessage 持久化, 后续追问仍可引用)
-  const readyFiles = tempAttachments.value.filter((a) => a.status === 'ready' && a.content)
+  // 携带已上传附件的文件名(附件已入库临时知识库, 发送即消费; 检索由后端自动并入)
+  const readyFiles = tempAttachments.value.filter((a) => a.status === 'ready')
   const attachBlocks: MessageBlock[] | null = readyFiles.length
     ? readyFiles.map((a) => ({
         id: `blk-${a.id}`,
@@ -728,8 +818,8 @@ const handleSend = async () => {
     try {
       const id = await createConversation({
         title: message.slice(0, 20),
-        project_ids: selectedProjectIds.value,
-        agent_id: selectedAgentId.value || undefined,
+        project_ids: effectiveProjectIds.value,
+        agent_id: selectedAgentId.value,
       })
       currentConversationId.value = id
       loadConversations()
@@ -745,10 +835,11 @@ const handleSend = async () => {
   await startStream(
     {
       message,
-      project_ids: selectedProjectIds.value,
-      deep_thinking: deepThinking.value,
+      agent_id: selectedAgentId.value,
+      project_ids: effectiveProjectIds.value,
+      kb_mode: kbMode.value,
       enable_websearch: enableWebsearch.value,
-      temp_files: readyFiles.map((a) => ({ name: a.name, content: a.content ?? '' })),
+      attachments: readyFiles.map((a) => a.name),
     },
     message,
     attachBlocks,
@@ -786,14 +877,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 思考模式胶囊按钮: 静态样式已 UnoCSS 化到模板, 此处仅保留依赖 JS 状态类的激活态 */
-.think-btn.active {
-  background: var(--el-bg-color, #fff);
-  border-color: var(--note-green, #6cbf8f);
-  color: var(--note-green, #6cbf8f);
-}
-
-/* 联网搜索图标按钮: 28px 圆形, 激活态白底描边(与思考按钮激活态一致) */
+/* 联网搜索图标按钮: 28px 圆形, 激活态白底描边 */
 .web-btn {
   display: flex;
   align-items: center;
@@ -819,20 +903,6 @@ onMounted(() => {
 .web-btn.active {
   background: var(--el-bg-color, #fff);
   border-color: var(--note-green, #6cbf8f);
-  color: var(--note-green, #6cbf8f);
-}
-</style>
-
-<style>
-/* 下拉菜单传送至 body, 菜单项布局需全局作用域: 图标+文字+勾选横排 */
-.mode-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mode-item .mode-check {
-  margin-left: 12px;
   color: var(--note-green, #6cbf8f);
 }
 </style>

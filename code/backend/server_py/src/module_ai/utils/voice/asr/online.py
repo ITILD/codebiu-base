@@ -15,10 +15,22 @@ import threading
 
 from module_ai.utils.voice.asr.dashscope import DashscopeASR
 from module_ai.utils.voice.audio import pcm_to_wav_bytes
-from module_ai.utils.voice.dashscope_ws import DASHSCOPE_WS_URL, DashscopeRealtimeASRStream
 from module_ai.utils.voice.interface import ASREngine
 
 logger = logging.getLogger(__name__)
+
+# 实时 WS 流式类懒加载(首次构造会话时才导入 dashscope_ws → aiohttp,
+# 未用语音功能不常驻约 11MB 内存)
+_RealtimeStream: type | None = None
+
+
+def _realtime_stream_cls() -> type:
+    global _RealtimeStream
+    if _RealtimeStream is None:
+        from module_ai.utils.voice.dashscope_ws import DashscopeRealtimeASRStream
+
+        _RealtimeStream = DashscopeRealtimeASRStream
+    return _RealtimeStream
 
 # OpenAI 兼容语音识别默认路径(vllm 等发布端按需覆盖 url)
 _OPENAI_ASR_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/audio/transcriptions"
@@ -166,7 +178,7 @@ class OnlineASR(ASREngine):
             ws_conf = dict(self._conf)
             # WS 端点: extra.ws_url / 配置 url(为 wss 时) 优先, 其余取全局默认
             ws_conf["url"] = _ws_url_from_conf(ws_conf)
-            stream = DashscopeRealtimeASRStream(ws_conf)
+            stream = _realtime_stream_cls()(ws_conf)
             await stream.start()
             return stream
         return PseudoStreamSession(
@@ -177,7 +189,7 @@ class OnlineASR(ASREngine):
 
     async def stream_accept_async(self, stream, samples, sample_rate: int = 16000) -> str:
         """送入一帧 PCM(兼容实时 WS 会话与伪流式会话两种形态)"""
-        if isinstance(stream, DashscopeRealtimeASRStream):
+        if isinstance(stream, _realtime_stream_cls()):
             await stream.accept(samples)
             return ""
         if isinstance(stream, PseudoStreamSession):
@@ -187,7 +199,7 @@ class OnlineASR(ASREngine):
 
     async def stream_result_async(self, stream, is_final: bool = False) -> str:
         """获取当前识别文本(实时会话收割下行帧; 伪流式收割已完成切片)"""
-        if isinstance(stream, DashscopeRealtimeASRStream):
+        if isinstance(stream, _realtime_stream_cls()):
             return await stream.text()
         if isinstance(stream, PseudoStreamSession):
             return stream.result(is_final)
@@ -195,7 +207,7 @@ class OnlineASR(ASREngine):
 
     async def stream_destroy_async(self, stream) -> None:
         """销毁会话(伪流式 flush 尾段; 实时会话 finish 并关连接)"""
-        if isinstance(stream, DashscopeRealtimeASRStream):
+        if isinstance(stream, _realtime_stream_cls()):
             try:
                 await stream.finish()
             finally:

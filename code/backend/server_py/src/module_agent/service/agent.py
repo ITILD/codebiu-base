@@ -8,6 +8,7 @@
 import logging
 
 from common.utils.fastapi_ex.exceptions import BusinessError, NotFoundError
+from module_agent.agents.builtin import builtin_chat_agents
 from module_agent.dao.agent import AgentDao
 from module_agent.do.agent import Agent, AgentCreate, AgentResponse, AgentUpdate
 from module_agent.skills import registry as _skills_collection  # noqa: F401 (导入即收集注册全部 Skill)
@@ -121,6 +122,10 @@ class AgentService:
             agent.default_project_ids = req.default_project_ids
         if req.is_public is not None:
             agent.is_public = req.is_public
+        if req.execution_strategy is not None:
+            agent.execution_strategy = req.execution_strategy
+        if req.chat_modes is not None:
+            agent.chat_modes = req.chat_modes
         agent = await self.agent_dao.update(agent)
         return AgentResponse.model_validate(agent, from_attributes=True)
 
@@ -184,3 +189,53 @@ class AgentService:
                 )
             )
             logger.info(f"内置智能体已播种: {name}({agent_id})")
+
+    async def seed_builtin_chat_agents(self) -> None:
+        """幂等播种内置对话 Agent(模式即 Agent, REQ-019 设计 §2.1)
+
+        `builtin_fast` / `builtin_thinking` 是代码内建的对话模式 Agent,
+        `chat_modes` 以代码 Manifest 为唯一事实源, 播种时只读同步进库
+        (同 Skill 双生命周期原则, 04 设计 W-8): 管理端不可编辑, 平台级调整走配置节。
+        """
+        for manifest in builtin_chat_agents():
+            chat_modes = {name: cfg.model_dump() for name, cfg in manifest.chat_modes.items()}
+            existed = await self.agent_dao.get(manifest.key)
+            if existed is not None:
+                # 内置对话 Agent 以代码为源: 刷新名称/描述/形态/策略;
+                # chat_modes 允许管理员在智能体设置中调整, 播种不再覆盖
+                changed = (
+                    existed.name != manifest.name
+                    or existed.description != manifest.description
+                    or existed.agent_kind != manifest.agent_kind
+                    or existed.decision_mode != manifest.decision_mode
+                    or existed.execution_strategy != manifest.execution_strategy
+                    or not existed.chat_modes
+                )
+                if changed:
+                    existed.name = manifest.name
+                    existed.description = manifest.description
+                    existed.agent_kind = manifest.agent_kind
+                    existed.decision_mode = manifest.decision_mode
+                    existed.execution_strategy = manifest.execution_strategy
+                    existed.chat_modes = existed.chat_modes or chat_modes
+                    await self.agent_dao.update(existed)
+                    logger.info(f"内置对话智能体已刷新: {manifest.name}({manifest.key})")
+                continue
+            await self.agent_dao.add(
+                Agent(
+                    id=manifest.key,
+                    name=manifest.name,
+                    description=manifest.description,
+                    default_prompt=manifest.system_prompt,
+                    default_project_ids=[],
+                    skills=list(manifest.skills),
+                    owner_user_id="system",
+                    is_public=True,
+                    is_builtin=True,
+                    agent_kind=manifest.agent_kind,
+                    decision_mode=manifest.decision_mode,
+                    execution_strategy=manifest.execution_strategy,
+                    chat_modes=chat_modes,
+                )
+            )
+            logger.info(f"内置对话智能体已播种: {manifest.name}({manifest.key})")

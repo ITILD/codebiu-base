@@ -1,0 +1,60 @@
+# ==============================================================================
+# 文件服务（RustFS S3 API）HTTPS 入口
+# server_name 由 nginx 镜像启动时用 .env 的 FILE_DOMAIN 渲染
+# 证书：./ctl.sh cert 签发到 nginx/certs/{fullchain.pem,privkey.pem}
+# 控制台不对外：仍走 127.0.0.1:20007（SSH 隧道访问）
+# ==============================================================================
+
+# HTTP：只做 ACME 校验，其余 301 到 HTTPS
+server {
+    listen       80;
+    listen  [::]:80;
+    server_name  ${SERVER_NAME};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS：S3 API（后端预签名上传/下载都走这里）
+server {
+    listen       443 ssl;
+    listen  [::]:443 ssl;
+    http2        on;
+    server_name  ${SERVER_NAME};
+
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # 大文件直传/下载：不落盘、不限体积、长超时
+    client_max_body_size 0;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    chunked_transfer_encoding on;
+
+    proxy_connect_timeout 30s;
+    proxy_send_timeout    3600s;
+    proxy_read_timeout    3600s;
+
+    location / {
+        # 不带 URI 后缀，保持原始路径与查询参数（SigV4 校验依赖）
+        proxy_pass http://rustfs:9000;
+
+        # 预签名 URL 绑定 Host，必须透传
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+    }
+}

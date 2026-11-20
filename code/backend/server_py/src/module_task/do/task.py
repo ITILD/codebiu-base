@@ -236,7 +236,7 @@ class TaskTypeView(SQLModel):
 
 
 class WorkerInfo(SQLModel):
-    """Celery 执行器(worker)运行状态条目"""
+    """Celery 执行器(worker)运行状态条目(inspect 实时数据 + 心跳注册合并)"""
 
     name: str
     queues: list[str] = Field(default_factory=list, description="消费的队列列表")
@@ -249,6 +249,15 @@ class WorkerInfo(SQLModel):
         description="正在执行的任务(name/id/args 摘要)",
     )
     pid: int | None = Field(default=None, description="进程ID")
+    # ---- 心跳注册合并字段(带默认, 向后兼容无心跳场景) ----
+    ip: str | None = Field(default=None, description="实例出口 IP(心跳注册)")
+    hostname: str | None = Field(default=None, description="实例主机名/容器 hostname")
+    pool: str | None = Field(default=None, description="执行池类型(solo/prefork/threads)")
+    status: str = Field(default="online", description="在线状态(online/offline)")
+    started_at: str | None = Field(default=None, description="启动时间(ISO, 心跳注册)")
+    last_seen: str | None = Field(
+        default=None, description="最近心跳时间(ISO, offline 时展示)"
+    )
 
 
 class WorkerListResponse(SQLModel):
@@ -258,6 +267,207 @@ class WorkerListResponse(SQLModel):
     online: int = 0
     workers: list[WorkerInfo] = Field(default_factory=list)
     error: str | None = Field(default=None, description="采集失败原因(可重试)")
+
+
+# ################ 队列注册表(逻辑队列动态增减) ################
+
+class QueueRegistryStatus(StrEnum):
+    """队列注册表状态"""
+
+    ENABLED = "enabled"    # 启用: worker 动态订阅 + 派发路由准入
+    DISABLED = "disabled"  # 停用: worker 退订 + 派发回落默认队列
+
+
+class TaskQueueRegistry(SQLModel, table=True):
+    """
+    队列注册表(逻辑队列的事实来源): 加/撤队列落库即生效(秒级动态订阅), 不动容器
+
+    队列数弹性 ≠ 进程数弹性: 本表只管"谁消费哪些队列"(celery 动态订阅),
+    worker 副本伸缩(容器数)由 sys_worker_host + agent(P3)负责。
+    """
+
+    __tablename__ = "sys_task_queue_registry"
+
+    queue_name: str = Field(
+        primary_key=True, max_length=100, description="队列名(broker 物理队列名)"
+    )
+    name: str = Field(default="", max_length=200, description="显示名")
+    description: str | None = Field(
+        default=None, sa_column=Column(Text), description="用途说明"
+    )
+    tenant: str | None = Field(
+        default=None, max_length=100, index=True,
+        description="租户隔离预留(None=公共队列)",
+    )
+    resource_class: str = Field(
+        default="default", max_length=50, index=True,
+        description="资源池分组预留(default=通用池, 未来按 CPU/GPU/IO 画像分组)",
+    )
+    min_replicas: int = Field(
+        default=0, description="最小副本数预留(未来自动伸缩下限)"
+    )
+    max_replicas: int = Field(
+        default=0, description="最大副本数预留(0=不限)"
+    )
+    status: str = Field(
+        default=QueueRegistryStatus.ENABLED,
+        sa_column=Column(String(20), nullable=False, default=QueueRegistryStatus.ENABLED),
+        description="状态(enabled=启用/disabled=停用)",
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+        description="创建时间",
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
+            nullable=False,
+        ),
+        description="最后更新时间",
+    )
+
+
+class TaskQueueRegistryCreate(SQLModel):
+    """创建队列请求体"""
+
+    queue_name: str = Field(max_length=100, description="队列名(字母/数字/下划线)")
+    name: str = Field(default="", max_length=200, description="显示名")
+    description: str | None = None
+    tenant: str | None = Field(default=None, max_length=100, description="租户预留")
+    resource_class: str = Field(default="default", max_length=50, description="资源池预留")
+
+
+class TaskQueueRegistryUpdate(SQLModel):
+    """更新队列请求体(全可选, 仅传变更字段)"""
+
+    name: str | None = Field(default=None, max_length=200)
+    description: str | None = None
+    tenant: str | None = Field(default=None, max_length=100)
+    resource_class: str | None = Field(default=None, max_length=50)
+    min_replicas: int | None = Field(default=None, ge=0)
+    max_replicas: int | None = Field(default=None, ge=0)
+    status: QueueRegistryStatus | None = None
+
+
+class TaskQueueRegistryView(SQLModel):
+    """队列注册表视图(含实时订阅 worker 数与积压深度)"""
+
+    queue_name: str
+    name: str
+    description: str | None = None
+    tenant: str | None = None
+    resource_class: str
+    min_replicas: int
+    max_replicas: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    subscribers: int = Field(default=0, description="当前订阅该队列的 worker 数(inspect)")
+    backlog: int = Field(default=0, ge=0, description="队列积压消息数(broker LLEN, 不可用时为 0)")
+
+
+# ################ worker 宿主机注册表(P3: agent 动态启停) ################
+
+class WorkerHost(SQLModel, table=True):
+    """
+    worker 宿主机注册表: 每台部署了 task_worker 的宿主机登记 agent 地址,
+    主服务经 agent(挂 docker.sock 的轻量 HTTP 服务)查看容器/伸缩副本。
+    """
+
+    __tablename__ = "sys_worker_host"
+
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True, index=True)
+    host_name: str = Field(
+        max_length=100, unique=True, index=True, description="主机名(唯一)"
+    )
+    agent_url: str = Field(
+        max_length=300, description="agent 地址(http://host:8700)"
+    )
+    agent_token: str | None = Field(
+        default=None, sa_column=Column(Text), description="agent Bearer token(密文存储语义, 响应打码)"
+    )
+    description: str | None = Field(default=None, sa_column=Column(Text))
+    enabled: bool = Field(default=True, description="是否启用(停用后不再聚合/运维)")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
+            nullable=False,
+        ),
+    )
+
+
+class WorkerHostCreate(SQLModel):
+    """登记 worker 宿主机请求体"""
+
+    host_name: str = Field(max_length=100)
+    agent_url: str = Field(max_length=300)
+    agent_token: str | None = None
+    description: str | None = None
+    enabled: bool = True
+
+
+class WorkerHostUpdate(SQLModel):
+    """更新 worker 宿主机请求体(全可选)"""
+
+    agent_url: str | None = Field(default=None, max_length=300)
+    agent_token: str | None = Field(default=None, description="传 null 清除")
+    description: str | None = None
+    enabled: bool | None = None
+
+
+class WorkerContainerInfo(SQLModel):
+    """worker 容器实时状态(agent docker 采集 + 心跳/inspect 关联)"""
+
+    id: str = Field(description="容器短 ID")
+    name: str = Field(description="容器名")
+    hostname: str | None = Field(default=None, description="容器内 hostname(心跳匹配键)")
+    state: str = Field(default="unknown", description="容器状态(running/exited/...)")
+    status: str = Field(default="", description="状态描述(Up 2 hours 等)")
+    started_at: str | None = Field(default=None, description="启动时间(ISO)")
+    # ---- 关联的 celery worker(按 hostname 匹配心跳, 未匹配为 None) ----
+    worker_name: str | None = Field(default=None, description="对应 celery 节点名")
+    worker_ip: str | None = Field(default=None)
+    worker_active: int = Field(default=0, description="在途任务数")
+    worker_queues: list[str] = Field(default_factory=list)
+
+
+class WorkerHostView(SQLModel):
+    """worker 宿主机聚合视图(注册表 JOIN agent 容器实时状态)"""
+
+    id: str
+    host_name: str
+    agent_url: str
+    description: str | None = None
+    enabled: bool
+    has_token: bool = Field(default=False, description="是否配置 token(不回传明文)")
+    reachable: bool = Field(default=False, description="agent 是否可达")
+    error: str | None = Field(default=None, description="agent 不可达原因")
+    containers: list[WorkerContainerInfo] = Field(default_factory=list)
+    running: int = Field(default=0, description="运行中容器数")
+    total: int = Field(default=0, description="容器总数(含已退出)")
+
+
+class WorkerScaleOpView(SQLModel):
+    """副本伸缩操作状态(缩容为后台任务, 前端轮询闭环)"""
+
+    op_id: str
+    host_id: str
+    host_name: str
+    from_count: int
+    to_count: int
+    phase: str = Field(description="checking/draining/waiting_stable/scaling/done/failed/aborted")
+    message: str | None = Field(default=None, description="当前阶段说明/失败原因")
+    created_at: str
+    updated_at: str
 
 
 class TaskRecoverResponse(SQLModel):

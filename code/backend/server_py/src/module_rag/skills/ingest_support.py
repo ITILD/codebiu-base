@@ -32,27 +32,25 @@ async def resolve_document_input(item: dict, ctx: SkillContext) -> dict:
 
     content_hash: str | None = document.content_hash or None
     file_path: Path | None = None
-    temp_dir: tempfile.TemporaryDirectory | None = None
-    if content_hash:
+    temp_dir_path: str | None = None
+    if document.entry_id:
         file_service = FileService()
-        results = await file_service.locate_content(content_hash)
-        if results.total > 0:
-            entry = results.items[0]
-            byte_stream = await file_service.stream_entry(entry.id)
-            temp_dir = tempfile.TemporaryDirectory(prefix="kb_ingest_")
-            file_path = Path(temp_dir.name) / (document.name or "document")
-            with file_path.open("wb") as f:
-                async for chunk in byte_stream:
-                    f.write(chunk)
+        # mkdtemp 而非 TemporaryDirectory: 后者对象离开作用域即删目录,
+        # 而本函数返回后 skill 才读取文件; 生命周期由 job 结束统一清理
+        temp_dir_path = tempfile.mkdtemp(prefix="kb_ingest_")
+        file_path = Path(temp_dir_path) / (document.name or "document")
+        with file_path.open("wb") as f:
+            async for chunk in file_service.stream_entry_chunks(document.entry_id):
+                f.write(chunk)
     if file_path is None:
         raise ValueError(
-            f"文档内容不可定位(content_hash 缺失或存储中无此内容): {document_id}"
+            f"文档内容不可定位(entry_id 缺失, content_hash={content_hash}): {document_id}"
         )
 
     return {
         "file_path": str(file_path),
         "filename": document.name or file_path.name,
-        "size_hint": int(document.file_size or file_path.stat().st_size),
+        "size_hint": int(document.file_size_bytes or file_path.stat().st_size),
         # job 结束统一清理临时目录(AgentJobService._cleanup_paths)
-        "__cleanup_paths": [temp_dir.name],
+        "__cleanup_paths": [temp_dir_path],
     }

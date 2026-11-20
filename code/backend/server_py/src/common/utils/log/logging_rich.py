@@ -8,10 +8,9 @@ import datetime
 import textwrap
 from pathlib import Path
 
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.traceback import Traceback, install as install_rich_tracebacks
-from rich.markup import escape
+# rich 延迟到 dev 控制台初始化时才导入: 生产环境只有文件日志,
+# 不再为所有进程常驻 rich(约 9MB/进程); 控制台相关方法内局部导入
+# (rich 已在 sys.modules 时局部导入仅字典查找, 无额外开销)
 
 from common.utils.log.custom_timed_rotating_file_handler import (
     CustomTimedRotatingFileHandler,
@@ -50,6 +49,8 @@ class _TruncateFormatter(logging.Formatter):
         if self.log_file and len(msg) > self.max_len:
             hidden = len(msg) - self.max_len
             log_file_path_rel = get_rel_path(self.log_file)
+            from rich.markup import escape  # 仅控制台路径触达(dev)
+
             # 用 escape() 转义截断提示，防止 markup=True 时将 [] 误解析为样式标签
             suffix = escape(f"[truncated {hidden} chars,full log in {log_file_path_rel}]")
             return f"{msg[:self.max_len]}... \n{suffix}"
@@ -82,6 +83,8 @@ class _CompactConsoleHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
+            from rich.markup import escape  # 仅控制台 handler 触达(dev)
+
             ts = datetime.datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
             msg = escape(self._fmt.format(record))
             src = f"{get_rel_path(Path(record.pathname))}:{record.lineno}"
@@ -92,6 +95,8 @@ class _CompactConsoleHandler(logging.Handler):
             )
             # ERROR 且携带异常: 渲染核心 bug 代码块(异常点源码上下文, 不带 locals 噪音)
             if record.levelno >= logging.ERROR and record.exc_info and record.exc_info[0] is not None:
+                from rich.traceback import Traceback
+
                 tb = Traceback.from_exception(
                     *record.exc_info,
                     show_locals=False,
@@ -131,11 +136,12 @@ class LoggingRich:
         log_dir: Path | None = None,
         is_dev: bool = False,
         format_string: str = DEFAULT_FILE_FORMAT,
-        console: Console | None = None,
+        console=None,
     ) -> None:
         self.log_dir = log_dir
         self.is_dev = is_dev
-        self.console = console or Console()
+        # dev 控制台初始化时才创建 rich Console(生产保持 None, 不导入 rich)
+        self.console = console
         # 文件日志通用纯文本格式
         self.file_formatter = logging.Formatter(format_string)
         self._configured = False
@@ -173,6 +179,13 @@ class LoggingRich:
         if not self.is_dev:
             return
 
+        # dev 才导入 rich(生产进程不加载, 省约 9MB 常驻内存)
+        from rich.console import Console
+        from rich.traceback import install as install_rich_tracebacks
+
+        if self.console is None:
+            self.console = Console()
+
         handler = _CompactConsoleHandler(
             console=self.console, log_file=self._log_file_path("info")
         )
@@ -186,6 +199,11 @@ class LoggingRich:
 
     def log_markdown(self, md_text: str) -> None:
         """在终端渲染并输出 Markdown 内容。仅用于终端展示，不会写入标准日志文件。"""
+        if self.console is None:
+            print(md_text)  # 无 rich 控制台(生产/未初始化)时退化为纯文本输出
+            return
+        from rich.markdown import Markdown
+
         self.console.print(Markdown(md_text))
 
     # ==================== 文件日志 ====================
@@ -225,9 +243,7 @@ class LoggingRich:
             test_file.touch(exist_ok=True)
             test_file.unlink()
         except (PermissionError, OSError) as e:
-            self.console.print(
-                f"[bold red]无法创建或写入日志目录: {self.log_dir}, 错误: {e}[/bold red]"
-            )
+            print(f"无法创建或写入日志目录: {self.log_dir}, 错误: {e}", file=sys.stderr)
             sys.exit(1)
 
     def _on_rollover(self) -> None:
@@ -236,8 +252,8 @@ class LoggingRich:
             with open(self.log_dir / "rollover.log", "a", encoding="utf-8") as f:
                 f.write(f"{datetime.datetime.now().isoformat()} - log rotated\n")
         except Exception as e:
-            # 使用 console 打印错误，避免死循环
-            self.console.print(f"[bold red]记录日志轮转事件失败: {e}[/bold red]")
+            # 直接输出避免死循环(不依赖 rich 控制台)
+            print(f"记录日志轮转事件失败: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

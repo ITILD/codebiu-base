@@ -1,0 +1,41 @@
+# ==============================================================================
+# 任务队列专用镜像：只含 Python 环境与依赖，代码/配置全部由 compose 外挂
+# 构建上下文：code/backend/server_py
+#   docker build -f tools/docker_task/Dockerfile.task -t base-task:0.1.1 .
+# 与 Dockerfile.dev 的差异：默认入口固定为 src/app_task.py，不含 Web 启动逻辑
+# ==============================================================================
+
+# ---------------- 阶段 1: 依赖构建（不进最终镜像） ----------------
+FROM python:3.14-slim-bookworm AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates build-essential cmake pkg-config \
+        libpq-dev libssl-dev zlib1g-dev libffi-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple uv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv venv --python /usr/local/bin/python3.14 .venv \
+    && uv sync --frozen --no-cache --no-install-project --no-dev \
+    && find .venv -depth -type d -name '__pycache__' -exec rm -rf {} +
+
+# ---------------- 阶段 2: 运行时 ----------------
+FROM python:3.14-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai LANG=C.UTF-8
+# libgomp1 供 torch；其余供 docling/opencv 加载
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates tzdata \
+        libpq5 libgomp1 \
+        libglib2.0-0 libgl1 libsndfile1 \
+        libxrender1 libsm6 libxext6 libfontconfig1 libxcb1 libxkbcommon0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/.venv /app/.venv
+
+WORKDIR /app
+CMD [".venv/bin/python", "src/app_task.py"]

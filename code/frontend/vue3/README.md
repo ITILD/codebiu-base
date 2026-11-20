@@ -2,6 +2,8 @@
 
 Vue 3.5 + TypeScript + Vite + Element Plus + UnoCSS + Pinia + unplugin 全家桶（自动路由 / 自动导入 / 图标）。
 
+> **AI 能力平台落点**：前端是三层能力的入口与观测面——对话入口承载 Agent，页面入口承载 Skill/业务流程，模型配置页承载 Model；契约见 [04-AI能力平台架构设计](../../../doc/02-设计文档/04-AI能力平台架构设计.md)。
+
 ## 快速开始
 
 ```bash

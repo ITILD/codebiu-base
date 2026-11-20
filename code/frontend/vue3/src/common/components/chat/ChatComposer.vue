@@ -282,9 +282,8 @@ onUnmounted(stopTipRotation)
           <Document v-else />
         </el-icon>
         <span class="truncate">{{ a.name }}</span>
-        <span v-if="a.status === 'parsing'" class="shrink-0 text-note-sub">解析中</span>
+        <span v-if="a.status === 'parsing'" class="shrink-0 text-note-sub">入库中</span>
         <span v-else-if="a.status === 'error'" class="shrink-0 text-[var(--note-seal,#ad563e)]">失败</span>
-        <span v-else-if="a.truncated" class="shrink-0 text-note-sub" title="内容较长已截断">已截断</span>
         <button
           class="shrink-0 border-none bg-transparent p-0 cursor-pointer text-note-sub hover:text-note"
           title="移除附件" @click="emit('remove-file', a.id)"
@@ -294,7 +293,7 @@ onUnmounted(stopTipRotation)
     <!-- 单行布局: [+] 输入 | 工具栏 发送组; 文字换行时输入占满整行、按键下移一行(stacked 复合态样式在 scoped style) -->
     <div class="cc-row flex items-center gap-1.5" :class="{ stacked: isMultiline }">
       <!-- 上传临时文件(最左侧 + 号) -->
-      <el-tooltip content="上传临时文件（解析后作为本次问答上下文，不进入知识库）" placement="top">
+      <el-tooltip content="上传文件（自动存入个人问答知识库，解析后参与本次问答检索）" placement="top">
         <button
           class="cc-plus flex items-center justify-center w-8 h-8 rounded-full border border-transparent bg-note-tint text-note-sub cursor-pointer note-transition hover:text-note shrink-0"
           :class="{ 'opacity-50 cursor-not-allowed': attachmentDisabled }"

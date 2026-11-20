@@ -1,0 +1,201 @@
+# codebiu_base 文档清单与代码映射（机器可读）
+# 用途：AI IDE 先读本清单，定位「代码改动 → 必须同步哪些文档」。
+# 规则来源：README_AI.md §5；文档治理：doc/README.md。
+# 维护：新增/移动文档、新增模块、接口/表/权限/配置变化时同步更新。
+
+version: 1
+updated: "2026-11-18"
+ai_entry: README_AI.md
+authority: doc/README.md
+skills_dir: doc/05-开发skill
+mirror_pairs:
+  - [README.md, README.en.md]
+
+markers:
+  syntax: "@doc-sync: <relative-path>[; <relative-path>...]; 触发: <condition>"
+  location: "文件头注释区，不参与运行"
+  rule: "改代码前先看标记；改完代码必须同步标记指向的文档"
+
+audit:
+  cadence: weekly
+  pre_release: required
+  after_external_code_intake: required
+  last_audit: null
+  skill: doc/05-开发skill/04-文档代码同步巡检.md
+
+docs:
+  - id: readme-zh
+    path: README.md
+    layer: showcase
+    mirror: README.en.md
+    authority_for: [project-positioning, capability-overview, quick-start]
+    sync_triggers: [capability-change, positioning-change, screenshot-change, link-change]
+  - id: readme-en
+    path: README.en.md
+    layer: showcase
+    mirror: README.md
+    authority_for: [project-positioning-en]
+    sync_triggers: [capability-change, positioning-change, screenshot-change, link-change]
+  - id: readme-ai
+    path: README_AI.md
+    layer: ai-rules
+    authority_for: [ai-startup-protocol, doc-first-gate, three-layer-classification, code-doc-sync, external-code-intake]
+    sync_triggers: [workflow-change, gate-change, sync-policy-change]
+  - id: doc-index
+    path: doc/README.md
+    layer: project
+    authority_for: [doc-layering, doc-inventory, anti-duplication, maintenance-gate]
+    sync_triggers: [doc-added, doc-moved, layer-change]
+  - id: req-analysis
+    path: doc/02-设计文档/01-需求分析.md
+    layer: project
+    authority_for: [business-requirements, fr-list, roles]
+    sync_triggers: [requirement-change, capability-change]
+  - id: overall-arch
+    path: doc/02-设计文档/02-总体架构与功能设计.md
+    layer: project
+    authority_for: [module-assembly, tech-stack, data-store, rag-flow, module-list]
+    sync_triggers: [module-add-remove, route-change, permission-code-change, rag-flow-change]
+  - id: permission-design
+    path: doc/02-设计文档/03-权限设计.md
+    layer: project
+    authority_for: [permission-model]
+    sync_triggers: [permission-code-change, rbac-change]
+  - id: ai-platform-arch
+    path: doc/02-设计文档/04-AI能力平台架构设计.md
+    layer: project
+    authority_for: [model-layer, skill-layer, agent-layer, skill-runtime, three-layer-contract, classification-tree]
+    sync_triggers: [model-change, skill-change, agent-change, runtime-change, contract-change]
+  - id: dial-agent-protocol
+    path: doc/02-设计文档/05-对话智能体与执行协议设计.md
+    layer: project
+    authority_for: [dialogue-protocol, bounded-react, five-beat, auto-invocation, agent-job]
+    sync_triggers: [protocol-change, agent-mode-change, tool-adapter-change]
+  - id: agent-scenario
+    path: doc/02-设计文档/06-AI智能体场景设计.md
+    layer: project
+    authority_for: [agent-scenarios]
+    sync_triggers: [scenario-change]
+  - id: req-registry
+    path: doc/02-设计文档/00-需求功能登记册.md
+    layer: project
+    authority_for: [requirement-ledger, requirement-status, change-log]
+    sync_triggers: [requirement-added, status-change, delivery, doc-change]
+  - id: req-card-template
+    path: doc/02-设计文档/99-需求卡模板.md
+    layer: project
+    authority_for: [requirement-card-format]
+    sync_triggers: [card-format-change]
+  - id: dev-flow
+    path: doc/03-规范/开发流程.md
+    layer: project
+    authority_for: [development-steps, delivery-checklist]
+    sync_triggers: [workflow-change, checklist-change]
+  - id: req-mgmt
+    path: doc/03-规范/需求与功能管理.md
+    layer: project
+    authority_for: [requirement-states, approval-gate, exemption, doc-first]
+    sync_triggers: [gate-change, status-change]
+  - id: code-style
+    path: doc/03-规范/代码规范.md
+    layer: project
+    authority_for: [code-style]
+    sync_triggers: [style-change]
+  - id: version-mgmt
+    path: doc/03-规范/版本管理.md
+    layer: project
+    authority_for: [versioning, branching, rollback]
+    sync_triggers: [version-change, release-flow-change]
+  - id: backend-doc-index
+    path: code/backend/server_py/doc/README.md
+    layer: backend
+    authority_for: [backend-doc-inventory]
+    sync_triggers: [backend-doc-added, backend-module-change]
+  - id: backend-ai-rules
+    path: code/backend/server_py/README_AI.md
+    layer: backend
+    authority_for: [backend-ai-rules]
+    sync_triggers: [backend-rule-change]
+  - id: frontend-doc-index
+    path: code/frontend/vue3/doc/README.md
+    layer: frontend
+    authority_for: [frontend-doc-inventory]
+    sync_triggers: [frontend-doc-added, frontend-module-change]
+  - id: frontend-ai-rules
+    path: code/frontend/vue3/README_AI.md
+    layer: frontend
+    authority_for: [frontend-ai-rules]
+    sync_triggers: [frontend-rule-change]
+  - id: flutter-doc-index
+    path: code/frontend/flutter/doc/README.md
+    layer: flutter
+    authority_for: [flutter-doc-inventory]
+    sync_triggers: [flutter-doc-added, flutter-module-change]
+  - id: flutter-ai-rules
+    path: code/frontend/flutter/README_AI.md
+    layer: flutter
+    authority_for: [flutter-ai-rules]
+    sync_triggers: [flutter-rule-change]
+  - id: deveops-index
+    path: deveops/README.md
+    layer: deveops
+    authority_for: [deployment, init, upgrade, backup]
+    sync_triggers: [deploy-change, queue-change, config-change]
+
+skills:
+  - id: requirement-intake
+    path: doc/05-开发skill/01-需求登记与批准.md
+  - id: three-layer-classification
+    path: doc/05-开发skill/02-三层归类与文档先行.md
+  - id: code-intake-doc-reclaim
+    path: doc/05-开发skill/03-代码导入与文档回收.md
+  - id: doc-code-sync-audit
+    path: doc/05-开发skill/04-文档代码同步巡检.md
+  - id: module-scaffold
+    path: doc/05-开发skill/05-模块骨架生成.md
+  - id: delivery-acceptance
+    path: doc/05-开发skill/06-交付验收与发版.md
+
+code_sync:
+  - code: code/backend/server_py/src/app.py
+    docs: [doc/02-设计文档/02-总体架构与功能设计.md, code/backend/server_py/doc/dev/02-目录结构.md, doc/02-设计文档/03-权限设计.md]
+    triggers: [module-register, router-change, permission-change]
+  - code: code/backend/server_py/src/module_agent/service/skill_runtime.py
+    docs: [doc/02-设计文档/04-AI能力平台架构设计.md, doc/02-设计文档/05-对话智能体与执行协议设计.md]
+    triggers: [skill-contract-change, runtime-change, queue-change]
+  - code: code/backend/server_py/src/module_agent/agents/manifest.py
+    docs: [doc/02-设计文档/04-AI能力平台架构设计.md, doc/02-设计文档/05-对话智能体与执行协议设计.md]
+    triggers: [agent-change, manifest-change]
+  - code: code/backend/server_py/src/module_agent/skills/manifest.py
+    docs: [doc/02-设计文档/04-AI能力平台架构设计.md]
+    triggers: [skill-contract-change, builtin-skill-change]
+  - code: code/backend/server_py/src/module_ai
+    docs: [doc/02-设计文档/04-AI能力平台架构设计.md, code/backend/server_py/doc/README.md]
+    triggers: [model-change, provider-change, static-func-change]
+  - code: code/backend/server_py/src/common/config/lifespan.py
+    docs: [code/backend/server_py/doc/dev/03-配置与初始化.md, deveops/运维手册/配置与数据库初始化.md]
+    triggers: [startup-order-change, seed-change]
+  - code: code/backend/server_py/alembic/versions
+    docs: [code/backend/server_py/doc/dev/04-数据库迁移.md, doc/02-设计文档/02-总体架构与功能设计.md]
+    triggers: [schema-change, migration-added]
+  - code: code/backend/server_py/config.yaml
+    docs: [code/backend/server_py/doc/dev/03-配置与初始化.md, deveops/运维手册/配置与数据库初始化.md]
+    triggers: [config-key-change, default-change]
+  - code: code/frontend/vue3/src/app/config/menu.ts
+    docs: [doc/02-设计文档/02-总体架构与功能设计.md, code/frontend/vue3/doc/dev/05-权限与菜单.md]
+    triggers: [menu-change, permission-code-change, home-entry-change]
+  - code: code/frontend/vue3/vite.config.ts
+    docs: [code/frontend/vue3/doc/dev/01-开发指南.md, code/frontend/vue3/doc/README.md]
+    triggers: [route-convention-change, build-change, chunk-change]
+  - code: code/frontend/vue3/src/common/api/http.ts
+    docs: [code/frontend/vue3/doc/dev/01-开发指南.md]
+    triggers: [http-wrapper-change, auth-refresh-change]
+  - code: code/frontend/flutter/lib/common/app_core.dart
+    docs: [code/frontend/flutter/doc/dev/01-开发指南.md]
+    triggers: [composition-root-change, provider-change]
+  - code: code/frontend/flutter/lib/main.dart
+    docs: [code/frontend/flutter/doc/dev/01-开发指南.md]
+    triggers: [entry-change, theme-shell-change]
+  - code: deveops/运维脚本/4-客户端
+    docs: [deveops/部署指南/打包构建.md, deveops/README.md]
+    triggers: [packaging-change, artifact-change]

@@ -10,6 +10,7 @@ engine 参数可选：缺省时按模型配置(model_config 表 model_type=asr/t
 自动选择方案(用户个人绑定优先)；旧值 dashscope/sherpa/qwen/local 自动归一化为 online。
 具体业务逻辑见 module_ai/service/voice.py(VoiceService)。
 """
+import asyncio
 import logging
 import time
 
@@ -36,6 +37,22 @@ from module_authorization.dependencies.auth import get_current_user_id_optional
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _record_call_usage(user_id: str | None, kind: str, quantity: float = 1.0) -> None:
+    """旁路记录一次语音调用用量(asr=次 / tts=字符, 成本按单价快照; 失败不影响主流程)
+
+    延迟导入避免模块加载期跨模块耦合(module_ai ← module_rag)。
+    """
+    if not user_id:
+        return
+
+    async def _run() -> None:
+        from module_rag.service.usage import ChatUsageService
+
+        await ChatUsageService().record_call(user_id, kind, quantity)
+
+    asyncio.create_task(_run())
 
 
 async def _ws_user_id(token: str | None) -> str | None:
@@ -84,6 +101,8 @@ async def asr_upload(
     resolved = resolve_engine(engine)
     start = time.time()
     text = await voice_service.asr(audio_bytes, resolved, user_id=current_user_id)
+    # 用量旁路记账: 语音识别按次计费(匿名调用不记)
+    _record_call_usage(current_user_id, "asr", 1.0)
     return ASRResponse(
         text=text,
         engine=await voice_service.effective_engine("asr", resolved, current_user_id),
@@ -124,6 +143,9 @@ async def asr_stream(ws: WebSocket):
                     final_text = await session.finish()
                     if not final_text:
                         final_text = last_text
+                    # 用量旁路记账: 一次流式会话按一次识别计费(匿名连接不记)
+                    if final_text:
+                        _record_call_usage(user_id, "asr", 1.0)
                     await ws.send_text(
                         ASRStreamMessage(
                             text=final_text, is_final=True, engine=effective
@@ -196,6 +218,8 @@ async def tts_file(
         req.sample_rate,
         user_id=current_user_id,
     )
+    # 用量旁路记账: 语音合成按字符数计费(匿名调用不记)
+    _record_call_usage(current_user_id, "tts", float(len(req.text)))
 
     wav_bytes = pcm_to_wav_bytes(pcm, sr)
     return Response(
@@ -233,6 +257,8 @@ async def tts_stream(
         req.text, resolve_engine(req.engine), req.speaker, req.speed, req.sample_rate,
         user_id=current_user_id,
     )
+    # 用量旁路记账: 流式合成按字符数计费(合成已成功发起; 匿名调用不记)
+    _record_call_usage(current_user_id, "tts", float(len(req.text)))
 
     if is_async:
         async def agen_async():

@@ -1,7 +1,6 @@
 """代理管理: 系统代理读取与 httpx 客户端装配"""
 
 import os
-import requests
 import logging
 logger = logging.getLogger(__name__)
 
@@ -64,17 +63,11 @@ class ProxyManager:
     def test_proxy(self):
         """测试代理"""
         try:
-            # 对于socks代理，使用不同的测试方法
-            if self.proxy_type == "socks":
-                proxies = {
-                    "http": os.environ.get("HTTP_PROXY", ""),
-                    "https": os.environ.get("HTTPS_PROXY", ""),
-                }
-                response = requests.get(
-                    "http://httpbin.org/ip", proxies=proxies, timeout=10
-                )
-            else:
-                response = requests.get("http://httpbin.org/ip", timeout=10)
+            import httpx
+
+            # httpx 默认 trust_env, 自动读取本类已写入的 HTTP(S)_PROXY/ALL_PROXY 环境变量
+            # (socks 代理需额外安装 httpx[socks], 与原 requests+PySocks 行为一致)
+            response = httpx.get("http://httpbin.org/ip", timeout=10)
 
             logger.info(f"proxy test success:{response.json()}")
             return True

@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 # 全局注册表(uid -> SkillManifest)
 SKILL_REGISTRY: dict[str, SkillManifest] = {}
+# 工具名精确反查表(LLM tool_name -> uid):
+# 多级命名空间(pack.*/mcp.*)的 tool 名含多个下划线, 首下划线替换不可逆, 必须查此表
+_TOOL_UID_BY_NAME: dict[str, str] = {}
 
 
 def register_skill(manifest: SkillManifest) -> SkillManifest:
@@ -27,8 +30,14 @@ def register_skill(manifest: SkillManifest) -> SkillManifest:
             f"Skill 注册冲突: {uid} 已存在且声明不一致(旧 v{existed.version} / 新 v{manifest.version})"
         )
     SKILL_REGISTRY[uid] = manifest
+    _TOOL_UID_BY_NAME[manifest.tool_name] = uid
     logger.debug("Skill 已注册: %s", uid)
     return manifest
+
+
+def uid_by_tool_name(tool_name: str) -> str | None:
+    """LLM 工具名精确反查 uid(未命中返回 None, 调用方自行兜底)"""
+    return _TOOL_UID_BY_NAME.get(tool_name)
 
 
 def get_skill(skill_key: str) -> SkillManifest | None:
@@ -81,6 +90,7 @@ def _manifest_view(m: SkillManifest) -> dict:
         "version": m.version,
         "side_effects": m.side_effects,
         "agent_callable": m.agent_callable,
+        "requires_features": m.requires_features,
         "capabilities": {
             "required": m.required_capabilities,
             "optional": m.optional_capabilities,

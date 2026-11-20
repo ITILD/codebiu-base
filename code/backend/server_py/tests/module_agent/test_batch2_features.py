@@ -9,7 +9,8 @@ from module_agent.skills.registry import SKILL_REGISTRY
 class TestQueueRouting:
     """物理队列拆分: priority>=7 → q_interactive(B2-1)"""
 
-    def test_interactive_routes_to_dedicated_queue(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_interactive_routes_to_dedicated_queue(self, monkeypatch):
         import module_agent.tasks  # noqa: F401 (注册 skill_execute/agent_job_execute)
         import module_task.tasks as mt
         from common.config.tasks import DEFAULT_QUEUE, INTERACTIVE_QUEUE
@@ -34,14 +35,12 @@ class TestQueueRouting:
                 self.id = "t1"
                 self.priority = priority
 
-        async def _go():
-            await mt.dispatch_task(_FakeTask(7), mt.TASK_TYPES["skill_execute"])
-            await mt.dispatch_task(_FakeTask(5), mt.TASK_TYPES["skill_execute"])
-            await mt.dispatch_task(_FakeTask(9), mt.TASK_TYPES["agent_job_execute"])
-
-        import asyncio
-
-        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(_go())
+        # 必须复用 pytest-asyncio 的事件循环: 自建循环会让共享引擎池里的
+        # asyncpg 连接跨循环使用, 污染后续所有 DB 测试("another operation
+        # is in progress" / "Could not refresh instance" 级联失败)
+        await mt.dispatch_task(_FakeTask(7), mt.TASK_TYPES["skill_execute"])
+        await mt.dispatch_task(_FakeTask(5), mt.TASK_TYPES["skill_execute"])
+        await mt.dispatch_task(_FakeTask(9), mt.TASK_TYPES["agent_job_execute"])
         assert sent[0]["queue"] == INTERACTIVE_QUEUE  # 会话交互类 → 独立队列
         assert sent[1]["queue"] == DEFAULT_QUEUE      # 常规 → 默认队列
         assert sent[2]["queue"] == INTERACTIVE_QUEUE

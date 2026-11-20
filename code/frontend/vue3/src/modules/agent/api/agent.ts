@@ -28,6 +28,8 @@ import type {
   McpServerInfo,
   McpRegisterReq,
   UsageSummary,
+  AgentPlanProjectionItem,
+  NorthStarMetrics,
 } from '../types';
 
 /**
@@ -42,6 +44,25 @@ export const listAgents = () => {
  */
 export const listAllAgents = () => {
   return http_base_server.get<AgentInfo[]>('/agent/agents/all');
+};
+
+/**
+ * 任务清单投影(五拍协议, 本人或管理员)
+ * 断线兜底与历史回放: 实时事件缺失时以该投影为准(REQ-002 §6.3)
+ */
+export const getAgentPlan = (runId: string) => {
+  return http_base_server.get<AgentPlanProjectionItem[]>(`/agent/plans/${runId}`);
+};
+
+/**
+ * 北极星指标(管理端点, 需 agent:manage:read; REQ-002 §7)
+ */
+export const getNorthStarMetrics = (days: number) => {
+  const end = new Date()
+  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000)
+  return http_base_server.get<NorthStarMetrics>('/agent/metrics/north-star', {
+    params: { start: start.toISOString(), end: end.toISOString() },
+  });
 };
 
 /**

@@ -6,7 +6,7 @@ from enum import Enum
 class ModelServerType(str, Enum):
     """
     模型服务类型枚举: 模型能力全部通过外部服务接入(基础框架不内置本地推理)
-    - chat/embeddings/rerank 类: openai/dashscope/vllm/ollama/aws
+    - chat/embeddings/rerank 类: openai/dashscope/vllm(ollama/aws 已下线, 见下方兼容说明)
     - image(生图): openai/dashscope(百炼兼容模式, 协议与 OpenAI 一致)
     - asr/tts 类: online(远程API或本地vllm发布, 协议细节放 extra.protocol)
     - ocr 类: dashscope(阿里云在线)
@@ -16,6 +16,7 @@ class ModelServerType(str, Enum):
     OPENAI = "openai"
     DASHSCOPE = "dashscope"
     VLLM = "vllm"
+    # ollama/aws 已下线(统一走 OpenAI 兼容接入), 值仅为兼容存量库行保留
     OLLAMA = "ollama"
     AWS = "aws"
     # 以下为已下线的历史方案值, 仅为兼容存量库行保留
@@ -40,6 +41,10 @@ class ModelType(str, Enum):
     TTS = "tts"
     # 生图: 文生图(T2I)/图生图·图像编辑(I2I), 走 OpenAI 兼容 /images/generations
     IMAGE = "image"
+    # 语音强制对齐: 输出文本与音频的时间戳对齐结果
+    ALIGNER = "aligner"
+    # 图像分割: 按文本/视觉提示输出 mask
+    SEGMENT = "segment"
     # 已下线的历史类型值, 仅为兼容存量库行保留
     VAD = "vad"
     DENOISE = "denoise"
@@ -68,8 +73,6 @@ def server_types_for(model_type: "ModelType | str") -> list[ModelServerType]:
         ModelServerType.OPENAI,
         ModelServerType.DASHSCOPE,
         ModelServerType.VLLM,
-        ModelServerType.OLLAMA,
-        ModelServerType.AWS,
     ]
 
 

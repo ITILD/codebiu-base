@@ -6,8 +6,16 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
+from common.utils.fastapi_ex.exceptions import ConflictError
 from module_authorization.dao.user import UserDao
 from module_authorization.do.user import UserUpdate
+from module_file.do.filesystem import (
+    EntryCreateRequest,
+    FileEntry,
+    MultipartCompleteRequest,
+    MultipartInitRequest,
+    MultipartInitResponse,
+)
 from module_file.service.filesystem import FileService
 
 logger = logging.getLogger(__name__)
@@ -58,24 +66,116 @@ class AvatarService:
         :raises ValueError: 格式不允许
         """
         filename = file.filename or "avatar.png"
+        self._validate_filename(filename)
+        folder = await self._ensure_folder(user_id)
+        # 上传新头像(内容哈希去重, 内容引用计数由文件条目维护)
+        entry = await self.file_service.upload_file(
+            file, "用户头像", folder.id, owner_user_id=user_id
+        )
+        return await self._apply_avatar(user_id, entry)
+
+    async def init_upload(
+        self, user_id: str, req: MultipartInitRequest
+    ) -> MultipartInitResponse:
+        """初始化头像预签名上传(同名自动加序号, 返回服务端确认的落库名)
+
+        :param user_id: 当前登录用户ID
+        :param req: 初始化请求(文件名/大小/SHA-256)
+        :return: 会话凭证与预签名URL(含最终落库文件名)
+        """
+        original = req.filename or "avatar.png"
+        self._validate_filename(original)
+        folder = await self._ensure_folder(user_id)
+        for index in range(20):
+            req.filename = (
+                original if index == 0 else self._numbered_name(original, index + 1)
+            )
+            req.pid = folder.id
+            try:
+                response = await self.file_service.init_multipart_upload(
+                    req, owner_user_id=user_id
+                )
+            except ConflictError:
+                continue
+            response.filename = req.filename
+            return response
+        raise ConflictError(f"头像同名文件过多: {original}")
+
+    async def complete_upload(
+        self, user_id: str, upload_id: str, req: MultipartCompleteRequest
+    ) -> dict:
+        """完成头像上传: 合并分片/建条目后回写用户头像并清理旧头像
+
+        :param user_id: 当前登录用户ID
+        :param upload_id: 分片会话凭证
+        :param req: 完成请求(文件名/分片清单)
+        :return: {"avatar": 下载路径, "entry_id": 文件条目ID}
+        """
+        original = req.filename or "avatar.png"
+        self._validate_filename(original)
+        folder = await self._ensure_folder(user_id)
+        for index in range(20):
+            req.filename = (
+                original if index == 0 else self._numbered_name(original, index + 1)
+            )
+            req.pid = folder.id
+            try:
+                entry = await self.file_service.complete_multipart_upload(
+                    upload_id, req, owner_user_id=user_id
+                )
+            except ConflictError:
+                continue
+            return await self._apply_avatar(user_id, entry)
+        raise ConflictError(f"头像同名文件过多: {original}")
+
+    async def register_existing(self, user_id: str, req: EntryCreateRequest) -> dict:
+        """头像秒传登记: 内容已存在时直接建条目并回写用户头像
+
+        :param user_id: 当前登录用户ID
+        :param req: 条目创建请求(文件名/内容SHA-256/大小)
+        :return: {"avatar": 下载路径, "entry_id": 文件条目ID}
+        """
+        original = req.name or "avatar.png"
+        self._validate_filename(original)
+        folder = await self._ensure_folder(user_id)
+        for index in range(20):
+            req.name = (
+                original if index == 0 else self._numbered_name(original, index + 1)
+            )
+            req.pid = folder.id
+            try:
+                entry = await self.file_service.create_entry(
+                    req, owner_user_id=user_id
+                )
+            except ConflictError:
+                continue
+            return await self._apply_avatar(user_id, entry)
+        raise ConflictError(f"头像同名文件过多: {original}")
+
+    @staticmethod
+    def _validate_filename(filename: str) -> None:
+        """校验头像扩展名(仅允许常见图片格式)"""
         ext = Path(filename).suffix.lstrip(".").lower()
         if ext not in ALLOWED_IMAGE_EXTS:
             raise ValueError(
                 f"不支持的图片格式 '{ext}', 允许: {'/'.join(sorted(ALLOWED_IMAGE_EXTS))}"
             )
 
-        # 幂等确保头像模块根目录与用户专属子目录
+    @staticmethod
+    def _numbered_name(filename: str, number: int) -> str:
+        """同名文件加序号: avatar.png → avatar (2).png"""
+        stem, ext = Path(filename).stem, Path(filename).suffix
+        return f"{stem} ({number}){ext}"
+
+    async def _ensure_folder(self, user_id: str) -> FileEntry:
+        """确保头像模块根目录与用户专属子目录存在"""
         root = await self.file_service.ensure_module_root(
             AVATAR_MODULE_KEY, AVATAR_MODULE_LABEL, user_id
         )
-        folder = await self.file_service.ensure_folder(user_id, root.id, user_id)
+        return await self.file_service.ensure_folder(user_id, root.id, user_id)
 
-        # 上传新头像(内容哈希去重, 内容引用计数由文件条目维护)
-        entry = await self.file_service.upload_file(
-            file, "用户头像", folder.id, owner_user_id=user_id
-        )
-
-        # 删除旧头像条目(仅当其属于 avatar 模块, 防止误删外部链接指向的条目)
+    async def _apply_avatar(self, user_id: str, entry: FileEntry) -> dict:
+        """回写用户头像字段并清理旧头像条目"""
         user = await self.user_dao.get(user_id)
         old_entry_id = self._extract_entry_id(user.avatar if user else None)
         if old_entry_id and old_entry_id != entry.id:

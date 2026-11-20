@@ -1,6 +1,8 @@
 # 客户端文档导航（flutter）
 
 > 本目录只放**Flutter 客户端实现与客户端约束**。文档分层归属、跨层主题矩阵与防冗余规则统一见 [文档总索引](../../../../doc/README.md)（唯一事实来源，本文件不重复定义）。AI 协作规则见 [README_AI.md](../README_AI.md)；后端规则见 [server_py/README_AI.md](../../../backend/server_py/README_AI.md)；Web 前端规则见 [vue3/README_AI.md](../../vue3/README_AI.md)。
+>
+> **AI 能力平台主轴**：客户端以「对话即入口」承载 Agent，功能卡片对应 Skill/业务流程，模型配置页对应 Model。三层契约见 [04-AI能力平台架构设计](../../../../doc/02-设计文档/04-AI能力平台架构设计.md)；新增功能先确认所属层，再按 `pages → providers → api → types` 四层落地。
 
 ## 客户端文档
 

@@ -73,28 +73,38 @@ class ConversationResponse(SQLModel):
     updated_at: datetime = Field(..., description="最后更新时间")
 
 
-class TempFilePayload(BaseModel):
-    """会话临时文件(前端经 parse-temp-file 解析后随消息回传, 不入知识库不入向量)"""
-
-    name: str = Field(..., max_length=255, description="文件名(展示与溯源用)")
-    content: str = Field(..., description="解析后的文本内容")
-
-
 class ChatRequest(BaseModel):
     """聊天请求"""
 
     # 交互卡片响应时可为空(纯点击提交), 由 service 生成可读兜底文案
     message: str = ""
+    # 智能体ID: 问答页选择的智能体决定执行方式(快速=固定 RAG / 思考=ReAct),
+    # 未传时回退会话绑定的 agent_id
+    agent_id: str | None = Field(
+        default=None, description="智能体ID(决定执行策略与运行参数)"
+    )
     project_ids: list[str] = []
-    deep_thinking: bool = False
+    mode: str | None = Field(
+        default=None,
+        description=(
+            "兼容字段: 未选智能体时的对话模式; 选择内置智能体时由 agent_id 决定, 忽略此值"
+        ),
+    )
+    # 知识库范围(前端三态): auto=自动匹配有权限的知识库(未勾选时后端自动解析) /
+    # manual=仅用 project_ids(可为空=本轮不检索) / off=禁用知识库;
+    # None=兼容旧客户端(空 project_ids 视为本轮不检索)
+    kb_mode: str | None = Field(
+        default=None, description="知识库范围模式(auto/manual/off)"
+    )
     rerank_limit: int = Field(default=20, description="Rerank精排返回的最大结果数") # 新增
     # 联网搜索开关: None=跟随通用配置"网页搜索"组的 rag_enable 全局默认; true/false 请求级覆盖
     enable_websearch: bool | None = Field(
         default=None, description="是否启用网络搜索(None=跟随通用配置全局开关)"
     )
-    # 临时文件: 本次问答上下文(以 SystemMessage 注入本 run, 经 checkpointer 持久可多轮追问)
-    temp_files: list[TempFilePayload] = Field(
-        default_factory=list, description="临时文件列表(不入知识库, 与知识库/联网开关可组合)"
+    # 本条消息附件文件名(附件已入库个人默认临时知识库, 此处仅作消息区块标记,
+    # 检索范围由后端自动并入临时库, 与知识库/联网开关可组合)
+    attachments: list[str] = Field(
+        default_factory=list, description="附件文件名列表(已入库, 用于用户消息附件标记)"
     )
     # 交互响应: {interaction_id, action, value}, 需与 checkpointer 中待响应请求匹配才生效
     interaction_response: dict | None = Field(

@@ -12,6 +12,8 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   dio: ^5.7.0
+  # 预签名上传需要前端计算内容 SHA-256(秒传与内容寻址)
+  crypto: ^3.0.7
   provider: ^6.1.2
   shared_preferences: ^2.3.3
   # 知识库文档上传需要系统文件选择器（白名单已登记：doc/dev/01-开发指南.md）

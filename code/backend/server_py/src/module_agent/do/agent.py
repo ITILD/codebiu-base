@@ -63,6 +63,12 @@ class AgentBase(SQLModel):
         default=None, max_length=20,
         description="ai_agent 执行策略 direct/react/plan_execute(仅 decision_mode=model 生效)",
     )
+    # ---- REQ-019 模式即 Agent: 模式配置挂在 Agent 上 ----
+    chat_modes: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON),
+        description="对话模式配置 {模式名: 运行参数}(内置对话 Agent 只读同步, 代码为事实源)",
+    )
 
 
 
@@ -113,6 +119,12 @@ class AgentUpdate(SQLModel):
     default_project_ids: list[str] | None = Field(default=None, description="默认知识库ID列表")
     skills: list[str] | None = Field(default=None, description="技能列表")
     is_public: bool | None = Field(default=None, description="是否公开")
+    execution_strategy: str | None = Field(
+        default=None, description="执行策略 direct/react/plan_execute"
+    )
+    chat_modes: dict | None = Field(
+        default=None, description="对话模式配置 {模式名: 运行参数}"
+    )
 
 
 class AgentResponse(SQLModel):
@@ -131,5 +143,6 @@ class AgentResponse(SQLModel):
     decision_mode: str = Field(default="model", description="决策方式: rule/model/hybrid")
     steps: list[dict] | None = Field(default=None, description="job 步骤声明")
     execution_strategy: str | None = Field(default=None, description="ai_agent 执行策略")
+    chat_modes: dict | None = Field(default=None, description="对话模式配置")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="最后更新时间")

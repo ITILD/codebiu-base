@@ -113,6 +113,33 @@ class ModelConfigDao:
         return result.first()
 
     @DaoRel
+    async def get_public_by_type_and_model(
+        self,
+        model_type: str,
+        model: str,
+        session: AsyncSession | None = None,
+    ) -> ModelConfig | None:
+        """
+        获取指定类型的公共模型(按模型标识匹配, 用于启动 seed 幂等判断/更新)
+        :param model_type: 模型类型(chat/embeddings/asr/tts等)
+        :param model: 模型标识名称
+        :param session: 可选数据库会话
+        :return: 公共模型配置, 未找到返回None
+        """
+        statement = (
+            select(ModelConfig)
+            .where(
+                ModelConfig.model_type == model_type,
+                ModelConfig.scope == ModelScope.PUBLIC,
+                ModelConfig.model == model,
+            )
+            .order_by(ModelConfig.created_at.asc())
+            .limit(1)
+        )
+        result = await session.exec(statement)
+        return result.first()
+
+    @DaoRel
     async def list_default_public_types(
         self, session: AsyncSession | None = None
     ) -> set[str]:

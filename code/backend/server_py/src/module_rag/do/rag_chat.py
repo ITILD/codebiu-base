@@ -24,6 +24,7 @@ class StreamEventType(StrEnum):
     ERROR = "error"  # 错误信息
     TEMP_FILE = "temp_file"  # 用户上传的临时文件附件标记(仅用户消息 blocks, 前端渲染附件芯片)
     INTERACTION = "interaction"  # 用户交互请求(信息澄清/知识缺口补充等, AG-UI 模式经 CUSTOM rag.interaction 下发)
+    MODE_DECISION = "mode_decision"  # 执行模式决策结论(模式即 Agent, AG-UI 模式经 CUSTOM rag.mode_decision 下发)
 
 
 class ConversationSummary(BaseModel):
@@ -66,6 +67,14 @@ class RagHelpInfo(BaseModel):
     clarify_question: str = Field(
         default="",
         description="向用户提出的澄清问题(needs_clarification 时使用, 需具体明确)",
+    )
+    complexity: str = Field(
+        default="simple",
+        description=(
+            "问题复杂度信号(模式即 Agent 的意图信号, REQ-019 §2.2): "
+            "simple=简单单问 / complex=复合问题(需多步或多方面取证) / "
+            "cross_source=需跨源交叉验证(知识库+网络或多库对比)"
+        ),
     )
 
 
@@ -128,19 +137,39 @@ class RagChatState(MessagesState):
     """RAG 聊天状态(扩展 MessagesState)"""
 
     project_ids: list[str]
+    # 仅临时知识库自动并入检索范围(用户未显式选择知识库): 检索零命中降级直接回答
+    kb_auto_only: bool
+    # 用户问答知识库(temp 分类, 会话附件入库)ID; 空串=用户尚未建库/本轮禁用知识库
+    temp_kb_id: str
+    # 本轮消息附件文件名: 非空时优先定向检索问答知识库, 保证上传文件必被召回
+    attachment_names: list[str]
     user_id: str
     rag_help_info: RagHelpInfo | None
     knowledge_context_list: list[ProjectDocumentChunkSearchResponse] | None
-    deep_thinking: bool
     rerank_limit: int  # Rerank 精排返回的最大结果数
     enable_websearch: bool  # 本轮是否启用网络搜索(请求级覆盖 → 全局 websearch.rag_enable)
     web_results: list[WebCitation] | None  # 网络搜索结果(与知识片段合并精排后, 按相关度序)
     web_search_error: str | None  # 网络搜索失败原因(失败静默降级仅用知识库, 过程区块提示)
     search_error: str | None  # 知识库检索失败原因(None=检索正常), 供过程区块区分"失败"与"无结果"
+    # ── REQ-019 模式即 Agent(§2.2) ──
+    agent_key: str  # 本轮执行智能体(内置: builtin_fast / builtin_thinking)
+    agent_chat_modes: dict  # 智能体库中 chat_modes(运行参数, 管理员可调)
+    requested_mode: str  # 用户请求模式: auto / fast / thinking
+    exec_mode: str  # 实际执行模式: fast / thinking / deep
+    mode_reason: str  # 模式决策依据(可观测, 前端展示"为什么是这个模式")
+    explicit_deep: bool  # 显式深度信号(意图强信号, 供模式解析升级到 deep)
+    conversation_id: str  # 会话ID(技能上下文注入)
+    mode_config: dict | None  # 解析出的执行模式参数(内置 Agent chat_modes 快照, §2.1)
+    deep_evidence: list[dict] | None  # 深度取证证据池(工具结果 → 证据)
+    deep_events: list[dict] | None  # 深度执行过程事件(工具调用/熔断等)
+    deep_stop_reason: str | None  # 深度执行收尾原因
+    skill_context: str | None  # 技能产出上下文(与检索证据区分, §3.3)
     # ── 用户交互(跨 run 持久于 checkpointer) ──
     pending_interaction: dict | None  # 待响应的交互请求(InteractionSpec 序列化)
     interaction_response: dict | None  # 本次请求携带的交互响应 {interaction_id, kind, action, value}
     supplement_content: str | None  # 用户补充的知识内容(knowledge_gap 响应), 注入 chat 上下文
+    # 用量元数据(chat 节点写入): {model_name, prompt_tokens}, 供回答完成后旁路记账
+    usage_meta: dict | None
 
 
 class StreamOne(BaseModel):
@@ -171,6 +200,8 @@ class GraphNode(StrEnum):
     SUMMARY = "summarize"
     CLARIFY = "clarify_interaction"  # 意图澄清交互(等待用户补充信息)
     GAP = "knowledge_gap"  # 知识缺口交互(检索无结果, 等待用户补充内容/选择继续方式)
+    RESOLVE_MODE = "resolve_mode"  # 模式解析(REQ-019 §2.2: requested → exec)
+    DEEP = "deep_agent"  # 深度执行节点(有界 ReAct 取证, §3.3)
 
 
 # 节点名 → 业务流事件类型
@@ -178,6 +209,8 @@ NODE_EVENT_MAP: dict[GraphNode, StreamEventType] = {
     GraphNode.INTENT: StreamEventType.AGENT_THINKING,
     GraphNode.SEARCH: StreamEventType.TOOL_CALL,
     GraphNode.CHAT: StreamEventType.ANSWER,
+    GraphNode.RESOLVE_MODE: StreamEventType.AGENT_THINKING,
+    GraphNode.DEEP: StreamEventType.TOOL_CALL,
 }
 
 # 节点名 → 前端状态提示
@@ -187,6 +220,8 @@ NODE_STATUS_MAP: dict[GraphNode, str] = {
     GraphNode.CHAT: "正在生成回答…",
     GraphNode.CLARIFY: "正在确认补充信息…",
     GraphNode.GAP: "正在评估知识覆盖…",
+    GraphNode.RESOLVE_MODE: "正在决策执行模式…",
+    GraphNode.DEEP: "正在多轮取证…",
 }
 
 # 知识库检索数量上限

@@ -1,6 +1,6 @@
 // AI聊天相关类型定义
 
-import type { MessageInteraction } from './agui'
+import type { AgentPlanItem, MessageInteraction } from './agui'
 
 export interface ChatHistory {
   id: string
@@ -115,6 +115,12 @@ enum StreamEventType {
   TEMP_FILE = 'temp_file',
   /** 用户交互请求(澄清/知识缺口补充) */
   INTERACTION = 'interaction',
+  /** 执行模式决策结论(模式即 Agent, REQ-019 §2.2) */
+  MODE_DECISION = 'mode_decision',
+  /** 技能熔断(五拍协议/深度执行中技能被摘除) */
+  SKILL_MASKED = 'skill_masked',
+  /** 任务清单(五拍协议单例块, data.items 为清单项快照) */
+  AGENT_PLAN = 'agent_plan',
   /** 错误 */
   ERROR = 'error',
 }
@@ -173,21 +179,20 @@ interface DisplayMessage {
   blocks?: MessageBlock[] | null
   /** 助手消息的交互卡片(澄清/知识缺口补充) */
   interactions?: MessageInteraction[] | null
+  /** 任务清单(五拍协议, REQ-002 §6.2: 单例, 全量替换) */
+  plan?: AgentPlanItem[] | null
   created_at?: string
   /** 消息 token 数(有值才展示统计标签) */
   tokenCount?: number | null
 }
 
-/** 输入区附件(临时文件)解析状态 */
+/** 输入区附件状态(附件已入库个人默认临时知识库) */
 interface ChatAttachment {
   id: string
   name: string
   status: 'parsing' | 'ready' | 'error'
-  /** 解析后的文本内容(ready 时有值, 随消息回传后端) */
-  content?: string
-  chars?: number
-  /** 内容超长被截断 */
-  truncated?: boolean
+  /** 入库文档ID(uploadChatAttachment 返回, 轮询入库进度用) */
+  documentId?: string
   error?: string
 }
 
@@ -200,6 +205,8 @@ const STREAM_TYPE_LABELS: Record<string, string> = {
   [StreamEventType.FILE_GEN]: '文件生成',
   [StreamEventType.STATUS]: '进度',
   [StreamEventType.INTERACTION]: '交互请求',
+  [StreamEventType.MODE_DECISION]: '模式决策',
+  [StreamEventType.SKILL_MASKED]: '技能熔断',
   [StreamEventType.ERROR]: '错误信息',
 }
 

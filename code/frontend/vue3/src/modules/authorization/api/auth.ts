@@ -1,5 +1,7 @@
 // src/modules/authorization/api/auth.ts
 import { http_base_server } from '@/common/api/http';
+import { createStorageUploader } from '@/common/utils/storageUpload';
+import type { MultipartPart } from '@/common/utils/storageUpload';
 import type { ThemeMode } from '@/common/types/theme';
 import type {
   AuthLoginRequest,
@@ -171,17 +173,117 @@ export interface AvatarUploadResponse {
   entry_id: string;
 }
 
+/** 头像上传模式缓存(direct=预签名直传 / proxy=服务端中转) */
+interface AvatarUploadMode {
+  mode: 'direct' | 'proxy';
+  part_size: number;
+  max_size: number;
+}
+let avatarUploadModeCache: AvatarUploadMode | null = null;
+
+/** 查询头像上传模式(首次调用获取并缓存) */
+const getAvatarUploadMode = async (): Promise<AvatarUploadMode> => {
+  if (!avatarUploadModeCache) {
+    avatarUploadModeCache = await http_base_server.get<AvatarUploadMode>(
+      '/authorization/auth/me/avatar/upload-mode'
+    );
+  }
+  return avatarUploadModeCache;
+};
+
+/** 头像分片初始化响应 */
+interface AvatarMultipartInit {
+  is_existing: boolean;
+  upload_id: string | null;
+  part_size: number;
+  mode: 'direct' | 'proxy';
+  part_urls: string[] | null;
+  /** 服务端确认的落库文件名(同名自动加序号) */
+  filename?: string | null;
+}
+
+/** 初始化头像预签名上传 */
+const initAvatarMultipart = (data: {
+  filename: string;
+  file_size_bytes: number;
+  content_hash: string;
+  content_type?: string;
+}) => {
+  return http_base_server.post<AvatarMultipartInit>(
+    '/authorization/auth/me/avatar/multipart/init',
+    data
+  );
+};
+
+/** proxy 模式分片中转 */
+const uploadAvatarPart = (
+  uploadId: string,
+  partNumber: number,
+  content: ArrayBuffer
+) => {
+  return http_base_server.putRaw<MultipartPart>(
+    `/authorization/auth/me/avatar/multipart/${encodeURIComponent(uploadId)}/parts/${partNumber}`,
+    content,
+    { headers: { 'Content-Type': 'application/octet-stream' } }
+  );
+};
+
+/** 完成头像上传并回写用户头像 */
+const completeAvatarMultipart = (
+  uploadId: string,
+  data: { filename: string; file_size_bytes: number; parts: MultipartPart[] }
+) => {
+  return http_base_server.post<AvatarUploadResponse>(
+    `/authorization/auth/me/avatar/multipart/${encodeURIComponent(uploadId)}/complete`,
+    data
+  );
+};
+
+/** 头像秒传登记 */
+const instantRegisterAvatar = (data: {
+  name: string;
+  content_hash: string;
+  file_size_bytes: number;
+  mime_type?: string;
+}) => {
+  return http_base_server.post<AvatarUploadResponse>(
+    '/authorization/auth/me/avatar/upload-complete',
+    data
+  );
+};
+
+/** 头像统一存储上传器(预签名直传优先, proxy 自动走服务端中转) */
+const avatarUploader = createStorageUploader<void, AvatarUploadResponse>({
+  getMode: getAvatarUploadMode,
+  init: (file, contentHash) =>
+    initAvatarMultipart({
+      filename: file.name,
+      file_size_bytes: file.size,
+      content_hash: contentHash,
+      content_type: file.type || undefined,
+    }),
+  uploadPart: uploadAvatarPart,
+  complete: (file, uploadId, parts, _ctx, filename) =>
+    completeAvatarMultipart(uploadId, {
+      filename: filename || file.name,
+      file_size_bytes: file.size,
+      parts,
+    }),
+  instant: (file, contentHash, _ctx, filename) =>
+    instantRegisterAvatar({
+      name: filename || file.name,
+      content_hash: contentHash,
+      file_size_bytes: file.size,
+      mime_type: file.type || undefined,
+    }),
+});
+
 /**
- * 上传当前用户头像(登录即可;后端经统一文件服务存入 /用户头像/<用户ID>/ 并清理旧头像)
+ * 上传当前用户头像(登录即可; 预签名直传优先, 后端清理旧头像)
  * @param file 图片文件(png/jpg/jpeg/gif/webp/svg/bmp)
  */
 export const uploadMyAvatar = (file: File) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  return http_base_server.post<AvatarUploadResponse>(
-    '/authorization/auth/me/avatar',
-    formData
-  );
+  return avatarUploader(file);
 };
 
 /**

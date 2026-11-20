@@ -7,7 +7,7 @@
 # ==============================================================================
 
 # ---------------- 阶段 1: 编译(不进最终镜像) ----------------
-FROM python:3.13-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
 # apt 换清华源(http); nuitka 需要 gcc/build-essential/patchelf/ccache
@@ -19,7 +19,7 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.o
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv venv --python /usr/local/bin/python3.13 .venv \
+RUN uv venv --python /usr/local/bin/python3.14 .venv \
     && uv sync --frozen --no-cache --no-install-project --no-dev \
     # nuitka 装进同一个 venv(它要 import 被编译环境的依赖做分析)
     && uv pip install --python .venv/bin/python --no-cache -i https://pypi.tuna.tsinghua.edu.cn/simple nuitka
@@ -68,6 +68,6 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.o
 COPY --from=builder /app/dist/app.dist /app/app.dist
 
 WORKDIR /app
-EXPOSE 8600
+EXPOSE 6666
 # config.yaml / public 等仍由 compose volume 外挂; src 不再外挂(代码已编译)
 CMD ["/app/app.dist/app.bin"]

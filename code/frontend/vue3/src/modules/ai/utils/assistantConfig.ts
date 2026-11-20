@@ -40,7 +40,9 @@ export const ASSISTANT_MAX_SUGGESTIONS = 6
 /** 默认配置 */
 export const DEFAULT_ASSISTANT_CONFIG: AssistantWidgetConfig = {
   enabled: true,
-  autoOpen: true,
+  // 默认不自动弹开: 面板会遮挡右下角页面元素(如导航入口),
+  // 需要引导的用户可在「AI 服务 · AI 助手配置」开启
+  autoOpen: false,
   position: 'right',
   agentId: '',
   projectIds: [],

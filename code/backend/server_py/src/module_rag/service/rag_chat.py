@@ -8,7 +8,7 @@
 
 import asyncio
 import logging
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from langchain_core.messages import HumanMessage, SystemMessage, AnyMessage
 from langchain_core.runnables import RunnableConfig
@@ -19,14 +19,28 @@ from langgraph.graph.state import CompiledStateGraph
 from module_ai.service.llm import LLMService
 from module_ai.utils.llm.types import RoleType, ModelType
 from module_ai.utils.llm.chat.trim import messages_trim_with_max_tokens
-from module_ai.utils.llm.limits import count_tokens
+from module_ai.utils.llm.limits import count_tokens, messages_tokens
 from common.utils.fastapi_ex.exceptions import BusinessError
+# 模式即 Agent(REQ-019 §2.2): 两级模式解析器 + 内置对话 Agent 档位配置
+from module_agent.agents.builtin import ChatModeConfig, resolve_mode_config
+from module_agent.service.mode_policy import (
+    ExecMode,
+    IntentSignal,
+    ModeDecision,
+    ModeSignals,
+    RequestedMode,
+    ToolAvailability,
+    resolve_mode,
+)
+from module_ai.utils.llm.chat.think import with_think_mode
 from module_rag.config.checkpointer import get_checkpointer
 from module_rag.dao.rag_chat_prompt import (
     RAG_CHAT_SYSTEM_PROMPT,
     RAG_CHAT_SYSTEM_PROMPT_TEMPLATE,
     RAG_SUPPLEMENT_CONTEXT_TEMPLATE,
     RAG_WEB_CONTEXT_TEMPLATE,
+    RAG_SKILL_CONTEXT_TEMPLATE,
+    DEEP_AGENT_SYSTEM_PROMPT,
     INTENT_ANALYSIS_SYSTEM_PROMPT,
     SUMMARIZE_SYSTEM_PROMPT,
 )
@@ -46,14 +60,18 @@ from module_rag.do.rag_chat import (
     WebCitation,
 )
 from module_rag.service.chat_message import ChatMessageService
+from module_rag.service.chat_attachment import get_temp_kb
 from module_rag.service.conversation import ConversationService
 from module_rag.service.conversation_title import maybe_auto_title
 from module_rag.service.user_model import UserModelService
+from module_rag.service.usage import ChatUsageService
 from module_rag.do.project_document_chunk import (
     ProjectDocumentChunkSearchResponse,
     SearchRequest,
 )
 from module_rag.service.project_document_chunk import ProjectDocumentChunkService
+# 业务侧深度取证(REQ-019 §3.3): 构建工具 + 证据融合
+from module_rag.service.deep_agent import DeepAgentRunner
 # 联网检索: 仅依赖 module_websearch 的 service 门面与配置读取入口(跨模块边界约定)
 from module_websearch.config.settings import get_websearch_settings
 from module_websearch.service.websearch import WebSearchService
@@ -62,11 +80,8 @@ from module_rag.utils.llm.stream_classifier import StreamEventClassifier
 
 logger = logging.getLogger(__name__)
 
-# ── 会话临时文件限制(不入知识库, 仅作问答上下文) ──
+# ── 问答附件限制(附件入库个人默认临时知识库, 见 service/chat_attachment.py) ──
 TEMP_MAX_FILES = 5  # 单条消息最多附件数
-TEMP_MAX_FILE_BYTES = 15 * 1024 * 1024  # 单文件上传大小上限(15MB)
-TEMP_MAX_FILE_CHARS = 40_000  # 单文件注入上下文的字符上限(超出截断)
-TEMP_TEXT_EXTS = {"txt", "md", "csv", "log", "json"}  # 纯文本直读(不经解析引擎)
 
 
 class RagChatService:
@@ -89,6 +104,10 @@ class RagChatService:
         self.chat_compiled_graph: CompiledStateGraph | None = None
         self.summary_compiled_graph: CompiledStateGraph | None = None
         self._classifier = StreamEventClassifier()
+        # 深度取证(业务侧): 工具构建 + 证据融合, 循环本体委托通用有界执行器
+        self._deep_runner = DeepAgentRunner(
+            project_document_chunk_service=self.project_document_chunk_service
+        )
 
     # ──────────────────────────────────────────────
     # Graph 初始化
@@ -104,6 +123,24 @@ class RagChatService:
             checkpointer=checkpointer
         )
 
+    async def _resolve_auto_projects(self, user_id: str) -> list[str]:
+        """自动知识库范围: 解析当前用户可见的知识库项目(与列表接口同口径)
+
+        上限 500 条(与分页参数上限一致); 解析失败按"本轮不检索知识库"降级,
+        不阻塞对话(用户仍可手动指定知识库)。
+        """
+        try:
+            from common.utils.db.schema.pagination import PaginationParams
+            from module_rag.service.project import ProjectService
+
+            res = await ProjectService().list_paged(
+                PaginationParams(page=1, size=500), viewer_id=user_id
+            )
+            return [p.id for p in res.items]
+        except Exception as exc:
+            logger.warning(f"自动知识库范围解析失败, 本轮不检索知识库: {exc}")
+            return []
+
     # ──────────────────────────────────────────────
     # Chat Graph
     # ──────────────────────────────────────────────
@@ -111,7 +148,9 @@ class RagChatService:
     def _build_chat_graph(self) -> StateGraph:
         """构建聊天 graph:
         [intent_analysis] → (需澄清?) [clarify_interaction] → END
-                          → (需检索?) [knowledge_search] → (无结果?) [knowledge_gap] → END
+                          → [resolve_mode](模式解析) → (需检索?) [knowledge_search]
+                          → (无结果?) [knowledge_gap] → END
+                          → (deep?) [deep_agent](有界 ReAct 取证) → [chat] → END
                           → [chat] → END
         交互节点为"伪中断": 本次 run 结束并落 pending_interaction,
         用户下一条消息携带 interaction_response 续跑(经 checkpointer 共享 state)
@@ -119,18 +158,25 @@ class RagChatService:
 
         graph = StateGraph(RagChatState)
         graph.add_node(GraphNode.INTENT, self._intent_analysis_node)
+        graph.add_node(GraphNode.RESOLVE_MODE, self._resolve_mode_node)
         graph.add_node(GraphNode.SEARCH, self._knowledge_search_node)
+        graph.add_node(GraphNode.DEEP, self._deep_agent_node)
         graph.add_node(GraphNode.CHAT, self._chat_node)
         graph.add_node(GraphNode.CLARIFY, self._clarify_interaction_node)
         graph.add_node(GraphNode.GAP, self._knowledge_gap_node)
 
         # 条件路由(起点): 知识缺口响应(supplement/answer_directly)跳过意图与检索直接对话;
-        # 有知识库 → 意图分析; 否则直接对话
+        # 有知识库 → 意图分析; 否则直接进模式解析
         graph.add_conditional_edges(START, self._route_start)
-        # 条件路由: 意图分析判定需要澄清 → 澄清交互; 需要外部信息才检索, 否则直接对话
+        # 条件路由: 意图分析判定需要澄清 → 澄清交互; 其余一律进模式解析(产出 exec_mode)
         graph.add_conditional_edges(GraphNode.INTENT, self._route_after_intent)
-        # 条件路由: 检索正常但无结果 → 知识缺口交互(邀请用户补充缺失内容)
+        # 条件路由: 模式解析后需要外部信息且有知识库 → 检索; 否则直接对话
+        graph.add_conditional_edges(GraphNode.RESOLVE_MODE, self._route_after_resolve_mode)
+        # 条件路由: 检索正常但无结果 → 知识缺口交互(邀请用户补充缺失内容);
+        # deep 模式先做多轮取证再决定是否真的缺内容
         graph.add_conditional_edges(GraphNode.SEARCH, self._route_after_search)
+        # 条件路由: 深度取证后仍无证据 → 知识缺口交互; 否则直接对话
+        graph.add_conditional_edges(GraphNode.DEEP, self._route_after_deep)
         graph.add_edge(GraphNode.CHAT, END)
         graph.add_edge(GraphNode.CLARIFY, END)
         graph.add_edge(GraphNode.GAP, END)
@@ -146,11 +192,11 @@ class RagChatService:
             and resp.get("action") in ("supplement", "answer_directly")
         ):
             return GraphNode.CHAT
-        return GraphNode.INTENT if state.get("project_ids") else GraphNode.CHAT
+        return GraphNode.INTENT if state.get("project_ids") else GraphNode.RESOLVE_MODE
 
     @staticmethod
     def _route_after_intent(state: RagChatState) -> GraphNode:
-        """意图分析后的路由: 信息不足→澄清交互; 需外部信息且有知识库→检索; 否则直接对话"""
+        """意图分析后的路由: 信息不足→澄清交互; 其余→模式解析(§2.2)"""
         info: RagHelpInfo | None = state.get("rag_help_info")
         # 同一轮待澄清请求只问一次(防止响应后仍判定需澄清造成循环打断)
         pending = state.get("pending_interaction")
@@ -162,6 +208,12 @@ class RagChatService:
             and not already_asked
         ):
             return GraphNode.CLARIFY
+        return GraphNode.RESOLVE_MODE
+
+    @staticmethod
+    def _route_after_resolve_mode(state: RagChatState) -> GraphNode:
+        """模式解析后的路由: 需外部信息且有知识库→检索; 否则直接对话"""
+        info: RagHelpInfo | None = state.get("rag_help_info")
         need_search = bool(state.get("project_ids")) and bool(
             info and info.is_need_external_info
         )
@@ -169,10 +221,33 @@ class RagChatService:
 
     @staticmethod
     def _route_after_search(state: RagChatState) -> GraphNode:
-        """检索后路由: 知识库与网络均无命中(且检索未失败) → 知识缺口交互"""
+        """检索后路由: 知识库与网络均无命中(且检索未失败) → 知识缺口交互
+
+        例外: kb_auto_only(用户未显式选择知识库, 仅临时库自动并入检索范围)时
+        零命中降级直接回答 —— 临时库常驻检索范围, 不能让纯聊天一直触发知识缺口交互
+
+        deep 模式: 零命中不立即打断用户, 先进深度取证(换关键词多轮检索),
+        取证后仍无证据才回到知识缺口交互
+        """
         has_knowledge = bool(state.get("knowledge_context_list") or [])
         has_web = bool(state.get("web_results") or [])
         if not state.get("search_error") and not has_knowledge and not has_web:
+            if state.get("kb_auto_only"):
+                return GraphNode.CHAT
+            if state.get("exec_mode") == "deep":
+                return GraphNode.DEEP
+            return GraphNode.GAP
+        if state.get("exec_mode") == "deep":
+            return GraphNode.DEEP
+        return GraphNode.CHAT
+
+    @staticmethod
+    def _route_after_deep(state: RagChatState) -> GraphNode:
+        """深度取证后路由: 仍无任何证据 → 知识缺口交互; 否则进回答节点"""
+        has_evidence = bool(state.get("knowledge_context_list") or []) or bool(
+            state.get("web_results") or []
+        )
+        if not has_evidence and not state.get("kb_auto_only") and not state.get("search_error"):
             return GraphNode.GAP
         return GraphNode.CHAT
 
@@ -218,6 +293,186 @@ class RagChatService:
                 )
         return {"rag_help_info": rag_help_info}
 
+    # ──────────────────────────────────────────────
+    # 模式解析(REQ-019 §2.2)
+    # ──────────────────────────────────────────────
+
+    async def _resolve_mode_node(self, state: RagChatState) -> dict:
+        """模式解析: 智能体(agent_key) + 意图信号 + 工具可用性 → exec_mode + mode_reason
+
+        内置对话智能体是唯一入口(会话页只提供两者):
+        - builtin_fast(快速): 固定 RAG 流程, 恒为 fast 档(模型关思考, 固定检索轮次)
+        - builtin_thinking(思考): ReAct 有界多轮, 有工具时恒为 deep 档(模型开思考)
+        其余/未选智能体沿用通用解析器(兼容旧客户端)。
+        """
+        agent_key = str(state.get("agent_key") or "")
+        agent_modes = state.get("agent_chat_modes") or {}
+        signals = self._derive_mode_signals(state)
+        tools = ToolAvailability(
+            has_kb=bool(state.get("project_ids")),
+            has_web=bool(state.get("enable_websearch")),
+            has_sandbox=False,
+        )
+        requested = str(state.get("requested_mode") or RequestedMode.AUTO.value)
+
+        if agent_key == "builtin_fast":
+            # 快速智能体: 固定 RAG 流程, 不升级、不开思考
+            decision = ModeDecision(
+                exec_mode=ExecMode.FAST,
+                mode_reason="快速智能体: 固定 RAG 检索流程, 不开启思考",
+                requested_mode=RequestedMode.FAST,
+                config=self._mode_config_of(agent_key, "fast", agent_modes),
+            )
+        elif agent_key == "builtin_thinking":
+            # 思考智能体: 有界 ReAct; 无工具时退化为仅检索+自答
+            mode = ExecMode.DEEP if tools.can_deep else ExecMode.THINKING
+            decision = ModeDecision(
+                exec_mode=mode,
+                mode_reason=(
+                    "思考智能体: 有界 ReAct 多轮取证"
+                    if tools.can_deep
+                    else "思考智能体: 无可用工具, 退化为检索+自答"
+                ),
+                requested_mode=RequestedMode.THINKING,
+                config=self._mode_config_of(agent_key, mode.value, agent_modes),
+            )
+        else:
+            decision = resolve_mode(
+                requested,
+                signals,
+                tools,
+                config_of=lambda m: self._mode_config_of(agent_key, m, agent_modes),
+            )
+        logger.info(
+            f"[Mode] agent={agent_key or '-'} requested={decision.requested_mode.value} "
+            f"exec={decision.exec_mode.value} reason={decision.mode_reason}"
+        )
+        return {
+            "requested_mode": decision.requested_mode.value,
+            "exec_mode": decision.exec_mode.value,
+            "mode_reason": decision.mode_reason,
+            "mode_config": decision.config.model_dump(),
+        }
+
+
+    @staticmethod
+    def _derive_mode_signals(state: RagChatState) -> ModeSignals:
+        """从 state 派生意图信号(§2.2)
+
+        - 意图分析给出的 complexity: complex=复合问题, cross_source=需跨源交叉
+        - explicit_deep: 显式深度信号(意图强信号时置位)
+        """
+        signals: set[str] = set()
+        info: RagHelpInfo | None = state.get("rag_help_info")
+        complexity = str(getattr(info, "complexity", "") or "") if info else ""
+        if complexity == "complex":
+            signals.add(IntentSignal.COMPLEX.value)
+        elif complexity == "cross_source":
+            signals.add(IntentSignal.CROSS_SOURCE.value)
+        if state.get("explicit_deep"):
+            signals.add(IntentSignal.EXPLICIT_DEEP.value)
+        return ModeSignals(signals=frozenset(signals))
+
+    @staticmethod
+    def _mode_config_of(agent_key: str, mode: str, agent_modes: dict | None = None):
+        """取该智能体某档位的运行参数(智能体 chat_modes 为唯一来源, §2.1)
+
+        优先级: 库中智能体 chat_modes(管理员在智能体设置中的调整) >
+        代码内置 Manifest > 按档位回退内置智能体(旧客户端兼容)
+        """
+        if isinstance(agent_modes, dict) and isinstance(agent_modes.get(mode), dict):
+            try:
+                return ChatModeConfig.model_validate(agent_modes[mode])
+            except Exception as exc:
+                logger.warning(f"智能体 {agent_key} 的模式配置 {mode} 非法, 回退内置: {exc}")
+        if agent_key in ("builtin_fast", "builtin_thinking"):
+            config = resolve_mode_config(agent_key, mode)
+            if config is not None:
+                return config
+        fallback = "builtin_fast" if mode == "fast" else "builtin_thinking"
+        return resolve_mode_config(fallback, mode)
+
+    # ──────────────────────────────────────────────
+    # 深度取证(REQ-019 §3.3)
+    # ──────────────────────────────────────────────
+
+    async def _deep_agent_node(self, state: RagChatState) -> dict:
+        """深度取证节点: 有界 ReAct 多轮取证 → 证据融合 → 写回 state
+
+        循环本体与预算由通用执行器 AgentRunner 负责(业务无关), 本节点只负责
+        业务编排: 拼取证提示词 → 调 DeepAgentRunner → 合并证据到 state。
+        失败时降级为已有检索证据(不阻断回答)。
+        """
+        user_id: str = state["user_id"]
+        llm = await self.user_model_service.get_llm_by_user_id(user_id)
+        if llm is None:
+            raise ValueError("无可用对话模型, 无法执行深度取证")
+
+        info: RagHelpInfo | None = state.get("rag_help_info")
+        query = info.vector_search if info and info.vector_search else ""
+        # 取证阶段只需最近上下文, 避免历史过长挤占预算
+        history = messages_trim_with_max_tokens(list(state["messages"]), max_tokens=4000)
+        messages = [SystemMessage(content=DEEP_AGENT_SYSTEM_PROMPT)] + history
+
+        try:
+            result = await self._deep_runner.run(
+                llm,
+                user_id=user_id,
+                project_ids=list(state.get("project_ids") or []),
+                messages=messages,
+                mode_config=state.get("mode_config") or {},
+                enable_websearch=bool(state.get("enable_websearch")),
+                conversation_id=state.get("conversation_id") or None,
+                query=query,
+                rerank_limit=int(state.get("rerank_limit", 20) or 20),
+            )
+        except Exception as e:
+            logger.warning(f"深度取证失败, 降级为已有证据: {e}", exc_info=True)
+            return {
+                "deep_evidence": [],
+                "deep_events": [],
+                "deep_stop_reason": f"failed: {e}",
+            }
+
+        return {
+            "deep_evidence": result.get("deep_evidence") or [],
+            "deep_events": result.get("deep_events") or [],
+            "deep_stop_reason": result.get("deep_stop_reason"),
+            "knowledge_context_list": self._merge_knowledge(
+                state.get("knowledge_context_list"), result.get("knowledge_context_list")
+            ),
+            "web_results": self._merge_web(
+                state.get("web_results"), result.get("web_results")
+            ),
+            "skill_context": result.get("skill_context") or "",
+        }
+
+    @staticmethod
+    def _merge_knowledge(base: Any, extra: Any) -> list:
+        """合并基础检索片段与深度取证片段(按片段 ID 去重, 取证结果优先)"""
+        merged: list = []
+        seen: set[str] = set()
+        for chunk in [*(extra or []), *(base or [])]:
+            key = str(getattr(chunk, "id", "") or id(chunk))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(chunk)
+        return merged
+
+    @staticmethod
+    def _merge_web(base: Any, extra: Any) -> list:
+        """合并基础网络引用与深度取证引用(按 URL/标题去重, 取证结果优先)"""
+        merged: list = []
+        seen: set[str] = set()
+        for item in [*(extra or []), *(base or [])]:
+            key = str(getattr(item, "url", "") or getattr(item, "title", "") or id(item))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+        return merged
+
     async def _knowledge_search_node(self, state: RagChatState) -> dict:
         """知识库混合检索 + 可选联网搜索 + 合并 Rerank 精排
 
@@ -229,13 +484,23 @@ class RagChatService:
         rag_help_info: RagHelpInfo | None = state.get("rag_help_info")
         project_ids: list[str] = state.get("project_ids", [])
         user_id: str = state["user_id"]
-        deep_thinking: bool = state.get("deep_thinking", True)
+        # 本轮消息附件: 已入库用户问答知识库(temp), 存在时必须定向召回(不依赖模型主动调用)
+        attachment_names: list[str] = list(state.get("attachment_names") or [])
+        temp_kb_id: str = (state.get("temp_kb_id") or "").strip()
+        has_attachment = bool(attachment_names and temp_kb_id)
+        # 精排开关跟随执行模式(模式即 Agent): fast 档不单独精排, thinking/deep 档精排
+        exec_mode: str = state.get("exec_mode") or ""
+        deep_thinking: bool = exec_mode in ("thinking", "deep")
         enable_websearch: bool = state.get("enable_websearch", False)
         # state 中获取前端传来的 rerank_limit，若无则给默认值 20
         rerank_limit: int = state.get("rerank_limit", 20)
         search_limit: int = state.get("search_limit", 50)
-        # 不需要外部信息时跳过(显式清空联网状态, 防止 checkpointer 残留上一轮结果)
-        if not (project_ids and rag_help_info and rag_help_info.is_need_external_info):
+        # 不需要外部信息时跳过(显式清空联网状态, 防止 checkpointer 残留上一轮结果);
+        # 带附件时强制检索问答知识库, 不能被意图分析的"无需外部信息"提前跳过
+        if not (
+            has_attachment
+            or (project_ids and rag_help_info and rag_help_info.is_need_external_info)
+        ):
             return {
                 "knowledge_context_list": [],
                 "web_results": [],
@@ -245,28 +510,90 @@ class RagChatService:
 
         # 1. 知识库多路粗排: 向量路(语义 query) + 关键词路(全文 query)并行召回合并,
         #    (联网开启时粗排不做精排, 与网络结果合并后统一精排)
-        request = SearchRequest(
-            query_content=rag_help_info.vector_search,
-            keyword_query=rag_help_info.full_text_search,
-            project_ids=project_ids,
-            limit=search_limit,
-            rerank_limit=rerank_limit,
-            enable_rerank=deep_thinking and not enable_websearch,
-        )
+        # 检索重检次数由智能体 chat_modes.search_rounds 固定: 首轮零命中时换用
+        # 全文/原始问题 query 重检, 达到上限即停止(快速智能体的固定 RAG 流程)
+        mode_config: dict = state.get("mode_config") or {}
+        try:
+            search_rounds = max(1, int(mode_config.get("search_rounds", 1) or 1))
+        except (TypeError, ValueError):
+            search_rounds = 1
+        query_candidates: list[str] = []
+        if rag_help_info:
+            for q in (
+                rag_help_info.vector_search,
+                rag_help_info.full_text_search,
+                rag_help_info.intent,
+            ):
+                if q and q not in query_candidates:
+                    query_candidates.append(q)
+        if not query_candidates:
+            # 意图分析缺失(附件场景强制检索)时以用户原问题兜底
+            last = state["messages"][-1] if state.get("messages") else None
+            query_candidates = [str(getattr(last, "content", "") or "")]
+
+        # 1.0 附件定向召回: 先只在问答知识库内检索并置前, 避免被其它知识库片段挤占,
+        #     保证"上传文件后提问"一定能发现附件内容(业界会话附件语料做法)
+        attachment_chunks: list[ProjectDocumentChunkSearchResponse] = []
+        if has_attachment:
+            attachment_query = query_candidates[0]
+            try:
+                attachment_chunks = await self.project_document_chunk_service.search(
+                    SearchRequest(
+                        query_content=attachment_query,
+                        keyword_query=attachment_query,
+                        project_ids=[temp_kb_id],
+                        limit=search_limit,
+                        rerank_limit=rerank_limit,
+                        enable_rerank=False,
+                    ),
+                    user_id,
+                )
+                logger.info(
+                    f"[Search] 附件定向召回 | 文件={len(attachment_names)} "
+                    f"片段={len(attachment_chunks)}"
+                )
+            except Exception as e:
+                logger.warning(f"附件定向检索失败(继续常规检索): {e}")
+
         knowledge_context_list: list[ProjectDocumentChunkSearchResponse] = []
         search_error: str | None = None
-        try:
-            knowledge_context_list = await self.project_document_chunk_service.search(request, user_id)
-        except Exception as e:
-            # 检索失败(模型网络错误/无 embedding 模型等)与"确实无相关片段"语义不同,
-            # 错误原因写入 state, 由 SEARCH 节点结束事件透传到前端过程区块
-            logger.warning(f"知识库检索失败: {e}")
-            search_error = str(e)
+        for idx, query_content in enumerate(query_candidates[:search_rounds]):
+            request = SearchRequest(
+                query_content=query_content,
+                keyword_query=(
+                    rag_help_info.full_text_search if rag_help_info and idx == 0
+                    else query_content
+                ),
+                project_ids=project_ids,
+                limit=search_limit,
+                rerank_limit=rerank_limit,
+                enable_rerank=deep_thinking and not enable_websearch,
+            )
+            try:
+                knowledge_context_list = await self.project_document_chunk_service.search(
+                    request, user_id
+                )
+            except Exception as e:
+                # 检索失败(模型网络错误/无 embedding 模型等)与"确实无相关片段"语义不同,
+                # 错误原因写入 state, 由 SEARCH 节点结束事件透传到前端过程区块
+                logger.warning(f"知识库检索失败: {e}")
+                search_error = str(e)
+                break
+            if knowledge_context_list:
+                break
+
+        # 附件片段置前 + 常规检索片段按 ID 去重追回(附件内容优先进入上下文)
+        if attachment_chunks:
+            seen_ids = {str(chunk.id) for chunk in attachment_chunks}
+            knowledge_context_list = [
+                *attachment_chunks,
+                *(c for c in knowledge_context_list if str(c.id) not in seen_ids),
+            ]
 
         # 2. 联网搜索(失败静默降级, 不阻断知识库链路); 使用意图分析产出的联网专用 query
         web_results: list[WebCitation] = []
         web_search_error: str | None = None
-        if enable_websearch:
+        if enable_websearch and rag_help_info:
             ws = await get_websearch_settings()
             try:
                 response = await WebSearchService().search(
@@ -302,7 +629,7 @@ class RagChatService:
                 try:
                     merged = await self.project_document_chunk_service.rerank_candidates(
                         rerank_llm,
-                        rag_help_info.vector_search,
+                        query_candidates[0],
                         candidates,
                         rerank_limit,
                     )
@@ -417,6 +744,12 @@ class RagChatService:
             system_prompt += RAG_SUPPLEMENT_CONTEXT_TEMPLATE.format(
                 supplement_content=supplement_content
             )
+        # 技能产出单独注入(与检索证据区分, 模型知道它是技能产物, §3.3)
+        skill_context: str | None = state.get("skill_context")
+        if skill_context:
+            system_prompt += RAG_SKILL_CONTEXT_TEMPLATE.format(
+                skill_context=skill_context
+            )
 
         # 按模型输入上限动态裁剪历史: 先扣除 system prompt 与输出预留, 再裁剪历史
         input_tokens = await self.user_model_service.get_chat_input_tokens(user_id)
@@ -425,11 +758,19 @@ class RagChatService:
         messages = messages_trim_with_max_tokens(
             list(state["messages"]), max_tokens=history_budget
         )
-        full_response = await llm.ainvoke(
-            [SystemMessage(content=system_prompt)] + messages
-        )
+        # 用量元数据: 模型标识(思考模式包装前取) + 实际输入 token(system prompt + 裁剪后历史)
+        model_name = getattr(llm, "model_name", None) or getattr(llm, "model", None)
+        # 思考档位跟随智能体配置: 快速智能体 off, 思考智能体默认开启(可配置)
+        mode_config = state.get("mode_config") or {}
+        llm = with_think_mode(llm, str(mode_config.get("think_level") or "off"))
+        chat_messages = [SystemMessage(content=system_prompt)] + messages
+        full_response = await llm.ainvoke(chat_messages)
         return {
             "messages": [full_response],
+            "usage_meta": {
+                "model_name": model_name,
+                "prompt_tokens": messages_tokens(chat_messages),
+            },
             # 清理交互状态: 本轮流交互闭环, 防止残留影响后续问题
             "pending_interaction": None,
             "interaction_response": None,
@@ -490,103 +831,6 @@ class RagChatService:
                 return value or "请基于知识库重新检索并回答我之前的问题"
         return value or f"（{kind} 响应: {action}）"
 
-    # ──────────────────────────────────────────────
-    # 临时文件(会话附件, 不入知识库)
-    # ──────────────────────────────────────────────
-
-    async def parse_temp_file(self, file, user_id: str = "") -> dict:
-        """解析会话临时文件为文本(不入知识库/向量): 纯文本直读, 版式/图片走 doc_parse Skill。
-
-        版式/图片分支经 SkillRuntime 调 sys.doc_parse(interactive 优先级,
-        REQ-018 批次 2): 与知识库入库/调试台同一条运行链路, 附件解析在
-        skill_invocation 可追溯; 超时按 inline 硬超时约束(超上限文件已前置拒绝)。
-
-        :param file: 上传的文件对象(UploadFile)
-        :return: {file_name, content, chars, truncated}
-        :raises BusinessError: 类型不支持/超限/解析失败
-        """
-        from pathlib import Path as _Path
-        import shutil
-        import tempfile
-
-        import aiofiles
-
-        from module_rag.do.project_document import DocType
-
-        name = file.filename or "未命名"
-        ext = _Path(name).suffix.lstrip(".").lower()
-        if not (DocType.is_allowed_extension(ext) or ext in TEMP_TEXT_EXTS):
-            allowed = "/".join((*DocType.ALLOWED_EXTENSIONS, *sorted(TEMP_TEXT_EXTS)))
-            raise BusinessError(f"不支持的临时文件类型 '{ext}', 允许: {allowed}")
-
-        # 流式读取并限长(分片 await 读, 大文件不占事件循环)
-        buf = bytearray()
-        while True:
-            chunk = await file.read(512 * 1024)
-            if not chunk:
-                break
-            buf.extend(chunk)
-            if len(buf) > TEMP_MAX_FILE_BYTES:
-                raise BusinessError(
-                    f"文件过大(上限 {TEMP_MAX_FILE_BYTES // (1024 * 1024)}MB)"
-                )
-        data = bytes(buf)
-        if not data:
-            raise BusinessError("文件内容为空")
-
-        truncated = False
-        if ext in TEMP_TEXT_EXTS:
-            # 纯文本直读: utf-8 优先, gbk 兜底, 容错替换
-            try:
-                text = data.decode("utf-8")
-            except UnicodeDecodeError:
-                try:
-                    text = data.decode("gbk")
-                except UnicodeDecodeError:
-                    text = data.decode("utf-8", errors="replace")
-        else:
-            # 版式/图片: 落临时文件 → doc_parse Skill(interactive, 同链路可追溯) → markdown
-            from module_agent.service.skill_runtime import SkillContext, SkillRuntime
-
-            tmp_dir = tempfile.mkdtemp(prefix="rag_temp_file_")
-            tmp_path = _Path(tmp_dir) / f"src.{ext}"
-            try:
-                async with aiofiles.open(tmp_path, "wb") as fp:
-                    await fp.write(data)
-                envelope = await SkillRuntime().invoke(
-                    "sys.doc_parse",
-                    {
-                        "file_path": str(tmp_path),
-                        "filename": name,
-                        "size_hint": len(data),
-                    },
-                    SkillContext(
-                        user_id=user_id, priority_class="interactive", entry="agent"
-                    ),
-                    mode="inline",  # 附件场景同步等待结果; 超上限文件已前置拒绝
-                    timeout_s=90,
-                )
-            except BusinessError:
-                raise
-            except Exception as e:
-                logger.warning(f"临时文件解析失败 {name}: {e}")
-                raise BusinessError(f"文件解析失败: {e}") from e
-            finally:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-            if envelope.get("status") != "succeeded":
-                error = envelope.get("error") or {}
-                raise BusinessError(
-                    f"文件解析失败: {error.get('message') or '未知错误'}"
-                )
-            text = str((envelope.get("result") or {}).get("markdown") or "")
-
-        text = text.strip()
-        if not text:
-            raise BusinessError("未能从文件中提取到文本内容")
-        if len(text) > TEMP_MAX_FILE_CHARS:
-            text = text[:TEMP_MAX_FILE_CHARS]
-            truncated = True
-        return {"file_name": name, "content": text, "chars": len(text), "truncated": truncated}
 
     # ──────────────────────────────────────────────
     # 流式聊天入口
@@ -602,6 +846,7 @@ class RagChatService:
         流式聊天生成器，按事件类型 yield StreamOne:
         - STATUS:          阶段提示 (意图分析中 / 检索中)
         - AGENT_THINKING:  意图分析结果
+        - MODE_DECISION:   执行模式决策结论(模式即 Agent, §2.2)
         - TOOL_CALL:       知识库检索结果(含结构化 data)
         - LLM_THINKING:    LLM reasoning tokens (若模型支持)
         - ANSWER:          正式回答 token
@@ -626,16 +871,16 @@ class RagChatService:
 
         # 2. 持久化用户消息(交互响应空输入时用可读兜底文案)
         store_message = self._interaction_store_message(raw_message, normalized_response)
-        # 临时文件: 单条消息最多 TEMP_MAX_FILES 个, 用户消息 blocks 记附件标记(历史恢复附件芯片)
-        temp_files = (chat_request.temp_files or [])[:TEMP_MAX_FILES]
-        temp_blocks: list[dict] | None = (
+        # 附件: 已入库个人默认临时知识库, 用户消息 blocks 记附件标记(历史恢复附件芯片)
+        attachments = (chat_request.attachments or [])[:TEMP_MAX_FILES]
+        attachment_blocks: list[dict] | None = (
             [
                 {
                     "node_name": "",
                     "stream_event_type": StreamEventType.TEMP_FILE.value,
-                    "content": tf.name,
+                    "content": name,
                 }
-                for tf in temp_files
+                for name in attachments
             ]
             or None
         )
@@ -643,7 +888,7 @@ class RagChatService:
             conversation_id=conversation_id,
             role=RoleType.USER,
             content=store_message,
-            blocks=temp_blocks,
+            blocks=attachment_blocks,
         )
         await self.chat_message_service.add(chat_message_user)
 
@@ -652,23 +897,85 @@ class RagChatService:
         if enable_websearch is None:
             enable_websearch = (await get_websearch_settings()).rag_enable
 
-        # 临时文件以 SystemMessage 注入本 run: 经 checkpointer 持久, 后续追问仍可引用
-        # (内容超长截断; 前端仅在附件上传后的首次发送携带)
-        run_messages: list[AnyMessage] = [
-            SystemMessage(
-                content=f"【临时文件】{tf.name}(用户上传, 未入知识库, 供回答参考)\n\n{tf.content[:TEMP_MAX_FILE_CHARS]}"
-            )
-            for tf in temp_files
-        ]
-        run_messages.append(HumanMessage(content=store_message))
+        # 检索范围自动并入用户临时知识库(存在时): 附件已入库, 检索即可命中;
+        # kb_auto_only=用户未显式选择任何知识库(仅临时库并入), 检索零命中时
+        # 降级直接回答(见 _route_after_search), 保持纯聊天不被知识缺口交互打断
+        project_ids = list(chat_request.project_ids or [])
+        # 知识库三态: auto=未勾选时自动匹配有权限的知识库 / manual=仅用勾选项 / off=禁用
+        # (None=旧客户端行为: 空 project_ids 即本轮不检索知识库)
+        kb_mode = (chat_request.kb_mode or "").strip().lower()
+        if kb_mode not in ("auto", "manual", "off"):
+            kb_mode = "manual"
+        kb_auto_only = False
+        if kb_mode == "off":
+            project_ids = []
+        elif kb_mode == "auto" and not project_ids:
+            project_ids = await self._resolve_auto_projects(user_id)
+            # 自动范围由后端解析, 用户并未显式指定: 零命中时直接回答而不打断追问
+            kb_auto_only = True
+        kb_auto_only = kb_auto_only or not project_ids
+        # 问答知识库(会话附件入库)在非禁用态自动并入检索范围; 禁用态不检索任何知识库
+        temp_kb = None if kb_mode == "off" else await get_temp_kb(user_id)
+        if temp_kb and temp_kb.id not in project_ids:
+            project_ids.append(temp_kb.id)
+
+        run_messages: list[AnyMessage] = [HumanMessage(content=store_message)]
+
+        # 4. 解析执行智能体(模式即 Agent): 问答页只提供两个内置智能体,
+        #    执行方式与运行参数全部由 agent_id 决定; mode 仅作为旧客户端兼容
+        agent_key = (chat_request.agent_id or "").strip()
+        if not agent_key:
+            try:
+                conv = await self.conversation_service.get(conversation_id)
+                agent_key = ((conv.agent_id if conv else "") or "").strip()
+            except Exception as exc:
+                logger.warning(f"读取会话智能体失败(按未选智能体处理): {exc}")
+        # 智能体运行参数以库中配置为准(管理员可在智能体设置中调整)
+        agent_modes: dict = {}
+        if agent_key:
+            try:
+                from module_agent.service.agent import AgentService
+
+                agent_row = await AgentService().agent_dao.get(agent_key)
+                agent_modes = (agent_row.chat_modes if agent_row else None) or {}
+            except Exception as exc:
+                logger.warning(f"读取智能体运行参数失败(回退内置默认): {exc}")
+        requested_mode = (chat_request.mode or "").strip().lower()
+        if agent_key == "builtin_fast":
+            requested_mode = RequestedMode.FAST.value
+        elif agent_key == "builtin_thinking":
+            requested_mode = RequestedMode.THINKING.value
+        elif requested_mode not in (
+            RequestedMode.AUTO.value,
+            RequestedMode.FAST.value,
+            RequestedMode.THINKING.value,
+        ):
+            requested_mode = RequestedMode.AUTO.value
+        explicit_deep = False
 
         input_state: RagChatState = {
             "messages": run_messages,
-            "project_ids": chat_request.project_ids or [],
+            "project_ids": project_ids,
+            "kb_auto_only": kb_auto_only,
+            "temp_kb_id": temp_kb.id if temp_kb else "",
+            "attachment_names": attachments,
             "user_id": user_id,
-            "deep_thinking": chat_request.deep_thinking,
             "rerank_limit": getattr(chat_request, 'rerank_limit', 20), # 传递精排数量
             "enable_websearch": enable_websearch,
+            # ── REQ-019 模式即 Agent ──
+            "agent_key": agent_key,
+            "agent_chat_modes": agent_modes,
+            "requested_mode": requested_mode,
+            "explicit_deep": explicit_deep,
+            "conversation_id": conversation_id,
+            # 模式决策结果每轮重算(先清空, 防 checkpointer 残留上一轮)
+            "exec_mode": "",
+            "mode_reason": "",
+            "mode_config": None,
+            "deep_evidence": [],
+            "deep_events": [],
+            "deep_stop_reason": None,
+            "skill_context": None,
             # 联网状态先清空, SEARCH 节点按本轮结果覆写(防 checkpointer 残留上一轮)
             "web_results": None,
             "web_search_error": None,
@@ -684,6 +991,7 @@ class RagChatService:
 
         full_response = ""
         process_blocks: list[dict] = []
+        resolved = None  # 模型解析结果(用量记账取 model_id; try 内赋值)
         try:
             # 兜底链可感知(v4 4.3): 绑定失效回退公共模型时, 先推送 STATUS 提示数据流向变化
             resolved = await self.user_model_service.resolve_model(
@@ -756,18 +1064,72 @@ class RagChatService:
                     asyncio.create_task(
                         maybe_auto_title(conversation_id, user_id, store_message, full_response)
                     )
+                    # 旁路记录本轮问答用量(token + 成本快照, 失败不影响主流程;
+                    # 后台任务执行, 客户端中止/取消也不受影响)
+                    if resolved is not None:
+                        asyncio.create_task(
+                            self._record_usage(
+                                config,
+                                user_id,
+                                conversation_id,
+                                agent_key or None,
+                                requested_mode,
+                                resolved.model_id,
+                                full_response,
+                            )
+                        )
                 if cancelled:
                     raise
 
+    async def _record_usage(
+        self,
+        config: RunnableConfig,
+        user_id: str,
+        conversation_id: str,
+        agent_id: str | None,
+        requested_mode: str,
+        model_id: str | None,
+        full_response: str,
+    ) -> None:
+        """旁路记录本轮问答用量(token + 成本快照); 任何异常只告警, 不影响主流程
+
+        输入 token 取 chat 节点写入的 usage_meta(system prompt + 裁剪后历史),
+        输出 token 按 full_response 估算, 模型标识/单价按 resolved.model_id 查库。
+        """
+        try:
+            usage_meta: dict = {}
+            exec_mode = ""
+            try:
+                snapshot = await self.chat_compiled_graph.aget_state(config)
+                values = getattr(snapshot, "values", None) or {}
+                usage_meta = values.get("usage_meta") or {}
+                exec_mode = str(values.get("exec_mode") or "")
+            except Exception as e:
+                logger.warning(f"读取本轮用量元数据失败(按空口径记账): {e}")
+            await ChatUsageService().record(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                prompt_tokens=int(usage_meta.get("prompt_tokens") or 0),
+                completion_tokens=count_tokens(full_response) if full_response else 0,
+                agent_id=agent_id or None,
+                model_id=model_id,
+                model_name=usage_meta.get("model_name"),
+                mode=exec_mode or requested_mode,
+            )
+        except Exception as e:
+            logger.warning(f"记录问答用量失败 conversation={conversation_id}: {e}")
+
     @staticmethod
     def _accumulate_process_block(blocks: list[dict], item: StreamOne) -> None:
-        """按 stream_event_type 累积过程区块(供前端折叠区恢复显示)
+        """按 (事件类型, 节点名) 累积过程区块(供前端折叠区恢复显示)
 
-        data(结构化检索结果/交互请求等)随首条事件写入, 同类型合并时补写缺失键
+        data(结构化检索结果/交互请求等)随首条事件写入, 同类合并时补写缺失键;
+        按节点名细分, 使检索与深度取证等同类事件分属不同区块
         """
         evt = item.stream_event_type.value
+        node = item.node_name
         for b in blocks:
-            if b.get("stream_event_type") == evt:
+            if b.get("stream_event_type") == evt and b.get("node_name") == node:
                 b["content"] += item.content
                 if item.data is not None and "data" not in b:
                     b["data"] = item.data

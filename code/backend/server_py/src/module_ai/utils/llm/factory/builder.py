@@ -2,16 +2,14 @@
 
 支持方案(ModelServerType):
     - openai / dashscope: OpenAI 兼容协议(chat 走 ChatQwenWithReasoning 以保留思考内容)
-    - ollama: 本地 Ollama 协议
-    - aws: Bedrock Converse
     - vllm: 暂未实现(抛 ValueError)
+    (ollama/aws 已下线: Ollama 走其 OpenAI 兼容端点接入; 枚举值仅作存量库行读取兼容)
 """
 import logging
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import OpenAIEmbeddings
-from pydantic import SecretStr
 
 from module_ai.do.model_config import ModelConfig
 from module_ai.utils.llm.chat.think import ChatQwenWithReasoning
@@ -37,28 +35,6 @@ def build_chat_model(config: ModelConfig, streaming: bool = True) -> BaseChatMod
             streaming=streaming,
             temperature=config.temperature,
             extra_body={"enable_thinking": not config.no_think},
-        )
-    if config.server_type == ModelServerType.OLLAMA:
-        from langchain_ollama import ChatOllama
-
-        return ChatOllama(
-            model=config.model,
-            base_url=config.url,
-            streaming=streaming,
-            temperature=config.temperature,
-        )
-    if config.server_type == ModelServerType.AWS:
-        from langchain_aws import ChatBedrockConverse
-
-        aws_access_key_id = (config.extra or {}).get("aws_access_key_id")
-        region_name = (config.extra or {}).get("region_name")
-        return ChatBedrockConverse(
-            provider="anthropic",
-            model=config.model,
-            aws_access_key_id=SecretStr(aws_access_key_id),
-            aws_secret_access_key=SecretStr(config.api_key),
-            region_name=region_name,
-            max_tokens=config.out_tokens,
         )
     raise ValueError(f"服务方案 {config.server_type} 的对话模型暂未实现")
 
@@ -91,25 +67,6 @@ def build_embeddings(config: ModelConfig) -> Embeddings:
             dimensions=dimensions,
             # qwen 系模型向量化长度检查关闭
             check_embedding_ctx_length=False,
-        )
-    if config.server_type == ModelServerType.OLLAMA:
-        from langchain_ollama import OllamaEmbeddings
-
-        return OllamaEmbeddings(
-            model=config.model,
-            base_url=config.url,
-            dimensions=config.out_tokens,
-        )
-    if config.server_type == ModelServerType.AWS:
-        from langchain_aws import BedrockEmbeddings
-
-        aws_access_key_id = (config.extra or {}).get("aws_access_key_id")
-        region_name = (config.extra or {}).get("region_name")
-        return BedrockEmbeddings(
-            model_id=config.model,
-            aws_access_key_id=SecretStr(aws_access_key_id),
-            aws_secret_access_key=SecretStr(config.api_key),
-            region_name=region_name,
         )
     raise ValueError(f"服务方案 {config.server_type} 的向量化模型暂未实现")
 
@@ -160,15 +117,6 @@ def build_rerank_model(config: ModelConfig) -> Rerank:
             model=config.model,
             base_url=config.url
             or "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank",
-            score_min=score_min,
-            score_max=score_max,
-        )
-    if config.server_type == ModelServerType.OLLAMA:
-        from module_ai.utils.llm.rerank.impl.ollama import OllamaRerank
-
-        return OllamaRerank(
-            model=config.model,
-            base_url=config.url or "http://localhost:11434/api/rerank",
             score_min=score_min,
             score_max=score_max,
         )

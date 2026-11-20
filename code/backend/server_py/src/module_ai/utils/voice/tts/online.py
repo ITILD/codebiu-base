@@ -8,7 +8,6 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Iterator, Tuple
 
-from module_ai.utils.voice.dashscope_ws import DashscopeStreamTTS
 from module_ai.utils.voice.interface import TTSEngine
 from module_ai.utils.voice.tts.dashscope import DashscopeTTS
 
@@ -85,6 +84,9 @@ class OnlineTTS(TTSEngine):
         ws_conf["rate"] = speed
         if speaker:
             ws_conf.setdefault("voice", str(speaker))
+        # 懒加载 WS 流式实现(导入 dashscope_ws → aiohttp, 未用语音不常驻内存)
+        from module_ai.utils.voice.dashscope_ws import DashscopeStreamTTS
+
         stream = DashscopeStreamTTS(ws_conf)
         async for pcm_chunk, out_sr, is_final in stream.stream(text, sample_rate):
             yield pcm_chunk, out_sr, is_final

@@ -10,6 +10,7 @@ authors = [
 ]
 
 dependencies = [
+    # WebSocket 客户端(dashscope 实时语音); 普通 HTTP 统一走 httpx
     "aiohttp>=3.12.15",
     "aiofiles>=25.1.0",
     # 权限
@@ -26,7 +27,7 @@ dependencies = [
     "pwdlib[argon2]>=0.2.1",
     "python-multipart>=0.0.20",
     "pyyaml>=6.0.2",
-    "requests>=2.32.5",
+    # HTTP 客户端统一 httpx(同步/异步双模); requests 仅作为 docker SDK 等的传递依赖保留
     "sqlmodel>=0.0.24",
     # SQLAlchemy 2.1 起 greenlet 仅随 asyncio extra 分发(异步引擎运行时必需)
     "sqlalchemy[asyncio]>=2.1.5",
@@ -37,15 +38,12 @@ dependencies = [
     # Python 3.14 需 >=4.13 才有 cp314 wheel; 若环境再遇 cv2 二进制加载失败可临时回加上界
     "opencv-python-headless>=4.13",
     "pillow>=11.3.0",
-    "beautifulsoup4>=4.14.3",
-    "lxml>=6.0.2",
+    "beautifulsoup4>=4.14.3",  # 解析用标准库 html.parser, 未装 lxml
     # 语音 asr/tts(在线外部服务, 音频解码/重采样)
     "soundfile>=0.13.1",
     # langchain
     "langchain>=1.2.15",
     "langchain-openai>=1.1.0",
-    "langchain-aws>=1.1.0",
-    "langchain-ollama>=1.0.1",
     "langchain-text-splitters>=1.1.0",
     # databases(生产栈: postgres + redis + milvus + S3/rustfs)
     "asyncpg>=0.30.0",
@@ -68,6 +66,7 @@ dependencies = [
     "aiosmtplib>=5.1.2",
     "rich>=15.0.0",
     "defusedxml>=0.7.1",
+    "docker>=7.1.0",
 ]
 
 [dependency-groups]

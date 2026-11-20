@@ -44,7 +44,10 @@ async def _run_ingest(task_id: str) -> dict:
         task_id, status="running", message="组装入库编排", set_started=True
     )
 
-    documents = [{"document_id": str(document_id)} for document_id in _collect_documents(payload)]
+    documents = [
+        {"document_id": str(document_id)}
+        for document_id in await _collect_documents(payload)
+    ]
     if not documents:
         await update_task_fields(
             task_id, status="success", progress=100, message="无可解析文档",

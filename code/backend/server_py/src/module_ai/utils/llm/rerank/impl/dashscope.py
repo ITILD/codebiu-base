@@ -1,11 +1,11 @@
 """DashScope 重排实现"""
 
+import httpx
+
 from module_ai.utils.llm.rerank.interface import Rerank
-import aiohttp
-import requests
 
 # 重排序接口超时(秒): 检索链路强依赖, 无超时易整体挂起
-_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=60)
+_REQUEST_TIMEOUT = 60.0
 
 
 class DashscopeRerank(Rerank):
@@ -58,7 +58,7 @@ class DashscopeRerank(Rerank):
     def rerank(self, query, documents, top_n=None) -> list:
         """同步文本重排序函数"""
         payload, headers = self._build_payload_and_headers(query, documents, top_n)
-        response = requests.post(self.base_url, headers=headers, json=payload)
+        response = httpx.post(self.base_url, headers=headers, json=payload, timeout=_REQUEST_TIMEOUT)
         response.raise_for_status()
         result = response.json()
         result = self._result_to_list(result)
@@ -67,17 +67,13 @@ class DashscopeRerank(Rerank):
     async def arerank(self, query, documents, top_n=None) -> list:
         """异步文本重排序函数(带超时与状态校验, 错误时抛出响应体便于排查)"""
         payload, headers = self._build_payload_and_headers(query, documents, top_n)
-        async with aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session:
-            async with session.post(
-                self.base_url, headers=headers, json=payload
-            ) as response:
-                if response.status >= 400:
-                    body = await response.text()
-                    raise RuntimeError(
-                        f"Dashscope 重排序请求失败({response.status}): {body[:500]}"
-                    )
-                result = await response.json()
-                return self._result_to_list(result)
+        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+            response = await client.post(self.base_url, headers=headers, json=payload)
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Dashscope 重排序请求失败({response.status_code}): {response.text[:500]}"
+                )
+            return self._result_to_list(response.json())
 
 
 if __name__ == "__main__":

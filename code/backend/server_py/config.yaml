@@ -126,10 +126,10 @@ token:
   expire_minutes: 30
   refresh_expire_days: 20
 
-# 默认公共模型种子: 基线不启用(reset_models=false); 本地覆盖示例见 config.dev.yaml
-# (chat/embeddings/rerank/asr/tts/ocr 全部为外部服务接入, api_key 放 config.dev.yaml)
+# 默认公共模型种子: 基线不启用(reset_model=false); 多模型列表示例见 config.dev.yaml
+# (models 列表中同类型可配置多个, 但每类只能有一个 is_default=true 的主模型)
 default_models:
-  reset_models: false
+  reset_model: false
 
 
 

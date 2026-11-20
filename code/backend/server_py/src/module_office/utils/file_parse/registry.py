@@ -18,6 +18,7 @@ from module_office.utils.file_parse.base import BaseParser
 from module_office.utils.file_parse.mineru import MinerUParser
 from module_office.utils.file_parse.office import OfficeParser
 from module_office.utils.file_parse.paddleocr import PaddleOCRParser
+from module_office.utils.file_parse.text import TextParser
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,18 @@ class EngineRegistry:
 
 # 模块级单例: 新引擎在此登记即可接入, 上层服务无需改动
 engine_registry = EngineRegistry()
+
+# 纯文本本地: txt/md/log/json/csv 直读解码, 优先级最高(无需外部服务, 零依赖零降级)
+engine_registry.register(
+    EngineDescriptor(
+        name="text-local",
+        label="本地文本解析",
+        suffixes=frozenset({".txt", ".md", ".log", ".json", ".csv", ".tsv"}),
+        capabilities=frozenset({EngineCapability.TEXT}),
+        parser_cls=TextParser,
+        priority=5,
+    )
+)
 
 # MinerU: 版式文档 / 图片 / 原生 Office 文档的整文件解析(MinerU 4.0 支持面)
 engine_registry.register(

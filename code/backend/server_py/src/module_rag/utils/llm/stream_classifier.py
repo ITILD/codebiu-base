@@ -138,6 +138,47 @@ class StreamEventClassifier:
                 data=self._structured_search(output),
             )
 
+        elif node_name == GraphNode.RESOLVE_MODE:
+            # 模式决策结论(模式即 Agent): 前端展示"为什么是这个模式"
+            reason = str(output.get("mode_reason") or "")
+            yield StreamOne(
+                content=reason,
+                node_name=node_name,
+                stream_event_type=StreamEventType.MODE_DECISION,
+                data={
+                    "requested_mode": output.get("requested_mode"),
+                    "exec_mode": output.get("exec_mode"),
+                    "reason": reason,
+                },
+            )
+
+        elif node_name == GraphNode.DEEP:
+            # 深度取证事件(有界 ReAct)与证据摘要
+            yield StreamOne(
+                content=self._format_deep(output),
+                node_name=node_name,
+                stream_event_type=StreamEventType.TOOL_CALL,
+                data=self._structured_deep(output),
+            )
+            # 技能熔断结构化下发(REQ-002 §6.1: agent.skill_masked), 前端可提示而非只读文本
+            for ev in output.get("deep_events") or []:
+                if not isinstance(ev, dict) or ev.get("type") != "skill_masked":
+                    continue
+                skill_key = str(ev.get("tool_name") or ev.get("skill_key") or "")
+                yield StreamOne(
+                    content=str(
+                        ev.get("content")
+                        or f"技能 {skill_key} 连续失败, 已在本次执行中摘除"
+                    ),
+                    node_name=node_name,
+                    stream_event_type=StreamEventType.TOOL_CALL,
+                    data={
+                        "event_type": "agent.skill_masked",
+                        "skill_key": skill_key,
+                        "reason": str((ev.get("data") or {}).get("reason") or ""),
+                    },
+                )
+
         elif node_name in (GraphNode.CLARIFY, GraphNode.GAP):
             spec = output.get("pending_interaction")
             if isinstance(spec, dict):
@@ -301,3 +342,49 @@ class StreamEventClassifier:
                 if len(web_results) > 5:
                     lines.append(f"…其余 {len(web_results) - 5} 条略")
         return "\n".join(lines)
+
+    @staticmethod
+    def _structured_deep(output: dict) -> dict:
+        """深度取证的结构化载荷(AG-UI TOOL_CALL_RESULT)
+
+        含收尾原因、证据摘要与执行事件(工具调用/技能熔断), 前端免正则解析
+        """
+        evidence = output.get("deep_evidence") or []
+        events = output.get("deep_events") or []
+        return {
+            "tool_name": "deep_agent",
+            "stop_reason": output.get("deep_stop_reason"),
+            "evidence_count": len(evidence),
+            "evidence": evidence,
+            "events": events,
+        }
+
+    @staticmethod
+    def _format_deep(output: dict) -> str:
+        """格式化深度取证过程(工具调用摘要 + 证据统计 + 收尾原因)"""
+        lines: list[str] = []
+        events = output.get("deep_events") or []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("type") or "")
+            if event_type == "tool_call":
+                tool_name = event.get("tool_name") or "tool"
+                status = event.get("status") or ""
+                elapsed = event.get("elapsed_ms")
+                detail = f"{tool_name}"
+                if status:
+                    detail += f"（{status}）"
+                if isinstance(elapsed, (int, float)):
+                    detail += f" {int(elapsed)}ms"
+                lines.append(f"- 调用 {detail}")
+            elif event_type == "skill_masked":
+                lines.append(f"- {event.get('content') or '技能已熔断'}")
+
+        evidence = output.get("deep_evidence") or []
+        if evidence:
+            lines.append(f"共取得 {len(evidence)} 条证据")
+        stop_reason = output.get("deep_stop_reason")
+        if stop_reason:
+            lines.append(f"取证收尾: {stop_reason}")
+        return "\n".join(lines) if lines else "深度取证无额外证据"

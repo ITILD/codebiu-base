@@ -2,7 +2,7 @@
 
 **简体中文** ｜ [English](README.en.md)
 
-多平台快速开发部署基线：前后端分离 + 文档 + 运维一体化。保留注册登录、权限、AI + RAG、文件、字典、主程序检测等通用底座，剥离业务模块与 torch/transformers 等重型依赖，新项目可直接复制起步。
+新一代 **AI 能力平台基线**：以 **Model（模型）/ Skill（技能）/ Agent（智能体）** 三层一等公民为架构主轴，前后端分离、文档与运维一体化。保留注册登录、权限、文件、字典、动态配置、RAG、任务队列等通用底座；新项目复制本仓库后，按「先归类三层，再写业务代码」的方式扩展，不污染公共底座。
 
 ## 界面预览
 
@@ -32,26 +32,50 @@ codebiu_base/
 ├── code/backend/server_py/  # 后端基线：Python 3.13 + FastAPI + SQLAlchemy 2.0(异步) + PostgreSQL/SQLite
 ├── code/frontend/vue3/      # 前端基线：Vue3 + TypeScript + Vite + Element Plus + UnoCSS + Pinia
 ├── code/frontend/flutter/   # 跨端客户端基线：Flutter（Android/iOS/Linux/Windows/macOS 手机尺寸界面）
-├── doc/                     # 项目级文档：入门 / 设计 / 跨端规范 / 测试报告
+├── doc/                     # 项目级文档：入门 / 设计 / 跨端规范 / 测试报告 / 开发 Skill
+│   ├── 02-设计文档/04-AI能力平台架构设计.md   # 三层契约唯一权威
+│   ├── 02-设计文档/05-对话智能体与执行协议设计.md
+│   ├── 05-开发skill/        # 纯 Markdown prompt skill（可拖入 AI IDE / AI 自动发现）
+│   └── doc-manifest.yaml    # 机器可读文档清单与代码映射
 ├── deveops/                 # 部署运维：环境、Docker、构建发布、初始化、版本升级、备份恢复、客户端打包
 ├── README.md                # 项目总览（简体中文）
 ├── README.en.md             # 项目总览（English，与中文版镜像同步）
-└── README_AI.md             # AI 协作总入口（全局流程 + 分层规则地图）
+└── README_AI.md             # AI IDE 唯一入口（全局流程 + 文档先行门禁 + 分层规则地图）
 ```
+
+## 架构主轴：Model / Skill / Agent
+
+平台只认三种一等公民，抽象与能力逐级增大；每层都有 **ai / static / hybrid** 三种能力来源，规则能力与 AI 能力在契约、队列、治理上完全平权。
+
+```text
+Agent 编排层   ai_agent(ReAct) │ static_agent(固定工作流) │ hybrid
+      │        例：kb_ingest_agent、builtin_thinking、ops_agent
+Skill 能力层   ai_skill │ static_skill │ hybrid
+      │        例：doc_parse、doc_chunk_index、sys.container_*
+Model 供给层   ai_model(chat/embeddings/rerank/ocr/asr/tts) │ static_func(固定规则函数)
+      │        例：Qwen 主模型、MinerU 解析引擎(经 Skill 包装)、哈希/正则/校验器
+Service 领域层 领域逻辑 / 事务 / 权限过滤 / DAO（既有，不变）
+```
+
+- **依赖单向**：`Agent → Skill → Model(可选) → Service`；Model 不调用任何东西，Skill 不互相编排，Agent 不调用 Agent。
+- **三条入口一个运行时**：页面 Controller、对话 Agent Tool Adapter、Celery Task Executor 全部汇合到 `SkillRuntime.invoke()`，同一 Skill 只有一份实现，inline / queued 只是两种外壳。
+- **零模型可运行**：`static_func / static_skill / rule Agent` 在无任何模型配置时仍可运行；不强制使用 AI。
+- **新功能先归类**：模型或固定规则函数 → Model；单次、可复用的执行单元 → Skill；多步编排或会话上下文 → Agent；普通 CRUD / 展示 → Controller + Service。
+
+权威契约见 [04-AI能力平台架构设计](doc/02-设计文档/04-AI能力平台架构设计.md)，对话执行协议见 [05-对话智能体与执行协议设计](doc/02-设计文档/05-对话智能体与执行协议设计.md)。
 
 ## 核心能力
 
-| 域 | 能力 |
+| 层 / 域 | 能力 |
 | :--- | :--- |
-| **认证权限** | 注册登录（支持邮箱验证码开关）、JWT 双令牌、Casbin 域分离 RBAC（菜单/按钮/接口）、项目级数据权限（成员/部门三档位） |
-| **AI** | 模型动态配置（按用户/部门隔离 public/dept/user）、LLM 流式对话、重排、OCR、语音 ASR/TTS（纯在线服务接入，无本地大模型） |
-| **RAG** | 知识库项目/文档/成员/部门授权、文档解析（MinerU 外部服务调用，接口可扩展其他解析服务）、分块向量化（Milvus/LanceDB）、意图分析问答 |
-| **文件** | 虚拟文件树、上传下载、预签名 URL、秒传去重、引用计数、local/S3 存储切换、在线预览 |
-| **通用** | 字典管理、健康检测（CPU/内存/磁盘/网络）、数据监测、通用动态配置中心、异步任务队列（Celery worker 独立进程）、通知中心、操作审计 |
-| **跨端客户端** | Flutter「对话即入口」AI 助手：登录注册/用户中心/知识库管理/智能体配置；在线（LLM 流式）与本地（离线助手）双模式；会话历史本地持久化；新对话空态功能卡片为后续新功能默认入口 |
-| **工程** | uv / pnpm 包管理、docker 开发部署、SQLite + Fakeredis 本地组合（向量库默认 Milvus，零依赖可切 LanceDB）、Alembic 数据库迁移、两套前端主题模板（toB/toC） |
+| **Model 供给层** | 模型动态配置（按用户/部门隔离 public/dept/user 三作用域）、LLM 对话/Embeddings/Rerank/OCR/ASR/TTS 纯在线接入、`static_func` 固定规则函数注册表（哈希、格式识别、正则抽取、校验器） |
+| **Skill 能力层** | Skill Manifest 契约（input/output schema、幂等键、执行形态、能力声明）、SkillRuntime 统一调用、内置/自定义/社区 SKILL.md 包/MCP 适配、`doc_parse`、`doc_chunk_index`、`sys.container_*`、prompt 与 script 沙箱 |
+| **Agent 编排层** | `ai_agent` 有界 ReAct、`static_agent` 固定工作流、`hybrid`、内置对话 Agent（fast / thinking / deep）、五拍协议与验收闸门、`kb_ingest_agent`、`ops_agent` |
+| **执行与观测** | 三条触发入口、物理队列（`q_interactive` / `q_agent_job` / `q_task`）、`skill_invocation`、`agent_job_run`、`agent_plan_item` / `agent_plan_event` |
+| **通用底座** | 注册登录（邮箱验证码开关）、JWT 双令牌、Casbin 域分离 RBAC、项目级数据权限、文件虚拟树/秒传/预签名、字典、动态配置中心、通知中心、操作审计、健康检测、Celery 任务队列 |
+| **工程** | uv / pnpm 包管理、Docker 开发部署、SQLite + Fakeredis 零依赖组合（向量库默认 Milvus，零依赖可切 LanceDB）、Alembic 数据库迁移、两套前端主题模板（toB/toC） |
 
-> 上表只做概览；模块划分、数据流与能力边界的权威描述见 [总体架构与功能设计](doc/02-设计文档/02-总体架构与功能设计.md)，需求台账见 [需求功能登记册](doc/02-设计文档/00-需求功能登记册.md)。
+> 上表只做概览；三层契约、执行协议与能力边界的权威描述见 [04-AI能力平台架构设计](doc/02-设计文档/04-AI能力平台架构设计.md) 与 [05-对话智能体与执行协议设计](doc/02-设计文档/05-对话智能体与执行协议设计.md)，需求台账见 [需求功能登记册](doc/02-设计文档/00-需求功能登记册.md)。
 
 ## 快速开始
 
@@ -78,7 +102,7 @@ flutter run -d linux          # 桌面；真机用 flutter devices 查 id 后 -d
 
 默认管理员：`admin / admin123`（`config.yaml` admin 段，首启入库后可在 通用配置页 修改）。
 
-- 大模型能力需在覆盖层 `config.dev.yaml`（或 通用配置页）填入真实 API Key（对话/向量化/重排等）。
+- 大模型能力需在覆盖层 `config.dev.yaml`（或 通用配置页）填入真实 API Key（对话/向量化/重排等）；不配模型时 `static_*` 能力链路仍可运行。
 - 数据库 / docker 环境安装见 [开发环境配置](doc/01-入门/3-开发环境.md)；首次部署见 [配置与数据库初始化](deveops/运维手册/配置与数据库初始化.md)。
 - 各端完整参数、目录结构与排错见各端 README：[后端](code/backend/server_py/README.md) · [Web 前端](code/frontend/vue3/README.md) · [客户端](code/frontend/flutter/README.md)。
 
@@ -86,7 +110,7 @@ flutter run -d linux          # 桌面；真机用 flutter devices 查 id 后 -d
 
 | 主题 | 入口 | 说明 |
 | :--- | :--- | :--- |
-| **toB 后台管理** | 登录后头像下拉「后台管理」→ `admin.vue` 工作台 | 侧边栏布局（SysSidebar + 面包屑），承载系统管理/文件/AI/知识库/任务/监控等后台页面 |
+| **toB 后台管理** | 登录后头像下拉「后台管理」→ `admin.vue` 工作台 | 侧边栏布局（SysSidebar + 面包屑），承载系统管理/文件/AI/知识库/技能与智能体/任务/监控等后台页面 |
 | **toC 主应用** | 首页 `index.vue` 入口卡 | 无侧边栏的独立前台（当前挂载知识库问答），面向终端用户 |
 
 功能边界与模块划分见 [总体架构与功能设计](doc/02-设计文档/02-总体架构与功能设计.md)；菜单与权限驱动方式见 [前端 05-权限与菜单](code/frontend/vue3/doc/dev/05-权限与菜单.md)。
@@ -97,13 +121,14 @@ flutter run -d linux          # 桌面；真机用 flutter devices 查 id 后 -d
 
 | 层 | 入口 | 读什么 |
 | :--- | :--- | :--- |
-| 项目级 | [doc/README.md](doc/README.md) | 文档总索引、需求登记册与需求卡、需求分析、总体架构、权限设计、跨端规范、测试报告 |
+| 项目级 | [doc/README.md](doc/README.md) | 文档总索引、需求登记册与需求卡、需求分析、总体架构、AI 三层架构、对话执行协议、权限设计、跨端规范、测试报告 |
+| 开发 Skill | [doc/05-开发skill/README.md](doc/05-开发skill/README.md) | 需求登记、三层归类、代码导入回收、文档同步巡检、模块骨架、交付验收（纯 Markdown，可拖入 AI IDE） |
 | 后端 | [server_py/doc](code/backend/server_py/doc/README.md) · [README](code/backend/server_py/README.md) | 分层与目录、配置初始化、数据库迁移、权限接入、AI 能力、性能、依赖、版本记录 |
 | Web 前端 | [vue3/doc](code/frontend/vue3/doc/README.md) · [README](code/frontend/vue3/README.md) | 自动路由、视觉主题、样式与响应式规范、菜单权限、版本记录 |
 | 客户端 | [flutter/doc](code/frontend/flutter/doc/README.md) · [README](code/frontend/flutter/README.md) | 开发部署与打包、四层分层方案、代码规范、新成员与 AI 协作指南、版本记录 |
 | 运维 | [deveops](deveops/README.md) | 环境准备、Docker 部署、打包构建、配置与数据库初始化、跨版本升级、备份恢复 |
 
-**AI 协作**：先读 [README_AI.md](README_AI.md)（全局门禁与硬规则），再按需进入 [后端 AI 规则](code/backend/server_py/README_AI.md)、[前端 AI 规则](code/frontend/vue3/README_AI.md) 或 [客户端 AI 规则](code/frontend/flutter/README_AI.md)。
+**AI 协作**：先读 [README_AI.md](README_AI.md)（AI IDE 唯一入口、文档先行门禁、代码-文档同步协议），再按需进入 [后端 AI 规则](code/backend/server_py/README_AI.md)、[前端 AI 规则](code/frontend/vue3/README_AI.md) 或 [客户端 AI 规则](code/frontend/flutter/README_AI.md)。
 
 **部署与版本迁移**：
 
@@ -111,15 +136,28 @@ flutter run -d linux          # 桌面；真机用 flutter devices 查 id 后 -d
 - [版本升级与数据库迁移](deveops/运维手册/版本升级与数据库迁移.md)：已上线系统从版本 A 升到 B、数据兼容、回滚。
 - [后端数据库迁移机制](code/backend/server_py/doc/dev/04-数据库迁移.md)：Alembic 脚本编写与命令。
 
-**客户端打包发布**：[deveops/运维脚本/app_realse](deveops/运维脚本/app_realse/build_flutter_desktop.sh) 一键产出桌面端（Linux AppImage + tar.gz，`build_flutter_desktop.sh`）与手机端（Android 分架构 APK，`build_flutter_mobile.sh`）；产物统一在 `dist/`。Windows exe 需在 Windows 机器（Visual Studio）上构建。
+**客户端打包发布**：[deveops/运维脚本/4-客户端](deveops/运维脚本/4-客户端/) 一键产出桌面端（Linux AppImage + tar.gz，`build_desktop.sh`）与手机端（Android 分架构 APK，`build_android.sh`）；产物统一在 `dist/`。Windows exe 需在 Windows 机器（Visual Studio）上构建。
 
-## 新模块扩展指南
+## 新功能扩展指南
 
-| 端 | 复制/新建位置 | 必读 |
+**第一步永远是归类，而不是直接写代码。** 判定树与契约见 [04-AI能力平台架构设计 §2.6](doc/02-设计文档/04-AI能力平台架构设计.md)。
+
+| 需求类型 | 放哪 | 必读 |
 | :--- | :--- | :--- |
-| 后端 | 复制 `src/module_template/` → `module_xxx/`，在 `src/app.py` 注册 import | [后端开发指南](code/backend/server_py/doc/dev/01-开发指南.md) · [权限接入FAQ](code/backend/server_py/doc/dev/06-权限接入FAQ.md) |
-| Web 前端 | `src/modules/xxx/`（api/components/pages/types 聚合，路由自动生成）+ `menu.ts` 菜单项 | [前端开发指南](code/frontend/vue3/doc/dev/01-开发指南.md) · [权限与菜单](code/frontend/vue3/doc/dev/05-权限与菜单.md) |
-| 客户端 | 在对话页空态 `_EmptyView._features` 注册功能卡片 → 新建 `lib/modules/xxx/` | [客户端开发指南](code/frontend/flutter/doc/dev/01-开发指南.md) |
+| **Model**：接入新模型 / 固定规则函数 | `model_config`（ai_model）或 `module_ai/functions/`（static_func），不新增业务代码 | 04 §2.2 |
+| **Skill**：单次、无状态、可复用执行单元 | `module_xxx/skills/<key>/manifest.py + impl.py`，薄包装调 Service | 04 §3.1、[后端开发指南](code/backend/server_py/doc/dev/01-开发指南.md) |
+| **Agent**：多步编排 / 会话角色 | 代码 Manifest 或 `module_agent/agents/`，优先 static_agent / 有界 ReAct | 04 §3.3、[05 执行协议](doc/02-设计文档/05-对话智能体与执行协议设计.md) |
+| **普通业务功能**：CRUD / 展示 / 审批流 | 后端 `module_xxx/`，前端 `src/modules/xxx/` + `menu.ts` | [开发流程](doc/03-规范/开发流程.md) |
+| **客户端功能** | 对话空态 `_EmptyView._features` 注册卡片 → `lib/modules/xxx/` | [客户端开发指南](code/frontend/flutter/doc/dev/01-开发指南.md) |
+
+## AI 协作与文档先行
+
+本仓库把「AI 可读、可执行」作为一等需求，而不是附加说明：
+
+1. **唯一 AI 入口**：[README_AI.md](README_AI.md)。任何 AI IDE 开始工作前必须先读它，再读 [doc/README.md](doc/README.md) 与对应端 `README_AI.md`。
+2. **文档先行门禁**：新需求先改 `doc/`（登记册 + 需求卡 + 设计/契约），状态置「已批准」后才允许写代码；缺陷/文档/纯重构/依赖升级走豁免，但仍要在登记册「变更记录」留痕。
+3. **代码-文档同步**：关键代码入口带 `@doc-sync` 标记，`doc/doc-manifest.yaml` 维护文档与代码映射；外部传入或手工修改的代码，合入前必须执行「代码导入与文档回收」流程。
+4. **开发 Skill**：[doc/05-开发skill/](doc/05-开发skill/README.md) 提供纯 Markdown prompt skill。可手工拖入 AI IDE，也可由 AI 自动发现；选中后在对话框补充本次细节即可。后期可平滑升级为带脚本的 skill。
 
 ## 版本管理
 
@@ -139,4 +177,4 @@ flutter run -d linux          # 桌面；真机用 flutter devices 查 id 后 -d
 
 ## 贡献方式
 
-分支 `dev` 开发，PR 审查后合入 `main`；遵循 [代码规范](doc/03-规范/代码规范.md) 与 [版本管理](doc/03-规范/版本管理.md)。功能需求先登记 [需求功能登记册](doc/02-设计文档/00-需求功能登记册.md) 并获批；缺陷/文档/纯重构/依赖升级走豁免。
+分支 `dev` 开发，PR 审查后合入 `main`；遵循 [代码规范](doc/03-规范/代码规范.md) 与 [版本管理](doc/03-规范/版本管理.md)。功能需求先登记 [需求功能登记册](doc/02-设计文档/00-需求功能登记册.md) 并获批，同时按 [文档先行流程](doc/05-开发skill/02-三层归类与文档先行.md) 更新设计与契约；缺陷/文档/纯重构/依赖升级走豁免。

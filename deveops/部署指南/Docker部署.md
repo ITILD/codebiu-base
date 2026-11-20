@@ -1,92 +1,138 @@
 # Docker 部署
-基于 `deveops/运维脚本/docker_dev/compose` 编排的一键部署。
 
-## 1. 编排内容
-`docker-compose.yml` 服务：
+四套独立编排，全部由 `deveops/运维脚本/` 下的 `ctl.sh` 控制。每套落到目标机器后只保留：
 
-| 服务 | 镜像 | 端口(宿主机:容器) | 用途 |
+```
+ctl.sh  docker-compose.yml  .env
+```
+
+## 1. 依赖环境（`1-依赖环境`）
+
+| 服务 | 镜像 | 默认宿主端口 | 用途 |
 | :--- | :--- | :--- | :--- |
-| nginx | nginx:alpine | 80:80 | 前端静态托管 + 后端反代 |
-| postgres | postgres:17（可换 postgis/postgis:17-3.5） | 15432:5432 | PostgreSQL；默认 `profiles: ["pg"]` 不启动，`ENABLE_PG=1` / `--profile pg` 开启 |
-| redis7 | redis:7.2.4 | 6379:6379 | 可选缓存 |
-| server_py | server_py:1.0.0 | `${SERVER_PORT:-3001}:6666` | 后端 API（容器内 6666） |
+| postgres | postgres:17 | 20001 | 业务库 |
+| redis | redis:7.2.4 | 20002 | 缓存 + Celery broker |
+| milvus | milvusdb/milvus:v3.0.4 | 20005 | 向量库（内置 etcd；对象存储复用 RustFS） |
+| rustfs | rustfs/rustfs:latest | 127.0.0.1:20006 / 20007 | S3 对象存储 / 控制台（仅本机） |
+| nginx | nginx:alpine | 80 / 443 | 文件服务 HTTPS 入口，反代 RustFS |
+| certbot | certbot/certbot | - | 签发与自动续期证书 |
 
-挂载约定(相对 `deveops/运维脚本/docker_dev/compose/`)：
-
-```
-compose/
-├── nginx/      html/(前端构建产物 vue3 dist/*)  conf/(覆盖 /etc/nginx/)  download/(静态下载资源)
-├── postgres/   data/(务必持久化备份)  init/(首次初始化 SQL,仅建库时执行)
-├── redis/      data/  redis.conf
-└── server_py/  config.yaml(挂载覆盖容器内配置)  config.dev.yaml  src/(源码挂载,热更新)  log/(日志落盘)  temp_source/(运行期文件)
-```
-
-## 2. 部署步骤
 ```bash
-# ① 构建后端镜像(见《打包构建》)
-cd code/backend/server_py
-docker build -f tools/docker_dev/Dockerfile.dev -t server_py:1.0.0 .
-
-# ② 构建前端并拷贝产物
-cd code/frontend/vue3
-pnpm i && pnpm run build
-cp -r dist/* <部署机>/deveops/运维脚本/docker_dev/compose/nginx/html/
-
-# ③ 调整配置
-#    - docker-compose.yml 中 POSTGRES_DB/USER/PASSWORD（默认 codebiu/codebiu/codebiu123）、SERVER_PORT
-#    - server_py/config.yaml 中 db_rel 连接(容器网络内用服务名 postgres)
-
-# ④ 启动（需要本地 PostgreSQL 时加 --profile pg）
-cd deveops/运维脚本/docker_dev/compose
-bash ctl.sh up          # 或 docker compose --profile pg up -d
-
-# ⑤ 验证
-docker compose ps
-curl http://127.0.0.1:3001/docs   # 后端 Swagger
-curl http://127.0.0.1/            # 前端首页
+cd deveops/运维脚本/1-依赖环境
+./ctl.sh up          # 首次自动生成 .env
+./ctl.sh status
+./ctl.sh logs milvus
 ```
 
-## 3. nginx 反代要点
-前端请求 `/base_server/*` 需反代到后端容器：
+数据目录在 `data/`，`./ctl.sh down` 只删容器，不删数据。
 
-```nginx
-location /base_server/ {
-    proxy_pass http://server_py:6666/;     # compose 网络内服务名:容器端口
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    # 大文件上传
-    client_max_body_size 200m;
-    # SSE 流式对话(必须关闭缓冲)
-    proxy_buffering off;
-    proxy_read_timeout 300s;
-}
-```
+### 文件服务 HTTPS
 
-## 4. 常用运维命令
 ```bash
-bash ctl.sh up              # 创建并启动全部服务(改配置后用这个)
-bash ctl.sh down            # 停止并移除容器(数据在宿主机,不丢)
-bash ctl.sh restart server_py   # 重启后端(换外挂代码/配置后)
-bash ctl.sh logs server_py      # 跟随日志
-bash ctl.sh status          # 查看各服务状态
-bash ctl.sh reload          # 只改 nginx conf 时热重载
+# .env
+FILE_DOMAIN=fs.example.com      # 解析到本机；建议用已备案主域名的子域名
+CERT_EMAIL=you@example.com
+NGINX_HTTP_PORT=80
+NGINX_HTTPS_PORT=443
 
-# 查看后端日志
-docker logs -f server_py --tail 200
-# 或挂载目录直接看
-tail -f server_py/log/*.log
+./ctl.sh cert        # certbot standalone 首次签发，随后启动 nginx
+```
+
+`./ctl.sh cert` 之后，certbot 容器用 webroot 每 12h 检查续期，nginx 每 12h reload 一次自动加载新证书。
+控制台不对公网开放，需要时用 SSH 隧道：`ssh -L 20007:127.0.0.1:20007 user@deps-host`，再访问 `http://127.0.0.1:20007`。
+
+签发后把后端 `file_system.endpoint_url` 改为 `https://fs.example.com`（已初始化过的实例在「系统管理→通用配置」改）。
+签名按 Host 计算，nginx 已透传 Host，预签名上传/下载可直接使用。
+
+> Milvus 默认未开启鉴权。首次部署时 `config.dev.yaml` 的 `db_vector.user/password` 留空即可；
+> 若库已初始化过，`db_cache/db_vector/file_system` 已落库，需到「系统管理→通用配置」页清空，改 yaml 不再生效。
+
+## 2. 主服务（`2-主服务`）
+
+| 服务 | 用途 | 默认宿主端口 |
+| :--- | :--- | :--- |
+| nginx | 前端静态页 + `/base_server` 反代 | 3002（HTTP）/ 443（HTTPS） |
+| server | 后端 API（容器内 6666） | 3001 |
+
+```bash
+cd deveops/运维脚本/2-主服务
+./build.sh --up      # 构建 + 生成部署目录 + 启动
+./update.sh          # 日常改代码（不重建镜像）
+```
+
+部署目录结构（`$DEPLOY_DIR`，默认 `~/a_apps/codebiu-base/server`）：
+
+```
+server/
+├── ctl.sh  docker-compose.yml  .env
+├── nginx/html/index/        # 前端 dist
+├── nginx/conf/conf.d/       # default.conf（HTTP 或 HTTPS，由 build.sh 选择）
+├── nginx/certs/             # fullchain.pem / privkey.pem（HTTPS 时）
+├── nginx/www/               # ACME 校验目录（certbot webroot）
+└── app/                     # src / config / log / temp_source
+```
+
+### 启用 HTTPS
+
+```bash
+# deploy.env
+ENABLE_HTTPS=1
+DOMAIN=app.example.com
+CERT_EMAIL=you@example.com
+NGINX_PORT=80          # 必须让公网 80 直达本机，否则无法签发
+NGINX_HTTPS_PORT=443
+```
+
+```bash
+./build.sh             # 生成部署目录（选 nginx.https.conf）
+./ctl.sh cert          # certbot 签发 + 复制证书 + 启动 nginx
+```
+
+- 首次签发用 `certbot standalone`（会短暂停 nginx 占用 80）；之后 certbot 容器用 webroot 每 12h 自动续期，nginx 每 12h `reload` 自动加载新证书。
+- 不用 certbot 时，把证书放到 `$DEPLOY_DIR/nginx/certs/{fullchain.pem,privkey.pem}` 再 `./ctl.sh up` 也一样。
+- `ctl.sh up` 在 HTTPS 配置下若发现证书缺失，只启动后端并提示先执行 `./ctl.sh cert`，避免 nginx 反复重启。
+
+
+## 3. 任务队列（`3-任务队列`）
+
+| 服务 | 用途 | 说明 |
+| :--- | :--- | :--- |
+| task_worker | 消费 `task_queue,q_interactive` | 副本数由 `TASK_REPLICAS` 控制 |
+| task_beat | 周期调度触发 | 全局单实例 |
+| host_probe | 主服务远程伸缩 worker | 需与主服务登记同一 token |
+
+```bash
+cd deveops/运维脚本/3-任务队列
+./build.sh --up
+./update.sh
+./ctl.sh scale 4     # 临时扩到 4 个 worker
+```
+
+任务机部署目录结构与主服务一致，只是没有 `nginx/` 和前端产物。
+
+## 4. 常用命令
+
+```bash
+./ctl.sh up          # 创建/更新并启动
+./ctl.sh stop        # 停止（保留容器）
+./ctl.sh down        # 停止并移除容器（数据保留）
+./ctl.sh restart     # 重启
+./ctl.sh logs        # 跟随日志
+./ctl.sh status      # 查看状态
 ```
 
 ## 5. 常见问题
+
 | 现象 | 处理 |
 | :--- | :--- |
-| 后端连不上数据库 | compose 网络内应使用服务名 `postgres`；宿主机库用 `host.docker.internal`(Linux 需 compose 中的 `extra_hosts` 行) |
-| 上传大文件 413 | nginx `client_max_body_size` 与后端 `file_system.max_size` 同时调大 |
-| AI 对话不流式 | nginx 该 location 必须 `proxy_buffering off` |
-| 改了 src 不生效 | 源码挂载仅热加载源码，依赖变化需重建镜像 |
+| 主服务连不上依赖 | 检查 `config.dev.yaml` 的 host/port；远程依赖需放行端口 |
+| 上传大文件 413 | 调大 `2-主服务/nginx.conf` 的 `client_max_body_size` 与后端 `file_system.max_size` |
+| AI 对话不流式 | nginx 的 `/base_server/` 必须保持 `proxy_buffering off` |
+| 改了代码不生效 | 主服务用 `update.sh`；任务队列用 `update.sh`（都会重启进程） |
+| 任务不执行 | 确认任务机 `ctl.sh status` 中 worker 正常，且 `config.dev.yaml` 的 Redis 配置一致 |
 
 ## 相关
+- [服务器管理（远程发布清单）](../运维脚本/5-服务器管理/README.md)
 - [打包构建](./打包构建.md)
 - [配置与数据库初始化](../运维手册/配置与数据库初始化.md)
 - [版本升级与数据库迁移](../运维手册/版本升级与数据库迁移.md)
-- [数据库运维](../运维手册/数据库运维.md)

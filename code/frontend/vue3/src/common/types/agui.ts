@@ -70,7 +70,35 @@ export const AGUI_CUSTOM_NAME = {
   INTENT_RESULT: 'rag.intent_result',
   /** 用户交互请求卡片(InteractionSpec) */
   INTERACTION: 'rag.interaction',
+  /** 执行模式决策结论(模式即 Agent, REQ-019 §2.2) */
+  MODE_DECISION: 'rag.mode_decision',
+  /** 五拍协议任务清单更新(全量替换, REQ-002 §6.1) */
+  PLAN_UPDATE: 'agent.plan_update',
+  /** 五拍协议单项验收裁决 */
+  VERDICT: 'agent.verdict',
+  /** 技能熔断提示(本次执行已摘除该技能) */
+  SKILL_MASKED: 'agent.skill_masked',
 } as const
+
+// ──────────────────────────────────────────────
+// 智能体任务清单 — 本项目业务扩展(REQ-002)
+// ──────────────────────────────────────────────
+
+/** 清单项状态: pending=未完成(第一项即进行中), done=已验收, awaiting_human=待人工验收 */
+export type AgentPlanItemStatus = 'pending' | 'done' | 'awaiting_human'
+
+/** 任务清单项(后端 Item 快照投影, snake_case 字段) */
+export interface AgentPlanItem {
+  id: string
+  goal: string
+  acceptance_kind?: string
+  acceptance_spec?: string
+  status?: AgentPlanItemStatus
+  attempts?: number
+  last_reason?: string
+  verdict_passed?: boolean | null
+  verdict_reason?: string | null
+}
 
 // ──────────────────────────────────────────────
 // 用户交互(澄清 / 知识缺口补充) — 本项目业务扩展, 非协议部分
@@ -178,4 +206,14 @@ export interface IntentResultData {
   clarify_question?: string
   /** 意图分析结论文本 */
   conclusion?: string
+}
+
+/** 执行模式决策结论(CUSTOM rag.mode_decision value, REQ-019 §2.2) */
+export interface ModeDecisionData {
+  /** 用户请求模式(auto/fast/thinking) */
+  requested_mode?: string
+  /** 执行模式(fast/thinking/deep) */
+  exec_mode?: string
+  /** 决策理由(前端展示"为什么是这个模式") */
+  reason?: string
 }

@@ -1,0 +1,214 @@
+# ==============================================================================
+# 依赖环境：PostgreSQL + Redis + Milvus + RustFS
+# 按主机拆分，用 COMPOSE_PROFILES 控制本机启动哪一组：
+#   47 主机（.env 里 COMPOSE_PROFILES=db）      -> postgres、redis
+#   112 主机（.env 里 COMPOSE_PROFILES=storage）-> rustfs、nginx、certbot、etcd、milvus
+# 用法：./ctl.sh up     （首次运行会自动从 .env.example 生成 .env）
+# 数据全部落在同目录 data/ 下，删除容器不会丢数据
+# ==============================================================================
+
+name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}
+
+services:
+  postgres:
+    # PostGIS 是 PostgreSQL 的超集，与线上 47 主机保持一致
+    image: postgis/postgis:18-3.7
+    profiles: ["db"]
+    container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-codebiu_base}
+      POSTGRES_USER: ${POSTGRES_USER:-here}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-here940901}
+      TZ: Asia/Shanghai
+    volumes:
+      # PG 18 官方镜像要求挂载 /var/lib/postgresql（数据落在 18/docker 子目录）
+      - ./data/postgres:/var/lib/postgresql
+    ports:
+      - "${PG_PORT:-20001}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-here} -d ${POSTGRES_DB:-codebiu_base}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.8.4-alpine
+    profiles: ["db"]
+    container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-here940901940901}", "--maxmemory", "${REDIS_MAXMEMORY:-256mb}", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - ./data/redis:/data
+    ports:
+      - "${REDIS_PORT:-20002}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-here940901940901}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # 业务对象存储（S3 兼容，供主服务/任务队列上传下载文件）
+  rustfs:
+    image: rustfs/rustfs:1.0.6
+    profiles: ["storage"]
+    container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-rustfs
+    # 以 root 运行，避免宿主机目录权限导致启动失败；内网自建环境足够
+    user: "0:0"
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-minioadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-minioadmin}
+      RUSTFS_REGION: us-east-1
+      RUSTFS_OBS_LOGGER_LEVEL: error
+    volumes:
+      - ./data/rustfs:/data
+    ports:
+      # 只监听本机：公网访问统一走上面的 nginx（HTTPS）
+      - "${RUSTFS_BIND_IP:-127.0.0.1}:${RUSTFS_PORT:-20006}:9000"          # S3 API
+      - "${RUSTFS_BIND_IP:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-20007}:9001"  # 管理控制台
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # ---------------- 文件服务 HTTPS 入口（反代 RustFS S3 API） ----------------
+  nginx:
+    image: nginx:1.30.6-alpine
+    profiles: ["storage"]
+    container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-nginx
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    environment:
+      # 由 nginx 镜像的 envsubst 渲染 templates/ 下的模板；只替换 SERVER_NAME
+      SERVER_NAME: ${FILE_DOMAIN:-_}
+      NGINX_ENVSUBST_FILTER: "^SERVER_NAME$"
+      TZ: Asia/Shanghai
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/www:/var/www/certbot
+    # 证书续期后自动加载（每 12h 检查一次）；必须走官方 entrypoint 才会渲染 templates/
+    command:
+      - /bin/sh
+      - -c
+      - |
+        rm -f /etc/nginx/conf.d/default.conf
+        while :; do sleep 43200 & wait $$!; nginx -s reload; done &
+        exec /docker-entrypoint.sh nginx -g 'daemon off;'
+    depends_on:
+      - rustfs
+    restart: unless-stopped
+
+  # ---------------- certbot：首次签发 ./ctl.sh cert，之后自动续期 ----------------
+  certbot:
+    image: certbot/certbot
+    container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-certbot
+    profiles: ["storage", "https"]
+    volumes:
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/www:/var/www/certbot
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        trap exit TERM
+        while :; do
+          certbot renew --webroot -w /var/www/certbot --quiet \
+            --deploy-hook 'cp -L "$${RENEWED_LINEAGE}/fullchain.pem" /etc/letsencrypt/fullchain.pem; cp -L "$${RENEWED_LINEAGE}/privkey.pem" /etc/letsencrypt/privkey.pem'
+          sleep 43200 & wait $$!
+        done
+    restart: unless-stopped
+
+  # ---------------- Milvus 单机版（内置 etcd，对象存储复用 RustFS） ----------------
+  etcd:
+    # Milvus 3.x 官方只验证到 etcd 3.5.x，不要跟到 3.6/3.7
+    image: quay.io/coreos/etcd:v3.5.25
+    profiles: ["storage"]
+    container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-etcd
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+      # 限制 Go 堆上限, 防止 etcd 随数据量无限增长
+      GOMEMLIMIT: ${ETCD_GOMEMLIMIT:-128MiB}
+    volumes:
+      - ./data/etcd:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  # 首次启动时修正数据目录权限（Milvus 容器内以非 root 运行）
+  milvus-volume-init:
+    image: milvusdb/milvus:v3.0.6
+    profiles: ["storage"]
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        uid="$$(id -u milvus)"
+        gid="$$(id -g milvus)"
+        marker="/var/lib/milvus/.milvus-volume-owner-$${uid}-$${gid}"
+        if [ ! -e "$${marker}" ]; then
+          echo "准备 /var/lib/milvus 权限: $${uid}:$${gid}"
+          chown -R "$${uid}:$${gid}" /var/lib/milvus
+          touch "$${marker}"
+          chown "$${uid}:$${gid}" "$${marker}"
+        fi
+    volumes:
+      - ./data/milvus:/var/lib/milvus
+
+  milvus:
+    image: milvusdb/milvus:v3.0.6
+    profiles: ["storage"]
+    container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-milvus
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      # 对象存储复用 RustFS（与线上 47 主机一致的写法）
+      MINIO_ADDRESS: ${MILVUS_S3_ENDPOINT:-rustfs:9000}
+      MINIO_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      MINIO_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      MINIO_REGION: ${MILVUS_S3_REGION:-us-east-1}
+      MINIO_USE_SSL: "${MILVUS_S3_SSL:-false}"
+      # Milvus 3.x 内置 WAL
+      MQ_TYPE: woodpecker
+      # 限制 Go 堆上限, 小内存机器上防止 Milvus 无节制增长
+      GOMEMLIMIT: ${MILVUS_GOMEMLIMIT:-256MiB}
+    volumes:
+      - ./data/milvus:/var/lib/milvus
+    ports:
+      - "${MILVUS_PORT:-20005}:19530"
+      - "${MILVUS_METRICS_PORT:-20008}:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 120s
+      timeout: 20s
+      retries: 5
+    depends_on:
+      milvus-volume-init:
+        condition: service_completed_successfully
+      etcd:
+        condition: service_started
+      rustfs:
+        condition: service_started
+    restart: unless-stopped

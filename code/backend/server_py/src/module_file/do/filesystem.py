@@ -213,6 +213,10 @@ class MultipartInitResponse(BaseModel):
         None,
         description="direct模式专用: 每片的预签名上传URL(下标=分片号-1);proxy模式为None",
     )
+    filename: str | None = Field(
+        None,
+        description="服务端确认的落库文件名(业务侧重名自动加序号时返回, 前端complete/秒传沿用)",
+    )
 
 
 class MultipartCompleteRequest(BaseModel):

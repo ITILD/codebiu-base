@@ -43,6 +43,7 @@ register_skill(
         retry=RetrySpec(max=1),
         side_effects="read",
         agent_callable=True,
+        requires_features=["web"],  # 未开启联网不注册(REQ-019 §5.1 条件注册)
     )
 )
 

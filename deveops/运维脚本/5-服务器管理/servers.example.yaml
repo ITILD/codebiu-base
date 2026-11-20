@@ -1,0 +1,70 @@
+# ==============================================================================
+# 服务器清单模板
+#   cp servers.example.yaml servers.yaml && chmod 600 servers.yaml
+# servers.yaml 含真实 IP / 账号 / 密钥路径，已加入 .gitignore，不会提交到 Git。
+# 每台机器的 ssh 段与各套件 deploy.env 的部署目录保持一致即可。
+# ==============================================================================
+
+# ---------------- 主服务 + 前端（2-主服务） ----------------
+main:
+  name: 主服务
+  domain: app.example.com          # 已备案域名；启用 HTTPS 时必填
+  cert_email: you@example.com      # Let's Encrypt 通知邮箱（./ctl.sh cert 用）
+  ip: 1.2.3.4
+  ssh:
+    host: 1.2.3.4                  # 留空则用 ip
+    port: 22
+    user: root
+    key: keys/main_server.pem      # 相对本目录；也可写绝对路径
+  deploy:
+    dir: /home/hrzn/D/a_apps/codebiu-base/server
+    nginx_http_port: 3002
+    nginx_https_port: 443
+    enable_https: true
+    server_port: 3001
+
+# ---------------- 任务队列（3-任务队列） ----------------
+task:
+  name: 任务队列
+  ip: 5.6.7.8
+  ssh:
+    host: 5.6.7.8
+    port: 22
+    user: root
+    key: keys/task_server.pem
+  deploy:
+    dir: /home/hrzn/D/a_apps/codebiu-base/task
+    replicas: 2                    # 副本数
+    concurrency: 2                 # 单副本并发
+    queues: task_queue,q_interactive
+    host_probe_port: 8700
+    host_probe_token: change-me
+
+# ---------------- 依赖环境（1-依赖环境） ----------------
+deps:
+  name: 依赖环境
+  file_domain: fs.example.com      # 文件服务（RustFS S3）HTTPS 域名，建议用主域名子域名
+  cert_email: you@example.com
+  ip: 9.10.11.12
+  ssh:
+    host: 9.10.11.12
+    port: 22
+    user: root
+    key: keys/deps_server.pem
+  deploy:
+    dir: /home/hrzn/D/a_apps/codebiu-base/deps
+  services:                        # 宿主端口，需与 1-依赖环境/.env 一致
+    postgres: 20001
+    redis: 20002
+    milvus: 20005
+    rustfs: 20006                  # 仅 127.0.0.1；公网走 file_domain 的 HTTPS
+    rustfs_console: 20007          # 仅 127.0.0.1（SSH 隧道访问）
+    nginx_http: 80                 # 证书签发要求公网可达
+    nginx_https: 443
+  credentials:                     # 与 1-依赖环境/.env 保持一致
+    postgres_user: postgres
+    postgres_password: change-me
+    postgres_db: codebiu
+    redis_password: change-me
+    rustfs_access_key: rustfsadmin
+    rustfs_secret_key: change-me

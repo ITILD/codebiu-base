@@ -8,6 +8,8 @@
       </el-radio-group>
       <el-button v-if="viewMode === 'documents'" :icon="Refresh" circle title="刷新" :loading="docLoading"
         @click="loadDocList" />
+      <div flex-1 />
+      <ViewToggle v-if="viewMode === 'projects'" v-model="projectLayout" />
     </div>
 
     <!-- ===== 视图一: 知识库项目 ===== -->
@@ -27,7 +29,7 @@
       </TableSearchBar>
 
       <!-- 项目卡片网格(便签风: 柔和阴影/圆角/绿色点缀, 点击卡片进入设置) -->
-      <div v-loading="loading" grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3>
+      <div v-if="projectLayout === 'card'" v-loading="loading" grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3>
         <div
           v-for="row in projects" :key="row.id"
           flex flex-col gap-3 p-4 rounded-2xl bg-note-card shadow-note cursor-pointer
@@ -72,7 +74,46 @@
         </div>
       </div>
 
-      <!-- 空状态 -->
+      <!-- 项目列表(表格视图) -->
+      <div v-else rounded-2xl bg-note-card shadow-note overflow-hidden>
+        <el-table :data="projects" v-loading="loading" stripe w-full>
+          <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span flex items-center gap-1.5>
+                <el-icon text-note-green><Collection /></el-icon>
+                {{ row.name }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="分类" min-width="90" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain" :type="categoryTagType(row.kb_category)">
+                {{ categoryLabel(row.kb_category) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="可见性" min-width="90" align="center">
+            <template #default="{ row }">
+              <span text-xs>{{ row.is_private ? '私有' : '公开' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.description || '暂无描述' }}</template>
+          </el-table-column>
+          <el-table-column label="创建时间" min-width="110" align="center">
+            <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" min-width="130" align="center">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="handleOpenEdit(row)">设置</el-button>
+              <el-button v-if="row.my_perms?.delete" link type="danger" size="small"
+                @click="handleDelete(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <!-- 空状态(仅项目视图且无数据) -->
       <div v-if="!loading && projects.length === 0" py-16 flex flex-col items-center text-note-sub>
         <el-icon text-5xl mb-3 class="opacity-40"><FolderOpened /></el-icon>
         <p m-0>暂无知识库，点击右上角"新建知识库"开始</p>
@@ -221,6 +262,7 @@ import {
   type ProjectMyPerms,
 } from '../types'
 import TableSearchBar, { type SearchField } from '@/common/components/TableSearchBar.vue'
+import ViewToggle from '@/common/components/ViewToggle.vue'
 import DocumentManage from '../components/DocumentManage.vue'
 import MemberManage from '../components/MemberManage.vue'
 import ProjectCreateDialog from '../components/ProjectCreateDialog.vue'
@@ -243,6 +285,12 @@ const READ_ONLY_PERMS: ProjectMyPerms = {
 
 // 视图切换(projects=项目列表 / documents=文档列表)
 const viewMode = ref<'projects' | 'documents'>('projects')
+// 项目列表布局(卡片/列表), 记住上次选择
+const PROJECT_VIEW_KEY = 'rag:project-layout'
+const projectLayout = ref<'card' | 'list'>(
+  localStorage.getItem(PROJECT_VIEW_KEY) === 'list' ? 'list' : 'card'
+)
+watch(projectLayout, (v) => localStorage.setItem(PROJECT_VIEW_KEY, v))
 
 // 项目列表: 分页/查询/拉取统一收口(统一使用 useTableQuery, 内置末页空页回退)
 const {
@@ -292,6 +340,8 @@ const categoryTagType = (value: string) => {
       return 'success'
     case KbCategory.COMPANY:
       return 'warning'
+    case KbCategory.TEMP:
+      return 'info'
     default:
       return 'primary'
   }

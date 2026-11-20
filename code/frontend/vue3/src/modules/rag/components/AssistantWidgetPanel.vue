@@ -20,8 +20,9 @@ import ChatMessageList from '@/common/components/chat/ChatMessageList.vue'
 import ChatComposer from '@/common/components/chat/ChatComposer.vue'
 import { useAguiMessages } from '@/common/composables/useAguiMessages'
 import { createConversation, sendRagChatAguiStream } from '@/modules/rag/api/conversation'
-import { listAgents, sendAgentChatAguiStream } from '@/modules/agent/api/agent'
+import { listAgents, getAgentPlan, sendAgentChatAguiStream } from '@/modules/agent/api/agent'
 import type { AgentInfo } from '@/modules/agent/types'
+import { StreamEventType } from '@/common/types/chat'
 import { assistantConfig } from '@/modules/ai/utils/assistantConfig'
 import { i18n } from '@/common/i18n/language'
 import type { ChatMessage, RagChatRequest } from '@/modules/rag/types'
@@ -44,7 +45,10 @@ const messageListRef = ref<InstanceType<typeof ChatMessageList>>()
 // 默认对话参数(取全局配置; 新对话时恢复为这些默认项)
 const selectedAgentId = ref(assistantConfig.value.agentId)
 const selectedProjectIds = ref<string[]>([...assistantConfig.value.projectIds])
-const deepThinking = ref(assistantConfig.value.deepThinking)
+// 对话模式(REQ-019 §2.2 两级模式): 旧配置 deepThinking 迁移为 thinking, 其余走 auto 自动决策
+const requestedMode = ref<'auto' | 'fast' | 'thinking'>(
+  assistantConfig.value.deepThinking ? 'thinking' : 'auto'
+)
 const enableWebsearch = ref(assistantConfig.value.enableWebsearch)
 
 // 助手列表(仅用于头部展示当前助手名, 失败静默)
@@ -81,6 +85,24 @@ let streamSeq = 0
 const abortActiveStream = () => {
   stopRequested = true
   abortController?.abort()
+}
+
+/** 断线兜底: 以 agent_plan_item 投影覆盖实时清单(投影优先, REQ-002 §6.3) */
+const syncPlanFromProjection = async (msg: ChatMessage) => {
+  const blocks = msg.blocks ?? []
+  const block = blocks.find((b) => b.stream_event_type === StreamEventType.AGENT_PLAN)
+  const runId = String(block?.data?.run_id ?? '')
+  if (!block || !runId) return
+  try {
+    const items = await getAgentPlan(runId)
+    block.data = {
+      ...(block.data ?? {}),
+      items: items.map((it) => ({ ...it, id: it.item_id })),
+    }
+    msg.blocks = [...blocks]
+  } catch {
+    // 兜底失败不打扰用户: 已有实时清单仍然可用
+  }
 }
 
 /** 发起一次 AG-UI 流式请求(普通提问 / 交互响应续跑共用) */
@@ -129,6 +151,7 @@ const startStream = async (request: RagChatRequest, userDisplay: string) => {
     },
     onError: () => {
       if (!stopRequested) ElMessage.error(t('asst_failed'))
+      void syncPlanFromProjection(assistantMsg)
     },
     onController: (controller: AbortController) => {
       abortController = controller
@@ -194,7 +217,7 @@ const handleSend = async () => {
     {
       message,
       project_ids: selectedProjectIds.value,
-      deep_thinking: deepThinking.value,
+      mode: requestedMode.value,
       enable_websearch: enableWebsearch.value,
     },
     message,
@@ -237,7 +260,7 @@ const handleNewChat = () => {
   inputMessage.value = ''
   selectedAgentId.value = assistantConfig.value.agentId
   selectedProjectIds.value = [...assistantConfig.value.projectIds]
-  deepThinking.value = assistantConfig.value.deepThinking
+  requestedMode.value = assistantConfig.value.deepThinking ? 'thinking' : 'auto'
   enableWebsearch.value = assistantConfig.value.enableWebsearch
   resetAguiMessage()
 }

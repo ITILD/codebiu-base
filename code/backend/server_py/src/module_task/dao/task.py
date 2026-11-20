@@ -6,7 +6,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from common.config.db import DaoRel
 from common.utils.fastapi_ex.exceptions import NotFoundError
 from common.utils.db.schema.pagination import PaginationParams
-from module_task.do.task import TaskQueue, TaskQueueResponse, TaskTypePriority
+from module_task.do.task import (
+    TaskQueue,
+    TaskQueueRegistry,
+    TaskQueueResponse,
+    TaskTypePriority,
+    WorkerHost,
+)
 
 
 class TaskQueueDao:
@@ -165,3 +171,94 @@ class TaskQueueDao:
         await session.delete(row)
         await session.flush()
         return True
+
+    # ################ 队列注册表(sys_task_queue_registry) ################
+
+    @DaoRel
+    async def list_queue_registry(
+        self, session: AsyncSession | None = None
+    ) -> list[TaskQueueRegistry]:
+        """读取全部队列注册表记录(队列名排序)"""
+        result = await session.exec(select(TaskQueueRegistry).order_by(TaskQueueRegistry.queue_name))
+        return list(result.all())
+
+    @DaoRel
+    async def get_queue_registry(
+        self, queue_name: str, session: AsyncSession | None = None
+    ) -> TaskQueueRegistry | None:
+        """按队列名查询注册表记录"""
+        return await session.get(TaskQueueRegistry, queue_name)
+
+    @DaoRel
+    async def add_queue_registry(
+        self, row: TaskQueueRegistry, session: AsyncSession | None = None
+    ) -> None:
+        """新增队列注册表记录"""
+        session.add(row)
+        await session.flush()
+
+    @DaoRel
+    async def update_queue_registry(
+        self, row: TaskQueueRegistry, session: AsyncSession | None = None
+    ) -> None:
+        """保存队列注册表变更"""
+        session.add(row)
+        await session.flush()
+
+    @DaoRel
+    async def delete_queue_registry(
+        self, queue_name: str, session: AsyncSession | None = None
+    ) -> None:
+        """删除队列注册表记录"""
+        row = await session.get(TaskQueueRegistry, queue_name)
+        if row is None:
+            raise NotFoundError(f"队列 {queue_name} 未在注册表登记")
+        await session.delete(row)
+        await session.flush()
+
+    # ################ worker 宿主机注册表(sys_worker_host) ################
+
+    @DaoRel
+    async def list_worker_hosts(
+        self, session: AsyncSession | None = None, enabled_only: bool = False
+    ) -> list[WorkerHost]:
+        """读取全部宿主机记录(创建时间排序, 可只取启用)"""
+        statement = select(WorkerHost)
+        if enabled_only:
+            statement = statement.where(WorkerHost.enabled.is_(True))  # type: ignore[attr-defined]
+        result = await session.exec(statement.order_by(WorkerHost.created_at))
+        return list(result.all())
+
+    @DaoRel
+    async def get_worker_host(
+        self, host_id: str, session: AsyncSession | None = None
+    ) -> WorkerHost | None:
+        """按ID查询宿主机记录"""
+        return await session.get(WorkerHost, host_id)
+
+    @DaoRel
+    async def add_worker_host(
+        self, row: WorkerHost, session: AsyncSession | None = None
+    ) -> None:
+        """新增宿主机记录"""
+        session.add(row)
+        await session.flush()
+
+    @DaoRel
+    async def update_worker_host(
+        self, row: WorkerHost, session: AsyncSession | None = None
+    ) -> None:
+        """保存宿主机变更"""
+        session.add(row)
+        await session.flush()
+
+    @DaoRel
+    async def delete_worker_host(
+        self, host_id: str, session: AsyncSession | None = None
+    ) -> None:
+        """删除宿主机记录"""
+        row = await session.get(WorkerHost, host_id)
+        if row is None:
+            raise NotFoundError(f"未找到ID为 {host_id} 的宿主机")
+        await session.delete(row)
+        await session.flush()

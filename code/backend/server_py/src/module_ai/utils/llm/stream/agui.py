@@ -31,6 +31,10 @@
 - rag.status         进度提示 { message, node }
 - rag.intent_result  意图分析结构化结论
 - rag.interaction    用户交互请求卡片(InteractionSpec, 澄清/知识缺口补充)
+- rag.mode_decision  执行模式决策结论(模式即 Agent, REQ-019 §2.2)
+- agent.plan_update  五拍协议清单更新(write_plan/revise 后的 items 快照)
+- agent.verdict      五拍协议验收裁决(通过/未通过 + 原因)
+- agent.skill_masked 会话内技能熔断摘除
 """
 
 import json
@@ -97,12 +101,14 @@ __all__ = [
     "CUSTOM_NAME_STATUS",
     "CUSTOM_NAME_INTENT_RESULT",
     "CUSTOM_NAME_INTERACTION",
+    "CUSTOM_NAME_MODE_DECISION",
 ]
 
 # 业务 StreamEventType → AG-UI 的自定义事件名约定
 CUSTOM_NAME_STATUS = "rag.status"
 CUSTOM_NAME_INTENT_RESULT = "rag.intent_result"
 CUSTOM_NAME_INTERACTION = "rag.interaction"
+CUSTOM_NAME_MODE_DECISION = "rag.mode_decision"
 
 
 def encode_agui_event(event: BaseEvent) -> str:
@@ -227,6 +233,16 @@ class AguiStreamTransformer:
 
         elif event_type == "tool_call":
             data = data or {}
+            # Agent 协议自定义事件(§8: agent.plan_update/agent.verdict/agent.skill_masked):
+            # 走 CUSTOM 透传, 不伪造工具调用组(缺 tool_name 会回退到误导性默认名)
+            custom_name = str(data.get("event_type") or "")
+            if custom_name.startswith("agent."):
+                value = dict(data)
+                value.setdefault("message", content)
+                self._close_reasoning(events)
+                events.append(CustomEvent(name=custom_name, value=value))
+                return
+
             tool_call_id = uuid4().hex
             tool_name = str(data.get("tool_name") or node_name or "knowledge_search")
             events.append(ToolCallStartEvent(tool_call_id=tool_call_id, tool_call_name=tool_name))
@@ -251,6 +267,14 @@ class AguiStreamTransformer:
             value = dict(data or {})
             value.setdefault("question", content)
             events.append(CustomEvent(name=CUSTOM_NAME_INTERACTION, value=value))
+
+        elif event_type == "mode_decision":
+            # 模式决策结论(模式即 Agent): 前端展示"为什么是这个模式"
+            value = dict(data or {})
+            value.setdefault("reason", content)
+            self._close_reasoning(events)
+            self._open_step(events, node_name)
+            events.append(CustomEvent(name=CUSTOM_NAME_MODE_DECISION, value=value))
 
         elif event_type == "error":
             self._errored = True

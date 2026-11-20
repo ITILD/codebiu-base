@@ -208,9 +208,19 @@ __marimo__/
 code/other/template/server_base_py/uv.lock
 code/backend/server_py/nuitka-crash-report.xml
 
-# App 打包产物与工具缓存
-deveops/运维脚本/app_realse/dist/
-deveops/运维脚本/app_realse/.cache/
+# 客户端打包产物与工具缓存
+deveops/运维脚本/4-客户端/dist/
+deveops/运维脚本/4-客户端/.cache/
+
+# 依赖环境本地数据与生成的 .env
+deveops/运维脚本/1-依赖环境/data/
+deveops/运维脚本/1-依赖环境/.env
+
+# 服务器管理：真实清单、SSH 私钥、已知主机（等价于密码本，禁止入库）
+deveops/运维脚本/5-服务器管理/servers.yaml
+deveops/运维脚本/5-服务器管理/keys/*
+!deveops/运维脚本/5-服务器管理/keys/.gitkeep
+deveops/运维脚本/5-服务器管理/known_hosts
 
 node_modules
 

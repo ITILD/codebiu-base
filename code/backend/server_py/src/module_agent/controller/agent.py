@@ -6,15 +6,19 @@
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
 from sse_starlette import EventSourceResponse
 
+from common.utils.fastapi_ex.exceptions import NotFoundError
 from module_agent.config.server import module_app
+from module_agent.dao.plan import AgentPlanEventDao, AgentPlanItemDao
 from module_agent.dependencies.agent import get_agent_runner_service, get_agent_service
 from module_agent.do.agent import AgentCreate, AgentResponse, AgentUpdate
 from module_agent.service.runner import AgentChatRequest, AgentRunnerService
 from module_agent.service.agent import AgentService
+from module_agent.service.metrics import build_north_star
 from module_ai.utils.llm.stream.sse import agui_event_generator
 from module_authorization.dependencies.auth import get_current_user_id
 from module_authorization.dependencies.permission import check_permission, require_permission
@@ -127,6 +131,87 @@ async def agent_chat_stream(
         ),
         media_type="text/event-stream",
     )
+
+
+# ── 五拍协议投影查询(§8: 清单视图/事件回放, 本人或管理员) ──
+
+async def _require_plan_access(rows: list, current_user_id: str) -> None:
+    """清单/事件访问权限: 本人或管理员(跨用户运行不泄露存在性)"""
+    if not rows:
+        raise NotFoundError("未找到该运行的投影记录")
+    if rows[0].user_id != current_user_id and not await check_permission(
+        current_user_id, "agent", "manage", "read"
+    ):
+        raise NotFoundError("未找到该运行的投影记录")
+
+
+@router.get("/plans/{run_id}", summary="任务运行清单投影", response_model=list[dict])
+async def get_plan_items(
+    run_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    """五拍协议清单投影(agent_plan_item, §8 UI 清单视图 + 假完成率数据源)"""
+    items = await AgentPlanItemDao().list_by_run(run_id)
+    await _require_plan_access(items, current_user_id)
+    return [
+        {
+            "run_id": it.run_id, "item_id": it.item_id, "goal": it.goal,
+            "acceptance_kind": it.acceptance_kind, "acceptance_spec": it.acceptance_spec,
+            "acceptance_hash": it.acceptance_hash, "status": it.status,
+            "attempts": it.attempts, "last_reason": it.last_reason,
+            "verdict_passed": it.verdict_passed, "verdict_reason": it.verdict_reason,
+            "created_at": it.created_at, "updated_at": it.updated_at,
+        }
+        for it in items
+    ]
+
+
+@router.get("/plans/{run_id}/events", summary="任务运行事件流", response_model=list[dict])
+async def get_plan_events(
+    run_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    """五拍协议事件日志(agent_plan_event, §8 回放/审计; 系统事实源)"""
+    events = await AgentPlanEventDao().list_by_run(run_id)
+    await _require_plan_access(events, current_user_id)
+    return [
+        {
+            "run_id": ev.run_id, "event_type": ev.event_type, "item_id": ev.item_id,
+            "payload": ev.payload, "created_at": ev.created_at,
+        }
+        for ev in events
+    ]
+
+
+# ── 北极星指标(REQ-002 §7: 运营看板, 管理员) ──
+
+@router.get("/metrics/north-star", summary="北极星指标(运营看板)")
+async def north_star_metrics(
+    start: datetime | None = None,
+    end: datetime | None = None,
+    agent_key: str | None = None,
+    current_user_id: str = Depends(require_permission("agent", "manage", "read")),
+) -> dict:
+    """北极星三项 + 两项下钻(口径见 06 设计 §7.1)
+
+    数据源: `run_finished` 事件(run 粒度) + `agent_plan_item`(项粒度);
+    只做只读聚合, 不落物化表。假完成率是**不变量监控**(正常恒为 0)。
+    """
+    now = datetime.now(timezone.utc)
+    end_at = end or now
+    start_at = start or (end_at - timedelta(days=7))
+
+    events = await AgentPlanEventDao().list_finished(start_at, end_at)
+    if agent_key:
+        events = [
+            e for e in events if (e.payload or {}).get("agent_key") == agent_key
+        ]
+    items = await AgentPlanItemDao().list_by_run_ids([e.run_id for e in events])
+
+    data = build_north_star(events, items)
+    data["window"] = {"start": start_at.isoformat(), "end": end_at.isoformat()}
+    data["agent_key"] = agent_key
+    return data
 
 
 # 注册路由(挂在 /agent 前缀下)

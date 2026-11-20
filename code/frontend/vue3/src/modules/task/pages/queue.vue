@@ -415,7 +415,7 @@ const {
     keyword: (keyword as string) || undefined,
     task_type: (task_type as string) || undefined,
     status: (status as string) || undefined,
-    priority: priority ?? undefined,
+    priority: (priority as number | undefined) ?? undefined,
   }
   return listTasks(query)
 }, { defaultQuery: { keyword: '', task_type: undefined, status: undefined, priority: undefined } })

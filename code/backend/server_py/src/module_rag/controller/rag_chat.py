@@ -1,15 +1,36 @@
 """
 RAG 聊天控制器
 - 流式聊天(SSE)：从 conversation.py 迁移过来
+- 问答附件上传：入库用户默认临时知识库并派发解析任务
 - 对话总结：压缩历史消息并生成标题
 """
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from sse_starlette import EventSourceResponse
+from common.utils.fastapi_ex.exceptions import BusinessError
+from module_file.do.filesystem import (
+    EntryCreateRequest,
+    MultipartCompleteRequest,
+    MultipartInitRequest,
+    MultipartInitResponse,
+    MultipartPartInfo,
+    UploadModeResponse,
+)
+from module_file.dependencies.filesystem import get_file_service
+from module_file.service.filesystem import FileService
 from module_rag.do.rag_chat import ConversationSummary
 from module_rag.do.conversation import ChatRequest
+from module_rag.do.project_document import ProjectDocumentResponse
+from module_rag.controller.project_document import _dispatch_parse_task
+from module_rag.dependencies.project import get_project_service
+from module_rag.dependencies.project_document import get_project_document_service
+from module_rag.service.project import ProjectService
+from module_rag.service.project_document import ProjectDocumentService
 from module_rag.service.rag_chat import RagChatService
+from module_rag.service.chat_attachment import ChatAttachmentService
 from module_rag.dependencies.rag_chat import get_rag_chat_service_single
+from module_task.dependencies.task import get_task_queue_service
+from module_task.service.task import TaskQueueService
 from module_authorization.dependencies.auth import get_current_user_id
 from module_authorization.dependencies.permission import require_permission
 from module_rag.config.server import module_app
@@ -22,23 +43,143 @@ router = APIRouter()
 
 
 @router.post(
-    "/parse-temp-file",
-    summary="解析会话临时文件(异步非阻塞, 不入知识库)",
+    "/attachments",
+    summary="上传问答附件(存入个人默认临时知识库并解析入库)",
+    response_model=ProjectDocumentResponse,
 )
-async def parse_temp_file_endpoint(
-    file: UploadFile = File(..., description="临时文件(版式文档/图片走 MinerU, 纯文本直读)"),
+async def upload_chat_attachment(
+    file: UploadFile = File(..., description="附件文件(与知识库白名单一致: 版式文档/图片/纯文本)"),
     current_user_id: str = Depends(require_permission("rag", "chat", "write")),
-    rag_chat_service: RagChatService = Depends(get_rag_chat_service_single),
-) -> dict:
+    task_service: TaskQueueService = Depends(get_task_queue_service),
+    project_service: ProjectService = Depends(get_project_service),
+    document_service: ProjectDocumentService = Depends(get_project_document_service),
+) -> ProjectDocumentResponse:
     """
-    解析会话临时文件为文本, 供前端随聊天请求回传(不入知识库/向量库):
-    - 支持版式文档 pdf/doc/docx/ppt/pptx + 图片 png/jpg/jpeg(经 MinerU 引擎)
-    - 纯文本 txt/md/csv/log/json 直接解码
-    - 全程异步(分片读取 + 异步解析), 不阻塞事件循环上的其他接口
-    :param file: 上传的临时文件
-    :return: {file_name, content, chars, truncated}
+    上传问答附件: 自动获取/创建用户 temp 分类临时知识库, 经统一存储登记为
+    project_document 并派发异步解析任务(解析→分块→向量化, 与知识库文档同链路);
+    入库进度经 GET /rag/project-documents/{document_id}/progress 轮询,
+    完成后问答检索范围自动并入该库
+    :param file: 上传的附件文件
+    :return: 文档元数据(parse_task_warning 携带解析任务派发警告)
     """
-    return await rag_chat_service.parse_temp_file(file, current_user_id)
+    service = ChatAttachmentService(project_service, document_service)
+    document = await service.upload(file, current_user_id)
+    response = ProjectDocumentResponse.model_validate(document.model_dump())
+    response.parse_task_warning = await _dispatch_parse_task(
+        service.document_service, task_service, document, current_user_id
+    )
+    return response
+
+
+@router.get(
+    "/attachments/upload-mode",
+    summary="查询问答附件上传模式(direct预签名直传/proxy服务端中转)",
+    response_model=UploadModeResponse,
+)
+async def get_attachment_upload_mode(
+    current_user_id: str = Depends(require_permission("rag", "chat", "write")),
+    project_service: ProjectService = Depends(get_project_service),
+    document_service: ProjectDocumentService = Depends(get_project_document_service),
+) -> UploadModeResponse:
+    """查询问答附件上传模式(前端上传前获取并缓存)"""
+    service = ChatAttachmentService(project_service, document_service)
+    return service.get_upload_mode()
+
+
+@router.post(
+    "/attachments/multipart/init",
+    summary="初始化问答附件预签名上传(同名自动加序号/内容已存在时秒传)",
+    response_model=MultipartInitResponse,
+)
+async def init_attachment_multipart(
+    req: MultipartInitRequest,
+    current_user_id: str = Depends(require_permission("rag", "chat", "write")),
+    project_service: ProjectService = Depends(get_project_service),
+    document_service: ProjectDocumentService = Depends(get_project_document_service),
+) -> MultipartInitResponse:
+    """
+    初始化问答附件上传: 登记到用户临时知识库, 返回直传预签名URL或中转凭证
+    :param req: 初始化请求(文件名/大小/SHA-256)
+    :return: 会话凭证(含服务端确认的落库文件名)
+    """
+    service = ChatAttachmentService(project_service, document_service)
+    return await service.init_multipart(req, current_user_id)
+
+
+@router.put(
+    "/attachments/multipart/{upload_id}/parts/{part_number}",
+    summary="上传问答附件分片(proxy中转模式)",
+    response_model=MultipartPartInfo,
+)
+async def upload_attachment_part(
+    upload_id: str,
+    part_number: int,
+    request: Request,
+    current_user_id: str = Depends(require_permission("rag", "chat", "write")),
+    file_service: FileService = Depends(get_file_service),
+) -> MultipartPartInfo:
+    """中转上传单个分片(direct 模式前端直传对象存储,不经服务端)"""
+    content: bytes = await request.body()
+    if not content:
+        raise BusinessError("分片内容不能为空")
+    return await file_service.upload_multipart_part(upload_id, part_number, content)
+
+
+@router.post(
+    "/attachments/multipart/{upload_id}/complete",
+    summary="完成问答附件上传(对账合并并登记文档)",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ProjectDocumentResponse,
+)
+async def complete_attachment_multipart(
+    upload_id: str,
+    req: MultipartCompleteRequest,
+    current_user_id: str = Depends(require_permission("rag", "chat", "write")),
+    project_service: ProjectService = Depends(get_project_service),
+    document_service: ProjectDocumentService = Depends(get_project_document_service),
+    task_service: TaskQueueService = Depends(get_task_queue_service),
+) -> ProjectDocumentResponse:
+    """
+    合并分片并登记为问答附件文档, 成功后自动派发解析任务
+    :param upload_id: 分片会话凭证
+    :param req: 完成请求(文件名/分片清单)
+    :return: 文档元数据(parse_task_warning 携带解析任务派发警告)
+    """
+    service = ChatAttachmentService(project_service, document_service)
+    document = await service.complete_multipart(upload_id, req, current_user_id)
+    response = ProjectDocumentResponse.model_validate(document.model_dump())
+    response.parse_task_warning = await _dispatch_parse_task(
+        document_service, task_service, document, current_user_id
+    )
+    return response
+
+
+@router.post(
+    "/attachments/upload-complete",
+    summary="问答附件秒传登记(内容已存在时直接建文档)",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ProjectDocumentResponse,
+)
+async def instant_attachment(
+    req: EntryCreateRequest,
+    current_user_id: str = Depends(require_permission("rag", "chat", "write")),
+    project_service: ProjectService = Depends(get_project_service),
+    document_service: ProjectDocumentService = Depends(get_project_document_service),
+    task_service: TaskQueueService = Depends(get_task_queue_service),
+) -> ProjectDocumentResponse:
+    """
+    基于已存在的内容记录创建问答附件文档(init 返回 is_existing=True 后调用)
+    :param req: 登记请求(文件名/内容SHA-256/大小)
+    :return: 文档元数据(parse_task_warning 携带解析任务派发警告)
+    """
+    service = ChatAttachmentService(project_service, document_service)
+    document = await service.create_from_content(req, current_user_id)
+    response = ProjectDocumentResponse.model_validate(document.model_dump())
+    response.parse_task_warning = await _dispatch_parse_task(
+        document_service, task_service, document, current_user_id
+    )
+    return response
+
 
 @router.post("/{conversation_id}/chat", summary="流式聊天(SSE, AG-UI 协议)")
 async def chat_stream(
@@ -79,7 +220,7 @@ async def chat_stream(
             initial_state={
                 "conversationId": conversation_id,
                 "projectIds": chat_request.project_ids,
-                "deepThinking": chat_request.deep_thinking,
+                "agentId": chat_request.agent_id,
             },
         ),
         media_type="text/event-stream",

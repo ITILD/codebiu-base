@@ -1,0 +1,12 @@
+# 真实服务器清单（含 IP / 账号 / 密钥路径 / 密码）——禁止入库
+servers.yaml
+
+# SSH 私钥与已知主机指纹——禁止入库
+keys/*
+!keys/.gitkeep
+known_hosts
+
+# 兜底：任何私钥文件都不提交
+*.pem
+*.key
+*.ppk

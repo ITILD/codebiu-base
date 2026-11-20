@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentChunkService:
-    def __init__(self, document_chunk_prompt: DocumentChunkPrompt):
-        """依赖注入构造器:初始化所需的数据访问对象"""
+    def __init__(self, document_chunk_prompt: DocumentChunkPrompt | None = None):
+        """依赖注入构造器:未注入时使用默认提示词实现"""
         self.document_chunk_prompt = document_chunk_prompt or DocumentChunkPrompt()
 
     async def detect_strategy(

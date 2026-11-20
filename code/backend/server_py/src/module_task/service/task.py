@@ -55,6 +55,92 @@ _CELERY_STATE_MAP = {
     "REVOKED": QueueTaskStatus.REVOKED,
 }
 
+# 执行器心跳键前缀(与 app_task.py 心跳注册线程约定)
+_HB_KEY_PREFIX = "sys:task:worker:hb:"
+# kombu Redis 优先级子队列分隔符(LLEN 积压统计需把各优先级子队列一并计入)
+_KOMBU_SEP = "\x06\x16"
+
+
+def _broker_redis():
+    """broker Redis 同步客户端(心跳/积压统计; 非 Redis broker 返回 None)"""
+    from common.config.tasks import BROKER_URL
+
+    if not BROKER_URL.startswith("redis"):
+        return None
+    import redis
+
+    return redis.Redis.from_url(BROKER_URL, socket_timeout=2)
+
+
+def scan_worker_heartbeats() -> dict[str, dict]:
+    """
+    SCAN 执行器心跳键 → {节点名: 心跳 payload}
+
+    心跳由 worker 心跳注册线程每 30s 写入(TTL 90s): 键仍在 = 进程近期存活;
+    配合 inspect 响应合并: 无响应但心跳存活 → 刚崩溃未过期的 offline 展示。
+    非 Redis broker 或 Redis 异常 → 返回空(仅 inspect 视角, 行为与旧版一致)。
+    """
+    client = _broker_redis()
+    if client is None:
+        return {}
+    import json
+
+    found: dict[str, dict] = {}
+    try:
+        cursor = 0
+        while True:
+            cursor, keys = client.scan(
+                cursor=cursor, match=f"{_HB_KEY_PREFIX}*", count=100
+            )
+            for key in keys:
+                raw = client.get(key)
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                    name = data.get("name") or key.decode().rsplit(":", 1)[-1]
+                    found[name] = data
+                except Exception:
+                    continue
+            if cursor == 0:
+                break
+    except Exception:
+        return found  # 已扫到的部分仍可用
+    return found
+
+
+def queue_backlogs(queues: list[str]) -> dict[str, int]:
+    """
+    统计各逻辑队列积压消息数(broker Redis LLEN, 含全部优先级子队列)
+
+    kombu Redis 优先级实现: 每个逻辑队列对应多个物理 list
+    (基础 key + <sep><priority> 子 key), 全部求和才是真实积压。
+    非 Redis broker / 异常 → 全 0(前端显示降级)。
+    """
+    client = _broker_redis()
+    if client is None or not queues:
+        return {q: 0 for q in queues}
+    result: dict[str, int] = {}
+    try:
+        for queue in queues:
+            keys = [queue] + [f"{queue}{_KOMBU_SEP}{p}" for p in range(10)]
+            pipe = client.pipeline()
+            for key in keys:
+                pipe.llen(key)
+            result[queue] = sum(pipe.execute())
+    except Exception:
+        return {q: 0 for q in queues}
+    return result
+
+
+def total_backlog(queues: list[str]) -> int | None:
+    """全部队列积压之和(缩容前置判定; broker 非 Redis/异常返回 None=无法判定)"""
+    client = _broker_redis()
+    if client is None:
+        return None
+    backlogs = queue_backlogs(queues)
+    return sum(backlogs.values())
+
 
 def _to_response(task: TaskQueue) -> TaskQueueResponse:
     """ORM 转 DTO(纯任务管理: 不透出业务参数/结果, 仅映射执行情况字段)"""
@@ -201,33 +287,72 @@ class TaskQueueService:
 
     async def workers(self) -> WorkerListResponse:
         """
-        采集 Celery 执行器(worker)在线状态(控制 ping/stats/active 队列)
+        采集 Celery 执行器状态: 同线程内 inspect(ping/stats/active_queues/active)
+        + SCAN 心跳注册表 合并
 
-        inspect 为同步阻塞调用, 放线程池执行; broker/worker 不可用时
-        返回 online=0 + error 提示而非抛异常, 便于前端展示"全部离线"。
+        - inspect 响应 → online(IP/hostname/pool/运行时长 取心跳补充)
+        - 心跳键存活但 inspect 无响应 → offline(进程刚崩溃, 键 90s 内过期)
+        - memory:// 或 broker 不可用 → 行为与旧版一致(online=0 + error 提示)
+        inspect 为同步阻塞调用, 整体放线程池执行。
         """
         def _inspect() -> WorkerListResponse:
+            import time
+            from datetime import datetime, timezone
+
             from common.config.tasks import app as celery_app
 
+            def _hb_iso(ts) -> str | None:
+                """心跳 epoch 秒 → ISO 字符串(空值透传)"""
+                if not ts:
+                    return None
+                try:
+                    return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+                except Exception:
+                    return None
+
+            heartbeats = scan_worker_heartbeats()
             try:
                 insp = celery_app.control.inspect(timeout=1.5)
                 pings = insp.ping() or {}
-                if not pings:
-                    return WorkerListResponse(
-                        total=0, online=0, error="没有执行器响应(可能均未启动)"
-                    )
                 stats = insp.stats() or {}
                 active_queues = insp.active_queues() or {}
                 active_tasks = insp.active() or {}
             except Exception as exc:  # broker 不可达等
-                return WorkerListResponse(error=f"执行器状态采集失败: {exc}")
+                # 心跳视角仍可展示(若有): 全部标记 offline
+                offline = [
+                    WorkerInfo(
+                        name=name,
+                        queues=hb.get("queues") or [],
+                        concurrency=int(hb.get("concurrency") or 0),
+                        ip=hb.get("ip"),
+                        hostname=hb.get("hostname"),
+                        pool=hb.get("pool"),
+                        status="offline",
+                        pid=hb.get("pid"),
+                        started_at=_hb_iso(hb.get("started_at")),
+                        last_seen=_hb_iso(hb.get("last_seen")),
+                    )
+                    for name, hb in heartbeats.items()
+                ]
+                return WorkerListResponse(
+                    total=len(offline),
+                    online=0,
+                    workers=offline,
+                    error=f"执行器状态采集失败: {exc}",
+                )
+            if not pings and not heartbeats:
+                return WorkerListResponse(
+                    total=0, online=0, error="没有执行器响应(可能均未启动)"
+                )
 
             workers: list[WorkerInfo] = []
             for name, pong in pings.items():
                 if not (isinstance(pong, dict) and pong.get("ok") == "pong"):
                     continue
+                # 已在线: 心跳数据就地取用, 该节点不再进 offline 列表
+                hb = heartbeats.pop(name, None) or {}
                 st = stats.get(name) or {}
-                pool = st.get("pool", {}) or {}
+                pool_stats = st.get("pool", {}) or {}
                 queues = sorted(
                     {
                         q.get("name")
@@ -243,24 +368,50 @@ class TaskQueueService:
                     }
                     for t in (active_tasks.get(name) or [])
                 ]
+                started = hb.get("started_at")
                 workers.append(
                     WorkerInfo(
                         name=name,
                         queues=queues,
-                        concurrency=int(pool.get("max-concurrency") or 0),
+                        concurrency=int(pool_stats.get("max-concurrency") or 0),
                         active=len(running),
                         processed=int(
                             (st.get("total") or {}).get(
                                 "tasks", st.get("processed") or 0
                             )
                         ),
-                        uptime_seconds=None,
+                        uptime_seconds=(
+                            time.time() - float(started) if started else None
+                        ),
                         active_tasks=running,
-                        pid=st.get("pid"),
+                        pid=st.get("pid") or hb.get("pid"),
+                        ip=hb.get("ip"),
+                        hostname=hb.get("hostname"),
+                        pool=hb.get("pool"),
+                        status="online",
+                        started_at=_hb_iso(started),
+                        last_seen=_hb_iso(hb.get("last_seen")),
+                    )
+                )
+            online = len(workers)
+            # 剩余心跳: inspect 无响应但心跳键未过期 → 进程刚崩溃, 标记 offline
+            for name, hb in heartbeats.items():
+                workers.append(
+                    WorkerInfo(
+                        name=name,
+                        queues=hb.get("queues") or [],
+                        concurrency=int(hb.get("concurrency") or 0),
+                        ip=hb.get("ip"),
+                        hostname=hb.get("hostname"),
+                        pool=hb.get("pool"),
+                        status="offline",
+                        pid=hb.get("pid"),
+                        started_at=_hb_iso(hb.get("started_at")),
+                        last_seen=_hb_iso(hb.get("last_seen")),
                     )
                 )
             return WorkerListResponse(
-                total=len(workers), online=len(workers), workers=workers
+                total=len(workers), online=online, workers=workers
             )
 
         return await asyncio.to_thread(_inspect)

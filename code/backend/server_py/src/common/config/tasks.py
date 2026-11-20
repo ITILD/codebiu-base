@@ -10,6 +10,7 @@
       result_backend: redis://127.0.0.1:6379/2
 """
 import logging
+import os
 
 from common.config.index import conf
 
@@ -46,12 +47,14 @@ def _build_celery_app():
         broker=BROKER_URL,
         backend=RESULT_BACKEND,
         # 导入各模块注册的任务(按需追加)
-        include=[
+        # beat 只按任务名投递消息、不需要任务实现，跳过导入可省约 60MB 内存
+        include=[] if os.environ.get("TASK_ROLE", "worker") == "beat" else [
             "module_task.tasks.demo",
             "module_task.tasks.maintenance",
             "module_task.tasks.schedule_beat",
             "module_rag.tasks.project_document",
             "module_rag.tasks.project_document_chunk",
+            "module_agent.tasks",
         ],
     )
 
@@ -70,8 +73,21 @@ def _build_celery_app():
         broker_transport_options={
             "priority_steps": list(range(10)),
             "queue_order_strategy": "priority",
+            # 可见超时(8h > 最长任务时长): 未 ack 的消息被其他 worker 重投前的等待期,
+            # 过短会导致长任务执行中被重复投递; 与 acks_late 配合构成"执行完才 ack"语义
+            "visibility_timeout": 28800,
         },
+        # 结果后端同样设置可见超时(与 broker 对齐, 防结果键提前重投)
+        result_backend_transport_options={"visibility_timeout": 28800},
         task_inherit_parent_priority=True,
+        # ---- 长任务可靠性配置(进程崩溃/OOM 不丢任务) ----
+        # 执行完成才 ack: worker 进程被 kill 时消息未 ack, 由 broker 重投
+        task_acks_late=True,
+        # worker 进程丢失(崩溃/OOM)时任务消息拒绝并重投(需 acks_late 配合);
+        # 与 Reaper 清扫互补: 消息级秒级恢复 + 状态级兜底对账
+        task_reject_on_worker_lost=True,
+        # 每次只预取 1 条任务: 多实例公平抢占不囤积(入口 app_task.py 亦显式传入)
+        worker_prefetch_multiplier=1,
         # 周期调度 beat(REQ-012): 每分钟 tick 一次, 调度定义落库热更
         # (无需随调度增改重启 beat); 仅启动 beat 进程时生效
         beat_schedule={

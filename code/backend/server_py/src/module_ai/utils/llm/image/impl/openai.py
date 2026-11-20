@@ -8,7 +8,7 @@
 
 import json
 
-import aiohttp
+import httpx
 
 from module_ai.utils.llm.image.interface import ImageGenerator
 
@@ -127,14 +127,14 @@ class OpenAIImage(ImageGenerator):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(self.endpoint, headers=headers, json=payload) as response:
-                body = await response.text()
-                if response.status >= 400:
-                    raise RuntimeError(
-                        f"图像生成请求失败({response.status}): {body[:500]}"
-                    )
+        timeout = httpx.Timeout(self.timeout)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(self.endpoint, headers=headers, json=payload)
+            body = response.text
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"图像生成请求失败({response.status_code}): {body[:500]}"
+                )
         results = self._parse_result(json.loads(body))
         if not results:
             raise RuntimeError(f"图像生成结果为空: {body[:300]}")

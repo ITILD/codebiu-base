@@ -38,7 +38,9 @@ class ProjectDocumentChunkBase(VectorModel):
     )
 # 拆分到向量库的内容
 class ProjectDocumentChunk(ProjectDocumentChunkBase, table=True):
+    # 向量在入库路线确定后回填(完整路线=实际向量, 降级路线=零向量), 构造时允许为空
     embedding: list[float] = Field(
+        default_factory=list,
         description="向量数据",
         json_schema_extra={"vector_dim": 1024},
     )

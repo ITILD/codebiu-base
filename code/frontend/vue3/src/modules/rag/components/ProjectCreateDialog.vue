@@ -7,7 +7,7 @@
       </el-form-item>
       <el-form-item label="分类" prop="kb_category">
         <el-select v-model="form.kb_category" placeholder="请选择分类" w-full>
-          <el-option v-for="opt in kbCategoryOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          <el-option v-for="opt in kbCategorySelectable" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
       </el-form-item>
       <el-form-item label="描述" prop="description">
@@ -29,7 +29,7 @@
 <script setup lang="ts">
 // 新建知识库项目对话框: 内部自持表单状态, expose.open 打开(打开时重置), 保存成功 emit saved 由父级刷新列表
 import { createRagProject } from '../api/project'
-import { KbCategory, kbCategoryOptions } from '../types'
+import { KbCategory, kbCategorySelectable } from '../types'
 import { useCrudDialog } from '@/common/composables/useCrudDialog'
 import { ElMessage } from 'element-plus'
 

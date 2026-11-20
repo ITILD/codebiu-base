@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 
 
 class KbCategory(str, Enum):
-    """知识库分类枚举(个人/项目/公司)"""
+    """知识库分类枚举(个人/项目/公司/临时)"""
     PERSONAL = "personal"
     PROJECT = "project"
     COMPANY = "company"
+    # 问答附件临时库: 系统按用户自动创建维护(每用户至多一个), 不允许手动新建
+    TEMP = "temp"
 
     @classmethod
     def values(cls) -> tuple[str, ...]:

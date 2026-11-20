@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 // 产物预压缩: 构建时同时生成 .gz/.br, 部署后由服务器直接回源压缩文件
@@ -56,6 +56,25 @@ const pptLegacyPrunePlugin = {
     }
   },
 }
+// 终端可点击服务地址: Vite 默认给 URL 里的端口号单独包 ANSI 加粗色,
+// 转义码把 http://IP 与端口从中间截断, 终端(Ctrl+Click)识别不出完整链接;
+// 覆盖 printUrls 改为输出纯文本 URL(dev 与 preview 均生效)
+const printPlainUrls = (
+  urls: { local: string[]; network: string[] } | null | undefined,
+  info: (msg: string) => void,
+) => {
+  for (const url of urls?.local ?? []) info(`  ➜  Local:   ${url}`)
+  for (const url of urls?.network ?? []) info(`  ➜  Network: ${url}`)
+}
+const clickableUrlPlugin: Plugin = {
+  name: 'clickable-server-urls',
+  configureServer(server) {
+    server.printUrls = () => printPlainUrls(server.resolvedUrls, server.config.logger.info)
+  },
+  configurePreviewServer(server) {
+    server.printUrls = () => printPlainUrls(server.resolvedUrls, server.config.logger.info)
+  },
+}
 // 代理
 import { createProxy } from './tools/vite/proxy'; // 代理
 import { killPort } from './tools/vite/kill_port';
@@ -90,6 +109,7 @@ export default defineConfig(
       // 插件配置
       plugins: [
         versionFilePlugin,
+        clickableUrlPlugin,
         // 预压缩产物(gzip + brotli): 传输体积大幅下降, 不影响原始文件回退
         ...(mode === 'production'
           ? [compression({ algorithms: ['gzip', 'brotli'] })]

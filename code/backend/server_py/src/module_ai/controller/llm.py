@@ -23,6 +23,7 @@ from module_ai.do.llm import (
     TtsTestRequest,
 )
 from common.utils.fastapi_ex.exceptions import BusinessError
+from module_authorization.dependencies.auth import get_current_user_id_optional
 from module_ai.config.server import module_app
 from module_ai.do.model_config import ModelConfigCreateRequest
 from module_ai.utils.llm.token.tokenizer import Tokenizer
@@ -182,6 +183,7 @@ async def test_ocr(
 async def generate_image(
     request: ImageGenerateRequest,
     llm_service: LLMService = Depends(get_llm_service),
+    current_user_id: str | None = Depends(get_current_user_id_optional),
 ) -> ImageGenerateResponse:
     """按模型配置生成图像(百炼 qwen-image 系列 / OpenAI 兼容生图服务)
 
@@ -191,7 +193,26 @@ async def generate_image(
     - **model_id**: 模型配置ID(缺省取 image 类型默认配置)
     """
     try:
-        return await llm_service.generate_image(request)
+        response = await llm_service.generate_image(request)
+        # 用量旁路记账: 生图按张计费(ok 且有产出才记; 匿名调用不记; 失败不影响主流程)
+        if response.ok and response.images and current_user_id:
+            import asyncio as _asyncio
+
+            user_id = current_user_id
+
+            async def _record() -> None:
+                from module_rag.service.usage import ChatUsageService
+
+                await ChatUsageService().record_call(
+                    user_id,
+                    "image",
+                    float(len(response.images)),
+                    model_id=response.model_id,
+                    model_name=response.model or None,
+                )
+
+            _asyncio.create_task(_record())
+        return response
     except BusinessError as e:
         # 参考图超限/压缩失败等输入问题: 400 便于前端直接提示用户
         raise HTTPException(status_code=400, detail=str(e))

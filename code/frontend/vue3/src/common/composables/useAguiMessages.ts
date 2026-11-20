@@ -13,11 +13,13 @@ import { reactive } from 'vue'
 import {
   AGUI_CUSTOM_NAME,
   EventType,
+  type AgentPlanItem,
   type AguiEvent,
   type InteractionSpec,
   type MessageInteraction,
 } from '@/common/types/agui'
 import type { MessageBlock } from '@/common/types/chat'
+import { StreamEventType } from '@/common/types/chat'
 
 /** 意图分析节点的 reasoning 沿用"意图分析"标签(对齐 legacy 协议观感) */
 const INTENT_STEP = 'intent_analysis'
@@ -49,6 +51,8 @@ class AguiMessageAggregator {
 
   private seq = 0
   private toolBlocks = new Map<string, MessageBlock>()
+  /** 任务清单块(单例: 全量替换 data, 不追加新块, REQ-002 §6.2) */
+  private planBlock: MessageBlock | null = null
 
   /** 重置(复用实例时调用) */
   reset(): void {
@@ -59,6 +63,7 @@ class AguiMessageAggregator {
     this.error = ''
     this.seq = 0
     this.toolBlocks.clear()
+    this.planBlock = null
   }
 
   /** 是否有可见输出(用于过滤空消息) */
@@ -155,6 +160,56 @@ class AguiMessageAggregator {
       if (spec && spec.interaction_id) {
         this.interactions.push({ spec, responded: false, response: null })
       }
+    } else if (name === AGUI_CUSTOM_NAME.MODE_DECISION) {
+      // 模式决策(REQ-019 §2.2): 展示"为什么是这个执行模式"
+      const reason = String(value.reason || '')
+      if (reason) {
+        this.appendBlock(StreamEventType.MODE_DECISION, this.currentStep, reason, value)
+      }
+    } else if (name === AGUI_CUSTOM_NAME.PLAN_UPDATE) {
+      // 任务清单(REQ-002 §6.2): 单例块, 全量替换 data; run_id 供断线兜底
+      const items = (Array.isArray(value.items) ? value.items : []).map(
+        (it) => ({ ...(it as AgentPlanItem) })
+      )
+      if (!this.planBlock) {
+        this.planBlock = {
+          id: `agui-${this.seq++}-plan`,
+          node_name: '',
+          type: 'process',
+          content: '',
+          stream_event_type: StreamEventType.AGENT_PLAN,
+        }
+        this.blocks.push(this.planBlock)
+      }
+      this.planBlock.data = {
+        items,
+        run_id: String(value.run_id || (this.planBlock.data?.run_id ?? '')),
+      }
+      this.planBlock.content = `任务清单 ${items.length} 项`
+    } else if (name === AGUI_CUSTOM_NAME.VERDICT) {
+      // 单项验收: 就地更新清单块(清单是唯一事实的投影)
+      const items = (this.planBlock?.data?.items as AgentPlanItem[] | undefined) ?? []
+      const target = items.find((it) => it.id === String(value.item_id || ''))
+      if (!target) return
+      const passed = Boolean(value.passed)
+      target.status = passed ? 'done' : 'pending'
+      target.verdict_passed = passed
+      target.verdict_reason = String(value.reason || '')
+      target.attempts = Number(value.attempts ?? target.attempts ?? 0)
+      if (!passed) target.last_reason = String(value.reason || '')
+      if (value.run_id && this.planBlock) {
+        this.planBlock.data = { ...this.planBlock.data, run_id: String(value.run_id) }
+      }
+    } else if (name === AGUI_CUSTOM_NAME.SKILL_MASKED) {
+      // 技能熔断: 过程区提示(本次执行已摘除, 避免用户以为技能仍在生效)
+      const key = String(value.skill_key || '')
+      const reason = String(value.reason || '')
+      this.appendBlock(
+        StreamEventType.SKILL_MASKED,
+        this.currentStep,
+        `${key}${reason ? `（${reason}）` : ''}`,
+        value
+      )
     }
   }
 

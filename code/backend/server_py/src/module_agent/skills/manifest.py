@@ -143,6 +143,11 @@ class SkillManifest(BaseModel):
     cancel: bool = Field(default=False, description="是否支持取消")
     side_effects: str = Field(default=SideEffect.READ.value, description="副作用声明")
     agent_callable: bool = Field(default=True, description="是否暴露给 ai_agent tool-calling")
+    requires_features: list[str] = Field(
+        default_factory=list,
+        description="运行特性门控(条件注册用, REQ-019 §5.1): web=联网可用 / sandbox=沙箱就绪 / "
+        "knowledge_base=会话命中知识库; 任一不满足则该 Skill 不注册为工具",
+    )
     prompt: dict[str, Any] | None = Field(
         default=None,
         description="prompt 类型专用(批次 2): {template: '含{{字段}}占位', output_format: 'text'|'json'};"
@@ -223,5 +228,14 @@ class SkillManifest(BaseModel):
 
 
 def tool_name_to_uid(tool_name: str) -> str:
-    """LLM 工具名还原为注册表键(与 SkillManifest.tool_name 互逆)"""
+    """LLM 工具名还原为注册表键(与 SkillManifest.tool_name 互逆)
+
+    优先查注册表精确反查表: 多级命名空间(pack.*/mcp.*)的 tool 名含多个
+    下划线, 单纯替换首个下划线不可逆; 注册表未命中(如测试构造)再退回启发式。
+    """
+    from module_agent.skills.registry import uid_by_tool_name  # 延迟导入避免循环依赖
+
+    exact = uid_by_tool_name(tool_name)
+    if exact is not None:
+        return exact
     return tool_name.replace("_", ".", 1)

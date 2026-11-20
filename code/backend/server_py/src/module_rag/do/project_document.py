@@ -129,11 +129,9 @@ class DocType:
     """RAG文档允许的文件类型
 
     白名单与解析引擎注册表(EngineRegistry)的真实支持面对齐:
-    pdf + Office(doc/docx/ppt/pptx) + 图片(png/jpg/jpeg)。
-    Office 格式默认由 MinerU 4.0 解析; docx/pptx 在 MinerU 不可用时自动降级到
-    本地 Office 引擎, doc/ppt 为二进制旧格式, 仅 MinerU 可解析。
-    纯文本类(txt/md 等)引擎不支持, 不入知识库白名单 —— 仅会话临时文件
-    口径(rag_chat.parse_temp_file)做轻量解码, 不经解析引擎。
+    pdf + Office(doc/docx/ppt/pptx) + 图片(png/jpg/jpeg) 走 MinerU/本地引擎;
+    纯文本类(txt/md/csv/log/json) 由本地文本引擎直读(不依赖外部解析服务),
+    问答附件与知识库上传共用同一白名单。
     """
 
     PDF = "pdf"
@@ -144,13 +142,19 @@ class DocType:
     PNG = "png"
     JPG = "jpg"
     JPEG = "jpeg"
+    TXT = "txt"
+    MD = "md"
+    CSV = "csv"
+    LOG = "log"
+    JSON = "json"
 
     # 场景分类，方便分组展示
     DOCUMENT_TYPES = (PDF, DOC, DOCX, PPT, PPTX)
     IMAGE_TYPES = (PNG, JPG, JPEG)
+    TEXT_TYPES = (TXT, MD, CSV, LOG, JSON)
 
     # 允许上传的扩展名集合(不含点) = 解析引擎真实支持面
-    ALLOWED_EXTENSIONS = DOCUMENT_TYPES + IMAGE_TYPES
+    ALLOWED_EXTENSIONS = DOCUMENT_TYPES + IMAGE_TYPES + TEXT_TYPES
 
     # 判断文件扩展名是否在允许的集合中 pdf/docx/pptx 等
     @staticmethod

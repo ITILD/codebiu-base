@@ -373,6 +373,11 @@
       <el-tab-pane label="用量统计" name="usage" lazy>
         <UsageSummaryPanel />
       </el-tab-pane>
+
+      <!-- ============================== 运行看板(REQ-002 §7: 北极星) ============================== -->
+      <el-tab-pane label="运行看板" name="north-star" lazy>
+        <NorthStarPanel />
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 技能调试抽屉(403 优雅处理) -->
@@ -410,6 +415,7 @@ import InvocationDetailDialog from '../components/InvocationDetailDialog.vue'
 import JobRunDetailDialog from '../components/JobRunDetailDialog.vue'
 import ExternalSkillsPanel from '../components/ExternalSkillsPanel.vue'
 import UsageSummaryPanel from '../components/UsageSummaryPanel.vue'
+import NorthStarPanel from '../components/NorthStarPanel.vue'
 
 const route = useRoute()
 const { hasPerm } = usePermission()

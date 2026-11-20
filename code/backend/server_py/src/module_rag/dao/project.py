@@ -95,6 +95,23 @@ class ProjectDao:
         return await session.get(Project, id)
 
     @DaoRel
+    async def get_temp_kb(
+        self, created_by: str, session: AsyncSession | None = None
+    ) -> Project | None:
+        """
+        查询用户的临时知识库(temp 分类, 每用户至多一个, 部分唯一索引兜底)
+        :param created_by: 用户ID
+        :return: 临时知识库对象, 未创建返回 None
+        """
+        stmt = (
+            select(Project)
+            .where(Project.kb_category == "temp", Project.created_by == created_by)
+            .order_by(Project.created_at)
+            .limit(1)
+        )
+        return (await session.exec(stmt)).first()
+
+    @DaoRel
     async def get_by_root_entry_ids(
         self, root_entry_ids: list[str], session: AsyncSession | None = None
     ) -> list[Project]:

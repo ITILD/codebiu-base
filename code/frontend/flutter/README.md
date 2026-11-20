@@ -2,6 +2,8 @@
 
 Flutter 3.47（Dart 3.13）+ provider + dio + shared_preferences。一套代码同时构建 Android / iOS / Linux / Windows / macOS 客户端，手机与 PC 桌面统一**手机尺寸界面**（桌面窗口 420×880，宽屏内容限宽 460 居中）。
 
+> **AI 能力平台落点**：客户端以「对话即入口」承载 Agent，空态功能卡片对应 Skill/业务流程，模型配置页对应 Model；契约见 [04-AI能力平台架构设计](../../../doc/02-设计文档/04-AI能力平台架构设计.md)。
+
 ## 快速开始
 
 ```bash

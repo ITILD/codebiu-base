@@ -10,12 +10,13 @@ import { MagicStick, CopyDocument, Promotion, Document, DataLine, Paperclip } fr
 import { ElMessage } from 'element-plus'
 import MarkdownContent from './MarkdownContent.vue'
 import ProcessBlock from './ProcessBlock.vue'
+import AgentPlanCard from './AgentPlanCard.vue'
 import InteractiveCard from './InteractiveCard.vue'
 import AnswerSourceBar from './AnswerSourceBar.vue'
 import { copyToClipboard, exportMarkdownToDocx, exportMarkdownToPdf } from '@/common/utils/export'
 import { StreamEventType } from '@/common/types/chat'
 import type { DisplayMessage } from '@/common/types/chat'
-import type { InteractionResponsePayload } from '@/common/types/agui'
+import type { AgentPlanItem, InteractionResponsePayload } from '@/common/types/agui'
 
 interface Props {
   messages: DisplayMessage[]
@@ -104,6 +105,20 @@ const attachmentNames = (msg: DisplayMessage): string[] =>
     .filter((b) => b.stream_event_type === StreamEventType.TEMP_FILE)
     .map((b) => b.content)
 
+/** 任务清单项(单例 agent_plan 块, 与过程区块分开渲染) */
+const planItems = (msg: DisplayMessage): AgentPlanItem[] => {
+  const block = (msg.blocks ?? []).find(
+    (b) => b.stream_event_type === StreamEventType.AGENT_PLAN
+  )
+  return (block?.data?.items as AgentPlanItem[] | undefined) ?? []
+}
+
+/** 过程区块(排除任务清单块, 避免清单被当成普通日志行) */
+const processBlocks = (msg: DisplayMessage) =>
+  (msg.blocks ?? []).filter(
+    (b) => b.stream_event_type !== StreamEventType.AGENT_PLAN
+  )
+
 const handleCopy = async (text: string) => {
   if (await copyToClipboard(text)) {
     ElMessage.success('已复制到剪贴板')
@@ -165,9 +180,15 @@ const handleExportPdf = async (msg: DisplayMessage) => {
             <el-icon :size="16"><MagicStick /></el-icon>
           </div>
           <div class="flex-1 min-w-0">
+            <!-- 任务清单(五拍协议: 计划—验收—产物链路的第一环) -->
+            <AgentPlanCard
+              :items="planItems(msg)"
+              :streaming="msg.id === streamingMessageId"
+            />
+
             <!-- 过程区块(思考/检索引用溯源, 折叠展示) -->
             <ProcessBlock
-              :blocks="msg.blocks ?? []"
+              :blocks="processBlocks(msg)"
               :streaming="msg.id === streamingMessageId"
             />
 

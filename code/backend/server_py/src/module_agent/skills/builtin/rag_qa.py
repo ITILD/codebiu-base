@@ -49,6 +49,7 @@ register_skill(
         retry=RetrySpec(max=1),
         side_effects="read",
         agent_callable=True,
+        requires_features=["knowledge_base"],  # 会话未命中知识库不注册(REQ-019 §5.1)
     )
 )
 

@@ -60,7 +60,8 @@ class DuckDuckGoEngine(SearchEngine):
             response = await client.post(SEARCH_URL, data=form)
             response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "lxml")
+        # html.parser 为标准库实现(免 lxml 依赖); 此处仅做简单 CSS 选择, 性能足够
+        soup = BeautifulSoup(response.text, "html.parser")
         for item in soup.select("div.result"):
             if len(results) >= limit:
                 break

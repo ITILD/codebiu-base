@@ -36,6 +36,8 @@ TASK_DEFINE = ModulePermissionDefine(
                 PermNode(name="创建", code="task:queue:create", menu_type="F"),
                 PermNode(name="操作", code="task:queue:update", menu_type="F"),
                 PermNode(name="删除", code="task:queue:delete", menu_type="F"),
+                # 执行器运维(P3): 宿主机纳管/副本伸缩/容器启停/优雅摘除, 高危仅管理员分配
+                PermNode(name="执行器运维", code="task:worker:manage", menu_type="F"),
             ],
         ),
         PermNode(

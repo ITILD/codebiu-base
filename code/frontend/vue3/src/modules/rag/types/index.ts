@@ -3,11 +3,12 @@
 import type { MessageBlock } from '@/common/types/chat';
 import type { MessageInteraction } from '@/common/types/agui';
 
-// 知识库分类: 个人/项目/公司
+// 知识库分类: 个人/项目/公司/临时(temp 为系统自动创建的问答附件临时库)
 enum KbCategory {
   PERSONAL = 'personal',
   PROJECT = 'project',
   COMPANY = 'company',
+  TEMP = 'temp',
 }
 
 // 项目级角色
@@ -237,13 +238,18 @@ interface ChatMessage {
 interface RagChatRequest {
   /** 交互卡片响应时可为空(纯点击提交) */
   message?: string;
+  /** 智能体ID: 决定执行方式与运行参数(快速=固定 RAG / 思考=ReAct) */
+  agent_id?: string;
   project_ids?: string[];
-  deep_thinking?: boolean;
+  /** 知识库范围: auto=自动匹配有权限的知识库 / manual=仅用 project_ids / off=禁用 */
+  kb_mode?: 'auto' | 'manual' | 'off';
+  /** 兼容字段: 未选智能体时的对话模式(选择内置智能体时由 agent_id 决定) */
+  mode?: 'auto' | 'fast' | 'thinking';
   rerank_limit?: number;
   /** 联网搜索: 不传=跟随通用配置全局开关; true/false 请求级覆盖 */
   enable_websearch?: boolean;
-  /** 临时文件: 本次问答上下文(不入知识库, 经 SystemMessage 注入可多轮追问) */
-  temp_files?: TempFilePayload[];
+  /** 本条消息附件文件名(附件已入库个人默认临时知识库, 仅作消息区块标记) */
+  attachments?: string[];
   /** 交互卡片响应 {interaction_id, action, value} */
   interaction_response?: {
     interaction_id: string;
@@ -251,22 +257,6 @@ interface RagChatRequest {
     value?: string;
   } | null;
   // 注: 接口已统一 AG-UI 协议事件流, 无需再声明流式协议参数
-}
-
-// 会话临时文件载荷(随聊天请求回传, 内容来自 parse-temp-file)
-interface TempFilePayload {
-  /** 文件名(展示与溯源用) */
-  name: string;
-  /** 解析后的文本内容 */
-  content: string;
-}
-
-// 临时文件解析结果(POST /rag/rag-chat/parse-temp-file 响应)
-interface TempFileParseResult {
-  file_name: string;
-  content: string;
-  chars: number;
-  truncated: boolean;
 }
 
 // 对话总结结果
@@ -303,17 +293,21 @@ export type {
   ConversationUpdate,
   ChatMessage,
   RagChatRequest,
-  TempFilePayload,
-  TempFileParseResult,
   ConversationSummary,
 };
 
-// 知识库分类显示配置
+// 知识库分类显示配置(temp 为系统自动创建, 不在新建/编辑可选列表中)
 const kbCategoryOptions = [
   { label: '个人知识库', value: KbCategory.PERSONAL },
   { label: '项目知识库', value: KbCategory.PROJECT },
   { label: '公司知识库', value: KbCategory.COMPANY },
+  { label: '临时知识库', value: KbCategory.TEMP },
 ];
+
+/** 可手动新建/切换的分类选项(排除系统托管的 temp) */
+const kbCategorySelectable = kbCategoryOptions.filter(
+  (o) => o.value !== KbCategory.TEMP
+);
 
 // 项目角色显示配置
 const ragRoleOptions = [
@@ -333,4 +327,4 @@ const parseStatusOptions: Record<
   [ParseStatus.FAILED]: { label: '解析失败', tag: 'danger' },
 };
 
-export { kbCategoryOptions, ragRoleOptions, parseStatusOptions };
+export { kbCategoryOptions, kbCategorySelectable, ragRoleOptions, parseStatusOptions };

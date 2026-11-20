@@ -15,3 +15,4 @@ from module_agent.agents.manifest import (  # noqa: F401 (重导出)
     register_agent_job,
 )
 from module_agent.agents import kb_ingest  # noqa: F401 (导入即注册)
+from module_agent.agents import ops  # noqa: F401 (导入即注册: ops_worker_heal 自愈编排, REQ-019 §6.2)

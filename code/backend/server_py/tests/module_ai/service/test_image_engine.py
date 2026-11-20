@@ -7,12 +7,12 @@
 - 引擎: 请求体默认参数合并与显式覆盖、结果解析(url/b64_json)、错误状态码抛错
 - 路由: /ai/llm/image、/ai/llm/test-image、/ai/llm/rerank 已注册
 
-说明: aiohttp.ClientSession 全局打桩, 零外部依赖, 不发起真实生图请求。
+说明: httpx.AsyncClient 全局打桩, 零外部依赖, 不发起真实生图请求。
 """
 
 import json
 
-import aiohttp
+import httpx
 import pytest
 
 from module_ai.do.llm import MODEL_CAPABILITIES
@@ -37,56 +37,40 @@ def _config(**kwargs):
     return ModelConfig(**data)
 
 
-# ==================== aiohttp 打桩(零外部依赖) ====================
-class _FakeAioResponse:
-    """aiohttp 响应桩: 预设状态码与文本内容"""
+# ==================== httpx 打桩(零外部依赖) ====================
+class _FakeHttpResponse:
+    """httpx 响应桩: 预设状态码与文本内容"""
 
-    def __init__(self, body: str, status: int = 200):
-        self._body = body
-        self.status = status
-
-    async def text(self) -> str:
-        return self._body
+    def __init__(self, body: str, status_code: int = 200):
+        self.text = body
+        self.status_code = status_code
 
 
-class _FakePostContext:
-    """session.post(...) 异步上下文桩"""
+class _FakeAsyncClient:
+    """httpx.AsyncClient 桩: 记录请求并按预设响应返回"""
 
-    def __init__(self, response: _FakeAioResponse):
-        self._response = response
+    last: "_FakeAsyncClient | None" = None
 
-    async def __aenter__(self) -> _FakeAioResponse:
-        return self._response
-
-    async def __aexit__(self, *args) -> bool:
-        return False
-
-
-class _FakeSession:
-    """aiohttp.ClientSession 桩: 记录请求并按预设响应返回"""
-
-    last: "_FakeSession | None" = None
-
-    def __init__(self, response: _FakeAioResponse, **kwargs):
+    def __init__(self, response: _FakeHttpResponse, **kwargs):
         self.response = response
         self.calls: list[dict] = []
         type(self).last = self
 
-    async def __aenter__(self) -> "_FakeSession":
+    async def __aenter__(self) -> "_FakeAsyncClient":
         return self
 
     async def __aexit__(self, *args) -> bool:
         return False
 
-    def post(self, url: str, headers: dict | None = None, json: dict | None = None):
+    async def post(self, url: str, headers: dict | None = None, json: dict | None = None):
         self.calls.append({"url": url, "headers": headers, "json": json})
-        return _FakePostContext(self.response)
+        return self.response
 
 
-def _patch_aiohttp(monkeypatch, response: _FakeAioResponse) -> None:
-    """替换 aiohttp.ClientSession 为打桩工厂(测试结束自动还原)"""
+def _patch_httpx(monkeypatch, response: _FakeHttpResponse) -> None:
+    """替换 httpx.AsyncClient 为打桩工厂(测试结束自动还原)"""
     monkeypatch.setattr(
-        aiohttp, "ClientSession", lambda **kw: _FakeSession(response, **kw)
+        httpx, "AsyncClient", lambda **kw: _FakeAsyncClient(response, **kw)
     )
 
 
@@ -182,7 +166,7 @@ def test_parse_result_url_and_b64():
 async def test_agenerate_success(monkeypatch):
     """成功响应: 请求体含提示词与默认参数, 返回图片列表"""
     body = json.dumps({"data": [{"url": "https://example.com/a.png"}]})
-    _patch_aiohttp(monkeypatch, _FakeAioResponse(body))
+    _patch_httpx(monkeypatch, _FakeHttpResponse(body))
     engine = OpenAIImage(
         api_key="test-key",
         model="qwen-image-3.0",
@@ -192,7 +176,7 @@ async def test_agenerate_success(monkeypatch):
     results = await engine.agenerate("一只戴墨镜的橘猫")
 
     assert results == [{"url": "https://example.com/a.png", "revised_prompt": ""}]
-    call = _FakeSession.last.calls[0]
+    call = _FakeAsyncClient.last.calls[0]
     assert call["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/images/generations"
     assert call["headers"]["Authorization"] == "Bearer test-key"
     assert call["json"] == {
@@ -205,7 +189,7 @@ async def test_agenerate_success(monkeypatch):
 
 async def test_agenerate_error_status(monkeypatch):
     """非 2xx 状态码: 抛出 RuntimeError 并带响应体摘要"""
-    _patch_aiohttp(monkeypatch, _FakeAioResponse('{"message": "invalid api key"}', 401))
+    _patch_httpx(monkeypatch, _FakeHttpResponse('{"message": "invalid api key"}', 401))
     engine = OpenAIImage(api_key="bad-key", model="qwen-image-3.0")
 
     with pytest.raises(RuntimeError, match="401"):
@@ -214,7 +198,7 @@ async def test_agenerate_error_status(monkeypatch):
 
 async def test_agenerate_empty_result(monkeypatch):
     """响应无图片: 抛出 RuntimeError"""
-    _patch_aiohttp(monkeypatch, _FakeAioResponse(json.dumps({"data": []})))
+    _patch_httpx(monkeypatch, _FakeHttpResponse(json.dumps({"data": []})))
     engine = OpenAIImage(api_key="test-key", model="qwen-image-3.0")
 
     with pytest.raises(RuntimeError, match="结果为空"):
