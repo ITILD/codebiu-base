@@ -40,17 +40,14 @@ router = APIRouter()
 
 
 def _record_call_usage(user_id: str | None, kind: str, quantity: float = 1.0) -> None:
-    """旁路记录一次语音调用用量(asr=次 / tts=字符, 成本按单价快照; 失败不影响主流程)
-
-    延迟导入避免模块加载期跨模块耦合(module_ai ← module_rag)。
-    """
+    """旁路记录一次语音调用用量(asr=次 / tts=字符, 成本按单价快照; 失败不影响主流程)"""
     if not user_id:
         return
 
     async def _run() -> None:
-        from module_rag.service.usage import ChatUsageService
+        from module_ai.service.usage import ChatUsageRecorder
 
-        await ChatUsageService().record_call(user_id, kind, quantity)
+        await ChatUsageRecorder().record_call(user_id, kind, quantity)
 
     asyncio.create_task(_run())
 

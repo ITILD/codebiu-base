@@ -11,6 +11,7 @@ from common.utils.db.schema.pagination import (
 from module_main.do.dict_item import DictItem, DictItemCreate, DictItemUpdate
 from module_main.dependencies.dict_item import get_dict_item_service
 from module_main.service.dict_item import DictItemService
+from module_authorization.dependencies.permission import require_permission
 from common.config.server import app
 
 router = APIRouter()
@@ -18,7 +19,9 @@ router = APIRouter()
 
 @router.post("", summary="创建字典项", status_code=status.HTTP_201_CREATED, response_model=str)
 async def create_dict_item(
-    dict_item: DictItemCreate, service: DictItemService = Depends(get_dict_item_service)
+    dict_item: DictItemCreate,
+    _: str = Depends(require_permission("main", "dict", "create")),
+    service: DictItemService = Depends(get_dict_item_service),
 ) -> str:
     """
     创建新字典项
@@ -33,6 +36,7 @@ async def create_dict_item(
 @router.get("/scroll", summary="滚动加载字典项")
 async def infinite_scroll(
     params: InfiniteScrollParams = Depends(),
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictItemService = Depends(get_dict_item_service),
 ) -> InfiniteScrollResponse:
     """
@@ -47,6 +51,7 @@ async def infinite_scroll(
 @router.get("/list", summary="分页查询字典项列表", response_model=PaginationResponse)
 async def list_dict_items(
     pagination: PaginationParams = Depends(),
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictItemService = Depends(get_dict_item_service),
 ) -> PaginationResponse:
     """
@@ -62,6 +67,7 @@ async def list_dict_items(
 @router.get("/by-type/{type_code}", summary="根据字典类型编码查询字典项列表", response_model=list[DictItem])
 async def list_dict_items_by_type(
     type_code: str,
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictItemService = Depends(get_dict_item_service),
 ) -> list[DictItem]:
     """
@@ -77,6 +83,7 @@ async def list_dict_items_by_type(
 @router.get("/by-type/{type_code}/count", summary="根据字典类型统计字典项数量", response_model=int)
 async def count_dict_items_by_type(
     type_code: str,
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictItemService = Depends(get_dict_item_service),
 ) -> int:
     """
@@ -92,6 +99,7 @@ async def count_dict_items_by_type(
 @router.get("/code/{item_code}", summary="根据编码获取字典项", response_model=DictItem)
 async def get_dict_item_by_code(
     item_code: str,
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictItemService = Depends(get_dict_item_service),
 ) -> DictItem:
     """
@@ -109,6 +117,7 @@ async def get_dict_item_by_code(
 @router.get("/{dict_item_id}", summary="获取单个字典项", response_model=DictItem)
 async def get_dict_item(
     dict_item_id: str,
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictItemService = Depends(get_dict_item_service),
 ) -> DictItem:
     """
@@ -126,6 +135,7 @@ async def get_dict_item(
 @router.delete("/{dict_item_id}", summary="删除字典项", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dict_item(
     dict_item_id: str,
+    _: str = Depends(require_permission("main", "dict", "delete")),
     service: DictItemService = Depends(get_dict_item_service),
 ) -> None:
     """
@@ -141,6 +151,7 @@ async def delete_dict_item(
 async def update_dict_item(
     dict_item_id: str,
     dict_item: DictItemUpdate,
+    _: str = Depends(require_permission("main", "dict", "update")),
     service: DictItemService = Depends(get_dict_item_service),
 ) -> None:
     """

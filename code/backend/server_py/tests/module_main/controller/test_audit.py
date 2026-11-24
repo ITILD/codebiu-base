@@ -39,7 +39,6 @@ async def test_login_audited_and_password_masked(anon_client, client, test_admin
 async def test_write_op_audited_with_operator(client, test_admin):
     """写操作(带鉴权依赖的 PUT /auth/me)应落库并记录操作人(user_id)
 
-    注: dict 系列接口历史设计无鉴权依赖, 无法验证操作人, 故选自助资料接口
     (提交与注册相同的昵称, 不产生真实数据变更)
     """
     resp = await client.put(
@@ -51,7 +50,17 @@ async def test_write_op_audited_with_operator(client, test_admin):
 
     data = await _query(client, keyword="/auth/me", method="PUT")
     assert data["total"] >= 1
-    entry = data["items"][0]
+    # 同秒内可能存在其他用户的 /auth/me 记录(排序不稳定), 按操作人+摘要定位本条
+    entry = next(
+        (
+            item
+            for item in data["items"]
+            if item["user_id"] == test_admin["id"]
+            and "测试管理员" in (item["params_digest"] or "")
+        ),
+        None,
+    )
+    assert entry is not None, data["items"]
     assert entry["user_id"] == test_admin["id"]
     assert "测试管理员" in (entry["params_digest"] or "")
 

@@ -33,9 +33,11 @@ WEBSEARCH_DEFINE = ModulePermissionDefine(
             ],
         ),
     ],
-    # 默认新模块不带权限(default_policies=[]):
-    # 普通用户需管理员在 角色管理→分配权限 中按需勾选本模块权限码
-    default_policies=[],
+    # 搜索能力内嵌于知识库会话页与独立搜索页, 为登录用户的基础能力:
+    # 默认授予 user 角色(管理员可按需在角色管理界面回收)
+    default_policies=[
+        ("websearch", "search", "read"),
+    ],
 )
 
 # 注册到权限中心(app 导入本模块 config 时生效)

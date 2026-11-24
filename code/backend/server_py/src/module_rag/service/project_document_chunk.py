@@ -92,13 +92,22 @@ class ProjectDocumentChunkService:
             )
             if rerank_llm:
                 logger.info(f"[Search] 深度思考已开启, 启动 Rerank 精排 | 候选数={len(results)}")
-                results = await self.rerank_candidates(
+                reranked = await self.rerank_candidates(
                     rerank_llm,
                     request.query_content,
                     results,
                     request.rerank_limit,
                     request.score_threshold,
                 )
+                if not reranked and results:
+                    # 降级保护: 精排全灭(多为分数量纲与 score_min/max 配置不符或阈值过严)
+                    # 保留精排前候选, 避免 Rerank 阈值配置错误导致深度思考丢失全部证据
+                    logger.warning(
+                        f"[Search] Rerank 精排将 {len(results)} 条候选全部过滤, "
+                        f"已降级保留精排前候选(建议核对 rerank 模型 extra.score_min/score_max 配置)"
+                    )
+                else:
+                    results = reranked
                 logger.info(f"[Search] Rerank 精排完成 | 最终返回={len(results)} 条")
             else:
                 logger.warning(f"[Search] 深度思考已开启但用户未绑定 Rerank 模型, 跳过精排")

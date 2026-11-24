@@ -5,7 +5,7 @@ from sqlmodel import select, func
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from common.config.db import DaoRel
-from module_rag.do.usage import ChatUsage
+from module_ai.do.usage import ChatUsage
 
 
 class ChatUsageDao:

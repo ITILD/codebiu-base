@@ -13,9 +13,11 @@ from common.utils.db.schema.pagination import (
 
 from fastapi import APIRouter, status, Depends
 from common.utils.fastapi_ex.exceptions import NotFoundError
+from module_authorization.dependencies.auth import get_current_user_id
 
 router = APIRouter()
 
+# 模板为演示脚手架模块, 未声明独立权限码: 路由级统一要求登录(见 include_router)
 @router.post(
     "", summary="创建模板", status_code=status.HTTP_201_CREATED, response_model=str
 )
@@ -135,4 +137,9 @@ async def update_template(
     await service.update(template_id, template)
 
 
-module_app.include_router(router, prefix="/templates", tags=["基础模板"])
+module_app.include_router(
+    router,
+    prefix="/templates",
+    tags=["基础模板"],
+    dependencies=[Depends(get_current_user_id)],
+)

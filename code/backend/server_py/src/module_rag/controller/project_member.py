@@ -95,17 +95,21 @@ async def list_project_members(
 @router.get("/{member_id}", summary="获取单个项目成员", response_model=ProjectMember)
 async def get_project_member(
     member_id: str,
+    current_user_id: str = Depends(get_current_user_id),
     service: ProjectMemberService = Depends(get_project_member_service)
 ):
     """
-    获取单个项目成员详情
+    获取单个项目成员详情(需要该知识库的成员查看权限)
     :param member_id: 项目成员ID
+    :param current_user_id: 当前登录用户ID(由 token 自动解析)
     :param service: 项目成员服务依赖注入
     :return: 项目成员详情
     """
     result = await service.get(member_id)
     if not result:
         raise NotFoundError("项目成员未找到")
+    # 复用项目级权限校验, 防止未授权用户按ID探测他人项目成员信息
+    await enforce_project_permission(current_user_id, result.project_id, "member", "read")
     return result
 
 

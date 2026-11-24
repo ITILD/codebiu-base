@@ -1,9 +1,13 @@
-"""问答用量记录表模型与响应体(成本与用量治理数据底座)
+"""AI 调用用量记录表模型与响应体(成本与用量治理数据底座)
 
-每轮问答落一条记录:
+每轮问答/每次能力调用落一条记录:
 - token 数在回答完成时统计快照(输入含 system prompt 与历史消息)
 - cost 按当次模型单价快照计算(pay_in/pay_out 口径: 元/百万token),
   后续单价调整不影响历史记录
+
+架构说明: 用量记账是 AI 能力平台的横切数据 sink, 归属 module_ai 底层,
+module_rag(问答编排)与 module_ai(直连调用)均写入本表; 管理端统计查询
+(需关联会话标题)由 module_rag.service.usage 提供。
 """
 from pydantic import BaseModel
 from sqlmodel import Column, DateTime, Field, SQLModel
@@ -12,7 +16,7 @@ from datetime import datetime, timezone
 
 
 class ChatUsage(SQLModel, table=True):
-    """问答用量数据库模型"""
+    """AI 调用用量数据库模型"""
 
     __tablename__ = "chat_usage"
 
@@ -24,12 +28,12 @@ class ChatUsage(SQLModel, table=True):
     )
     user_id: str = Field(..., max_length=50, index=True, description="发起用户ID")
     conversation_id: str = Field(
-        ..., max_length=50, index=True, description="所属对话ID"
+        ..., max_length=50, index=True, description="所属对话ID(非对话内调用为空串)"
     )
     agent_id: str | None = Field(default=None, max_length=50, description="智能体ID")
     # 回答使用的模型标识(model_config.model), 旁路记录失败时可能为空
     model_name: str | None = Field(default=None, max_length=200, description="模型标识")
-    # 执行模式: fast/thinking/deep
+    # 执行模式: fast/thinking/deep 或能力标识(asr/tts/image)
     mode: str = Field(default="", max_length=20, description="执行模式")
     prompt_tokens: int = Field(default=0, description="输入token数")
     completion_tokens: int = Field(default=0, description="输出token数")

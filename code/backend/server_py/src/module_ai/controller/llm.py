@@ -23,7 +23,7 @@ from module_ai.do.llm import (
     TtsTestRequest,
 )
 from common.utils.fastapi_ex.exceptions import BusinessError
-from module_authorization.dependencies.auth import get_current_user_id_optional
+from module_authorization.dependencies.auth import get_current_user_id
 from module_ai.config.server import module_app
 from module_ai.do.model_config import ModelConfigCreateRequest
 from module_ai.utils.llm.token.tokenizer import Tokenizer
@@ -45,6 +45,7 @@ _tokenizer = Tokenizer()
 @router.post("/check-config", summary="配置校验")
 async def check_config(
     model_config: ModelConfigCreateRequest,
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ) -> ModelConfigCheckResponse:
     """
@@ -59,6 +60,7 @@ async def check_config(
 @router.post("/check-config-by-model-id", summary="配置校验")
 async def check_config_by_model_id(
     model_id: str,
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ):
     """
@@ -73,6 +75,7 @@ async def check_config_by_model_id(
 @router.post("/test-by-model-id", summary="模型能力测试")
 async def test_by_model_id(
     request: ModelTestRequest,
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ) -> ModelTestResponse:
     """
@@ -91,6 +94,7 @@ async def test_by_model_id(
 @router.post("/test-custom", summary="模型单独测试(自定义参数)")
 async def test_custom(
     request: ModelCustomTestRequest,
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ) -> ModelCustomTestResponse:
     """按模型配置ID用自定义参数做单次真实调用(chat 问答/向量化/重排打分)
@@ -115,6 +119,7 @@ async def test_custom(
 @router.post("/test-tts", summary="TTS 单独测试(文本合成语音)")
 async def test_tts(
     request: TtsTestRequest,
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ):
     """按指定 TTS 模型配置把自定义文本合成语音, 直接返回 WAV 音频(试听)
@@ -143,6 +148,7 @@ async def test_tts(
 async def test_asr(
     model_id: str = Form(..., description="模型配置ID"),
     audio: UploadFile = Form(..., description="音频文件(WAV/MP3 等)"),
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ):
     """按指定 ASR 模型配置识别上传音频, 返回识别文本"""
@@ -163,6 +169,7 @@ async def test_asr(
 async def test_ocr(
     model_id: str = Form(..., description="模型配置ID"),
     image: UploadFile = Form(..., description="图片文件"),
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ):
     """按指定 OCR 模型配置识别上传图片, 返回识别文本行"""
@@ -182,8 +189,8 @@ async def test_ocr(
 @router.post("/image", response_model=ImageGenerateResponse, summary="图像生成(文生图/图生图)")
 async def generate_image(
     request: ImageGenerateRequest,
+    current_user_id: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
-    current_user_id: str | None = Depends(get_current_user_id_optional),
 ) -> ImageGenerateResponse:
     """按模型配置生成图像(百炼 qwen-image 系列 / OpenAI 兼容生图服务)
 
@@ -194,16 +201,16 @@ async def generate_image(
     """
     try:
         response = await llm_service.generate_image(request)
-        # 用量旁路记账: 生图按张计费(ok 且有产出才记; 匿名调用不记; 失败不影响主流程)
-        if response.ok and response.images and current_user_id:
+        # 用量旁路记账: 生图按张计费(ok 且有产出才记; 失败不影响主流程)
+        if response.ok and response.images:
             import asyncio as _asyncio
 
             user_id = current_user_id
 
             async def _record() -> None:
-                from module_rag.service.usage import ChatUsageService
+                from module_ai.service.usage import ChatUsageRecorder
 
-                await ChatUsageService().record_call(
+                await ChatUsageRecorder().record_call(
                     user_id,
                     "image",
                     float(len(response.images)),
@@ -226,6 +233,7 @@ async def generate_image(
 @router.post("/test-image", response_model=ImageGenerateResponse, summary="生图单独测试")
 async def test_image(
     request: ImageTestRequest,
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ) -> ImageGenerateResponse:
     """按指定模型配置生成图片(模型配置页单独测试, 失败以 ok=False 返回)
@@ -243,6 +251,7 @@ async def test_image(
 @router.post("/rerank", response_model=RerankResponse, summary="文本重排序")
 async def rerank_documents(
     request: RerankRequest,
+    _: str = Depends(get_current_user_id),
     llm_service: LLMService = Depends(get_llm_service),
 ) -> RerankResponse:
     """对文档列表按查询相关性重排序(与生图/对话同属 llm 能力线)
@@ -301,9 +310,21 @@ async def chat_completion(
         raise HTTPException(status_code=500, detail=f"模型调用失败: {str(e)}")
 
 
+@router.delete("/cache", summary="清除全部模型缓存")
+async def clear_all_cache(
+    _: str = Depends(get_current_user_id),
+    llm_service: LLMService = Depends(get_llm_service),
+):
+    """清空全部已缓存的模型实例, 使后续请求重新加载模型配置"""
+    llm_service.clear_cache(None)
+    return {"message": "所有模型缓存已清除"}
+
+
 @router.delete("/cache/{model_id}", summary="清除模型缓存")
 async def _test_cache_clear(
-    model_id: str, llm_service: LLMService = Depends(get_llm_service)
+    model_id: str,
+    _: str = Depends(get_current_user_id),
+    llm_service: LLMService = Depends(get_llm_service),
 ):
     """
     按 model_id 前缀匹配清除已缓存的模型实例，使下次请求重新加载模型；model_id 为空时清空全部模型缓存

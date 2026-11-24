@@ -1,7 +1,7 @@
 """知识库模块 conversation 接口层: 参数校验并调度 service"""
 
 from fastapi import APIRouter, status, Depends
-from common.utils.fastapi_ex.exceptions import NotFoundError
+from common.utils.fastapi_ex.exceptions import ForbiddenError, NotFoundError
 from common.utils.db.schema.pagination import PaginationParams, PaginationResponse
 from pydantic import field_validator
 from module_rag.do.conversation import (
@@ -16,12 +16,25 @@ from module_rag.dependencies.conversation import (
     get_chat_message_service,
 )
 from module_authorization.dependencies.auth import get_current_user_id
+from module_authorization.config.casbin_rule import is_global_admin
 from module_rag.config.server import module_app
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _get_owned_conversation(
+    conversation_id: str, user_id: str, service: ConversationService
+) -> Conversation:
+    """取会话并校验访问权限: 属主或全局管理员可访问, 其余 403(修复越权读写他人会话)"""
+    conv = await service.get(conversation_id)
+    if conv is None:
+        raise NotFoundError("对话未找到")
+    if conv.user_id != user_id and not is_global_admin(user_id):
+        raise ForbiddenError("无权访问该对话")
+    return conv
 
 
 @router.post("", summary="创建对话", status_code=status.HTTP_201_CREATED, response_model=str)
@@ -51,31 +64,33 @@ async def list_my_conversations(
 @router.get("/{conversation_id}", summary="获取对话详情", response_model=Conversation)
 async def get_conversation(
     conversation_id: str,
+    current_user_id: str = Depends(get_current_user_id),
     service: ConversationService = Depends(get_conversation_service),
 ):
-    """按ID查询对话详情, 对话不存在时返回404"""
-    result = await service.get(conversation_id)
-    if not result:
-        raise NotFoundError("对话未找到")
-    return result
+    """按ID查询对话详情(仅属主/全局管理员), 对话不存在时返回404"""
+    return await _get_owned_conversation(conversation_id, current_user_id, service)
 
 
 @router.put("/{conversation_id}", summary="更新对话", status_code=status.HTTP_204_NO_CONTENT)
 async def update_conversation(
     conversation_id: str,
     data: ConversationUpdate,
+    current_user_id: str = Depends(get_current_user_id),
     service: ConversationService = Depends(get_conversation_service),
 ):
-    """更新对话(标题/智能体/知识库)"""
+    """更新对话(标题/智能体/知识库, 仅属主/全局管理员)"""
+    await _get_owned_conversation(conversation_id, current_user_id, service)
     await service.update(conversation_id, data)
 
 
 @router.delete("/{conversation_id}", summary="删除对话", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: str,
+    current_user_id: str = Depends(get_current_user_id),
     service: ConversationService = Depends(get_conversation_service),
 ):
-    """删除对话(同时删除关联消息)"""
+    """删除对话(同时删除关联消息, 仅属主/全局管理员)"""
+    await _get_owned_conversation(conversation_id, current_user_id, service)
     await service.delete(conversation_id)
 
 
@@ -103,10 +118,13 @@ class ChatMessagePaginationParams(PaginationParams):
 async def list_messages(
     conversation_id: str,
     pagination: ChatMessagePaginationParams = Depends(),
-    service: ChatMessageService = Depends(get_chat_message_service),
+    current_user_id: str = Depends(get_current_user_id),
+    service: ConversationService = Depends(get_conversation_service),
+    message_service: ChatMessageService = Depends(get_chat_message_service),
 ):
-    """获取指定对话的聊天消息列表"""
-    return await service.list_by_conversation(conversation_id, pagination)
+    """获取指定对话的聊天消息列表(仅属主/全局管理员)"""
+    await _get_owned_conversation(conversation_id, current_user_id, service)
+    return await message_service.list_by_conversation(conversation_id, pagination)
 
 
 # 注：流式聊天接口(SSE)已迁移至 module_rag.controller.rag_chat

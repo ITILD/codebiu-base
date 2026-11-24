@@ -156,6 +156,7 @@ import {
   Search, Refresh, Coin, Download, Upload, Wallet, ChatDotRound, UserFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 import type { PaginationParams, PaginationResponse } from '@/common/types/common'
 import { usePermission } from '@/common/composables/usePermission'
 import { useResponsive } from '@/common/composables/useResponsive'
@@ -166,6 +167,7 @@ import UsageCharts from '../components/UsageCharts.vue'
 
 // 用量统计仅系统管理员
 const { isAdmin } = usePermission()
+const router = useRouter()
 const { isMd } = useResponsive()
 
 // ── 用量统计 ──
@@ -292,7 +294,8 @@ const handleExportCsv = async () => {
 
 /** 跳转对话记录页并携带会话ID(由目标页处理高亮/抽屉) */
 const openConversation = (conversationId: string) => {
-  useRouter().push({ path: '/rag/chat-records', query: { conversation_id: conversationId } })
+  // router 需在 setup 上下文捕获, 事件回调内调用 useRouter() 会返回 undefined
+  router.push({ path: '/rag/chat-records', query: { conversation_id: conversationId } })
 }
 
 onMounted(() => {

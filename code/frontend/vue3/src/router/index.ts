@@ -7,6 +7,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { routes, handleHotUpdate } from "vue-router/auto-routes"
 import { RouterStore } from '@/common/stores/router'
 import { useAuthStore } from '@/common/stores/auth'
+import { usePermission } from '@/common/composables/usePermission'
+import { menuItems } from '@/app/config/menu'
 import { ElMessage } from 'element-plus'
 
 // 路由 meta 类型扩展(admin 由 vite.config.ts 的 extendRoute 统一标记:
@@ -17,6 +19,15 @@ declare module 'vue-router' {
     admin?: boolean
     /** 独立页面: 属后台路由(需登录), 但不渲染左侧模块侧边栏(如账户设置) */
     standalone?: boolean
+  }
+}
+
+// 菜单路径 -> 权限码映射(守卫据此拦截无权限页面的直链访问, 与侧边栏过滤同口径)
+const menuPermByPath = new Map<string, string>()
+for (const group of menuItems) {
+  if (group.perm) menuPermByPath.set(group.index, group.perm)
+  for (const leaf of group.children ?? []) {
+    if (leaf.perm) menuPermByPath.set(leaf.index, leaf.perm)
   }
 }
 
@@ -41,6 +52,16 @@ router.beforeEach((to) => {
   if (to.meta.admin && !authStore.authState.user.id) {
     ElMessage.warning('请先登录后再访问')
     return { path: '/', query: { login: '1' } }
+  }
+  // 权限拦截: 菜单标注权限码的页面, 普通用户直输 URL 也无法绕过
+  // (权限码未加载完成时放行, 由页面空态与后端接口鉴权兜底, 避免登录竞态误伤)
+  const perm = menuPermByPath.get(to.path)
+  if (perm && authStore.authState.user.id && authStore.permState.permissions.length > 0) {
+    const { hasPerm } = usePermission()
+    if (!hasPerm(perm)) {
+      ElMessage.warning('暂无访问权限')
+      return { path: '/' }
+    }
   }
 })
 

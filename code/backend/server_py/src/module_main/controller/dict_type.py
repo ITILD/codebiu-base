@@ -11,6 +11,7 @@ from common.utils.db.schema.pagination import (
 from module_main.do.dict_type import DictType, DictTypeCreate, DictTypeUpdate
 from module_main.dependencies.dict_type import get_dict_type_service
 from module_main.service.dict_type import DictTypeService
+from module_authorization.dependencies.permission import require_permission
 from common.config.server import app
 
 router = APIRouter()
@@ -18,7 +19,9 @@ router = APIRouter()
 
 @router.post("", summary="创建字典类型", status_code=status.HTTP_201_CREATED, response_model=str)
 async def create_dict_type(
-    dict_type: DictTypeCreate, service: DictTypeService = Depends(get_dict_type_service)
+    dict_type: DictTypeCreate,
+    _: str = Depends(require_permission("main", "dict", "create")),
+    service: DictTypeService = Depends(get_dict_type_service),
 ) -> str:
     """
     创建新字典类型
@@ -33,6 +36,7 @@ async def create_dict_type(
 @router.get("/scroll", summary="滚动加载字典类型")
 async def infinite_scroll(
     params: InfiniteScrollParams = Depends(),
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictTypeService = Depends(get_dict_type_service),
 ) -> InfiniteScrollResponse:
     """
@@ -49,6 +53,7 @@ async def list_dict_types(
     pagination: PaginationParams = Depends(),
     keyword: str | None = Query(None, max_length=100, description="类型名称/编码模糊搜索"),
     is_active: bool | None = Query(None, description="状态过滤(true=启用/false=禁用)"),
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictTypeService = Depends(get_dict_type_service),
 ) -> PaginationResponse:
     """
@@ -67,6 +72,7 @@ async def list_dict_types(
 @router.get("/code/{type_code}", summary="根据编码获取字典类型", response_model=DictType)
 async def get_dict_type_by_code(
     type_code: str,
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictTypeService = Depends(get_dict_type_service),
 ) -> DictType:
     """
@@ -84,6 +90,7 @@ async def get_dict_type_by_code(
 @router.get("/{dict_type_id}", summary="获取单个字典类型", response_model=DictType)
 async def get_dict_type(
     dict_type_id: str,
+    _: str = Depends(require_permission("main", "dict", "read")),
     service: DictTypeService = Depends(get_dict_type_service),
 ) -> DictType:
     """
@@ -101,6 +108,7 @@ async def get_dict_type(
 @router.delete("/{dict_type_id}", summary="删除字典类型", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_dict_type(
     dict_type_id: str,
+    _: str = Depends(require_permission("main", "dict", "delete")),
     service: DictTypeService = Depends(get_dict_type_service),
 ) -> None:
     """
@@ -116,6 +124,7 @@ async def delete_dict_type(
 async def update_dict_type(
     dict_type_id: str,
     dict_type: DictTypeUpdate,
+    _: str = Depends(require_permission("main", "dict", "update")),
     service: DictTypeService = Depends(get_dict_type_service),
 ) -> None:
     """

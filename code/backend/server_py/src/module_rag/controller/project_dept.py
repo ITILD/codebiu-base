@@ -26,6 +26,7 @@ router = APIRouter()
     "/dept-tree", summary="获取部门树(供项目授权选择,仅需登录)", response_model=list
 )
 async def get_dept_tree_for_auth(
+    _: str = Depends(get_current_user_id),
     service: DeptService = Depends(get_dept_service),
 ):
     """

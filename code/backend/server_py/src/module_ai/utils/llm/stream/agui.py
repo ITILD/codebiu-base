@@ -151,6 +151,8 @@ class AguiStreamTransformer:
         self._reasoning_key: tuple[str, str] | None = None
         self._current_step: str | None = None
         self._errored = False
+        # 空回答保护: 是否产出过非空正文(收尾时据此注入兜底提示)
+        self._has_text = False
 
     # ── 单事件便捷构造 ──────────────────────────
 
@@ -218,6 +220,7 @@ class AguiStreamTransformer:
             if content:
                 message_id = self._open_message(events)
                 events.append(TextMessageContentEvent(message_id=message_id, delta=content))
+                self._has_text = True
 
         elif event_type in ("llm_thinking", "agent_thinking"):
             if content:
@@ -292,6 +295,18 @@ class AguiStreamTransformer:
             # RUN_ERROR 已发, 不再发 RUN_FINISHED(协议: 错误即运行终态)
             return
         self._close_reasoning(events)
+        if not self._has_text:
+            # 空回答保护: 全程未产出任何正文时显式给出提示, 禁止静默结束无反馈
+            logger.warning(
+                f"AG-UI run:{self.run_id} 正常结束但无正文输出, 注入兜底提示消息"
+            )
+            message_id = self._open_message(events)
+            events.append(
+                TextMessageContentEvent(
+                    message_id=message_id,
+                    delta="抱歉，本次运行未能生成回答内容，请重试或更换问法。",
+                )
+            )
         if self._message_id is not None:
             events.append(TextMessageEndEvent(message_id=self._message_id))
             self._message_id = None

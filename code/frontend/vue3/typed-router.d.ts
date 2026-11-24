@@ -40,8 +40,10 @@ declare module 'vue-router/auto-routes' {
     '/main/overview': RouteRecordInfo<'/main/overview', '/main/overview', Record<never, never>, Record<never, never>>,
     '/monitor/localstorage': RouteRecordInfo<'/monitor/localstorage', '/monitor/localstorage', Record<never, never>, Record<never, never>>,
     '/monitor/server_status': RouteRecordInfo<'/monitor/server_status', '/monitor/server_status', Record<never, never>, Record<never, never>>,
+    '/rag/chat_records': RouteRecordInfo<'/rag/chat_records', '/rag/chat_records', Record<never, never>, Record<never, never>>,
     '/rag/conversation': RouteRecordInfo<'/rag/conversation', '/rag/conversation', Record<never, never>, Record<never, never>>,
     '/rag/project': RouteRecordInfo<'/rag/project', '/rag/project', Record<never, never>, Record<never, never>>,
+    '/rag/usage': RouteRecordInfo<'/rag/usage', '/rag/usage', Record<never, never>, Record<never, never>>,
     '/setting': RouteRecordInfo<'/setting', '/setting', Record<never, never>, Record<never, never>>,
     '/task/queue': RouteRecordInfo<'/task/queue', '/task/queue', Record<never, never>, Record<never, never>>,
     '/task/schedule': RouteRecordInfo<'/task/schedule', '/task/schedule', Record<never, never>, Record<never, never>>,
@@ -159,12 +161,20 @@ declare module 'vue-router/auto-routes' {
       routes: '/monitor/server_status'
       views: never
     }
+    'src/modules/rag/pages/chat_records.vue': {
+      routes: '/rag/chat_records'
+      views: never
+    }
     'src/modules/rag/pages/conversation.vue': {
       routes: '/rag/conversation'
       views: never
     }
     'src/modules/rag/pages/project.vue': {
       routes: '/rag/project'
+      views: never
+    }
+    'src/modules/rag/pages/usage.vue': {
+      routes: '/rag/usage'
       views: never
     }
     'src/pages/setting.vue': {

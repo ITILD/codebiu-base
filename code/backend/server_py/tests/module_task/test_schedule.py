@@ -161,9 +161,14 @@ class TestScanDispatch:
             assert refreshed.last_task_id  # 已回写任务ID
             assert refreshed.last_status == "ok"
             assert refreshed.last_fired_at is not None
-            # 下次触发已推进到未来(*/5 语义: 未来 5 分钟内)
+            # 下次触发已推进到本次触发之后(*/5 语义: 未来 5 分钟内)
+            # 注: 以 last_fired_at 为基准断言, 避免断言执行耗时造成的偶发失败
             assert refreshed.next_fire_at is not None
-            assert refreshed.next_fire_at > datetime.now(timezone.utc) - timedelta(seconds=1)
+            assert refreshed.next_fire_at > refreshed.last_fired_at
+            assert (
+                refreshed.next_fire_at
+                <= refreshed.last_fired_at + timedelta(minutes=5, seconds=1)
+            )
             # 任务记录真实生成(memory broker 进程内派发)
             task = await TaskQueueDao().get(refreshed.last_task_id)
             assert task is not None
