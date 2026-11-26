@@ -18,6 +18,8 @@ set -a
 . ./.env
 set +a
 PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$PWD" | tr -cd '[:alnum:]_.-')}"
+# 运行模式: all=单容器合并(worker+beat+probe, 适合 2G 小机器) / split=三容器拆分
+export COMPOSE_PROFILES="${TASK_MODE:-all}"
 dc() {
     COMPOSE_PROJECT_NAME="$PROJECT_NAME" docker compose --env-file .env "$@"
 }

@@ -76,6 +76,9 @@ services:
       - TZ=Asia/Shanghai
       # 限制 glibc 内存池, 多线程 Python 服务可省 10%~20% 内存
       - MALLOC_ARENA_MAX=2
+      # 大块分配直接走 mmap, 并在释放后归还系统, 抑制 RSS 只增不减
+      - MALLOC_MMAP_THRESHOLD_=131072
+      - MALLOC_TRIM_THRESHOLD_=131072
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

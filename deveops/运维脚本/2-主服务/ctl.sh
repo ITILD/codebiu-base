@@ -42,9 +42,9 @@ case "$CMD" in
         fi
         ;;
     cert)
-        [ "$HTTPS_MODE" = "1" ] || die "当前是 HTTP 配置：请先在 deploy.env 设置 ENABLE_HTTPS=1 并重新 ./build.sh"
+        [ "$HTTPS_MODE" = "1" ] || die "当前是 HTTP 配置：请先在 server_0/deploy.env 设置 ENABLE_HTTPS=1 并重新 ./build.sh"
         [ -n "${DOMAIN:-}" ] || die "缺少 DOMAIN（.env）"
-        [ -n "${CERT_EMAIL:-}" ] || die "缺少 CERT_EMAIL（deploy.env）"
+        [ -n "${CERT_EMAIL:-}" ] || die "缺少 CERT_EMAIL（server_0/deploy.env）"
         mkdir -p nginx/certs nginx/www
         [ "${NGINX_PORT:-80}" = "80" ] || echo "提示: NGINX_PORT=$NGINX_PORT≠80，Let's Encrypt 校验需要公网 80 转发到该端口" >&2
         echo "==> 暂停 nginx 释放 80 端口 ..."

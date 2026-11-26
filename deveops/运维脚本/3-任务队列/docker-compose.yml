@@ -22,6 +22,7 @@ services:
   # 任务执行器：副本数 = 容器数，单容器并发 = TASK_CONCURRENCY
   # 不设 container_name，才能多副本；ctl.sh scale 可临时扩缩容
   task_worker:
+    profiles: ["split"]
     image: ${TASK_IMAGE}
     command: [".venv/bin/python", "src/app_task.py"]
     volumes: *app-volumes
@@ -34,12 +35,15 @@ services:
       - TASK_REAPER=1
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      # 文件服务域名指向宿主机 nginx（同机部署时避免公网回环不通）
+      - "${FS_DOMAIN:-fs.local}:host-gateway"
     restart: unless-stopped
     deploy:
       replicas: ${TASK_REPLICAS:-2}
 
   # 周期调度触发进程：全局单实例（多台任务机时只在一台启动）
   task_beat:
+    profiles: ["split"]
     image: ${TASK_IMAGE}
     container_name: ${COMPOSE_PROJECT_NAME}-beat
     command: [".venv/bin/python", "src/app_task.py"]
@@ -50,11 +54,14 @@ services:
       - TASK_ROLE=beat
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      # 文件服务域名指向宿主机 nginx（同机部署时避免公网回环不通）
+      - "${FS_DOMAIN:-fs.local}:host-gateway"
     restart: unless-stopped
 
   # 宿主机运维探针：主服务经它查看/伸缩本机 task_worker 容器
   # 如不需要远程伸缩，可在 .env 里把 HOST_PROBE_PORT 留空并注释本服务
   host_probe:
+    profiles: ["split"]
     image: ${TASK_IMAGE}
     container_name: ${COMPOSE_PROJECT_NAME}-host-probe
     command: [".venv/bin/python", "src/app_host_probe.py"]
@@ -70,4 +77,48 @@ services:
       - "${HOST_PROBE_PORT:-8700}:8700"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      # 文件服务域名指向宿主机 nginx（同机部署时避免公网回环不通）
+      - "${FS_DOMAIN:-fs.local}:host-gateway"
+    restart: unless-stopped
+
+  # 合并模式(all): 单容器内同时运行 worker + beat + 宿主机探针
+  # 适合 2G 小机器: 省去 3 个容器的 Python 常驻开销，并发仍由 TASK_CONCURRENCY 控制
+  task_all:
+    profiles: ["all"]
+    image: ${TASK_IMAGE}
+    container_name: ${COMPOSE_PROJECT_NAME}-all
+    command:
+      - /bin/sh
+      - -c
+      - |
+        .venv/bin/python src/app_task.py &
+        TASK_ROLE=beat .venv/bin/python src/app_task.py &
+        .venv/bin/python src/app_host_probe.py &
+        wait
+    volumes:
+      - ./app/src:/app/src
+      - ./app/public:/app/public
+      - ./app/config.yaml:/app/config.yaml
+      - ./app/config.dev.yaml:/app/config.dev.yaml
+      - ./app/rbac_model.conf:/app/rbac_model.conf
+      - ./app/alembic.ini:/app/alembic.ini
+      - ./app/alembic:/app/alembic
+      - ./app/temp_source:/app/temp_source
+      - ./app/log:/app/log
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=Asia/Shanghai
+      - MALLOC_ARENA_MAX=2
+      - TASK_QUEUES=${TASK_QUEUES}
+      - TASK_POOL=${TASK_POOL}
+      - TASK_CONCURRENCY=${TASK_CONCURRENCY}
+      - TASK_REAPER=1
+      - AGENT_PORT=8700
+      - AGENT_TOKEN=${HOST_PROBE_TOKEN}
+    ports:
+      - "${HOST_PROBE_PORT:-8700}:8700"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      # 文件服务域名指向宿主机 nginx（同机部署时避免公网回环不通）
+      - "${FS_DOMAIN:-fs.local}:host-gateway"
     restart: unless-stopped

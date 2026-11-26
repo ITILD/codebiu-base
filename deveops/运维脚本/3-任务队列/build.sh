@@ -8,8 +8,11 @@
 # ==============================================================================
 source "$(dirname "$0")/../lib.sh"
 KIT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 服务器角色配置：server_1（112 任务队列机），可用 DEPLOY_ENV 指定其他文件
+ENV_FILE="${DEPLOY_ENV:-$KIT_DIR/server_1/deploy.env}"
+[ -f "$ENV_FILE" ] || die "缺少配置 $ENV_FILE"
 # shellcheck disable=SC1091
-source "$KIT_DIR/deploy.env"
+source "$ENV_FILE"
 
 require_cmd docker
 require_cmd rsync
@@ -34,15 +37,18 @@ cp "$KIT_DIR/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
 chmod +x "$DEPLOY_DIR/ctl.sh"
 
 cat > "$DEPLOY_DIR/.env" <<EOF
-# 由 3-任务队列/deploy.env 生成；改规模/队列请改源文件后重新执行 build.sh
+# 由 3-任务队列/server_1/deploy.env 生成；改规模/队列请改源文件后重新执行 build.sh
 COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME
 TASK_IMAGE=$IMAGE
+TASK_MODE=$TASK_MODE
 TASK_REPLICAS=$TASK_REPLICAS
 TASK_CONCURRENCY=$TASK_CONCURRENCY
 TASK_QUEUES=$TASK_QUEUES
 TASK_POOL=$TASK_POOL
 HOST_PROBE_PORT=$HOST_PROBE_PORT
 HOST_PROBE_TOKEN=$HOST_PROBE_TOKEN
+FS_DOMAIN=$FS_DOMAIN
+MAIN_IP=$MAIN_IP
 EOF
 
 # ---------- 3. 外挂代码/配置 ----------

@@ -1,9 +1,9 @@
 # ==============================================================================
 # 依赖环境：PostgreSQL + Redis + Milvus + RustFS
-# 按主机拆分，用 COMPOSE_PROFILES 控制本机启动哪一组：
-#   47 主机（.env 里 COMPOSE_PROFILES=db）      -> postgres、redis
-#   112 主机（.env 里 COMPOSE_PROFILES=storage）-> rustfs、nginx、certbot、etcd、milvus
-# 用法：./ctl.sh up     （首次运行会自动从 .env.example 生成 .env）
+# 按服务器角色加载配置（server_0 / server_1 子目录），用 COMPOSE_PROFILES 控制本机启动哪一组：
+#   server_0（47 主服务机）  ：postgres、redis
+#   server_1（112 任务队列机）：rustfs、nginx、certbot、etcd、milvus
+# 用法：./ctl.sh --role server_0 up   （首次自动从 server_0/.env.example 生成 server_0/.env）
 # 数据全部落在同目录 data/ 下，删除容器不会丢数据
 # ==============================================================================
 
@@ -25,6 +25,15 @@ services:
       - ./data/postgres:/var/lib/postgresql
     ports:
       - "${PG_PORT:-20001}:5432"
+    # 2G 小机器收敛内存: 共享缓冲 64MB、排序/哈希工作内存 4MB
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=32MB
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-here} -d ${POSTGRES_DB:-codebiu_base}"]
       interval: 10s
@@ -127,11 +136,27 @@ services:
         done
     restart: unless-stopped
 
+  # Milvus Web UI（随 vector profile 部署，默认端口 20009）
+  attu:
+    image: ${ATTU_IMAGE:-zilliz/attu:latest}
+    profiles: ["vector"]
+    container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-attu
+    environment:
+      MILVUS_URL: ${ATTU_MILVUS_URL:-milvus:19530}
+    ports:
+      - "${ATTU_PORT:-20009}:3000"
+    volumes:
+      # attu 3.x 内置账号库，持久化避免容器重建后丢失
+      - ./data/attu:/data
+    depends_on:
+      - milvus
+    restart: unless-stopped
+
   # ---------------- Milvus 单机版（内置 etcd，对象存储复用 RustFS） ----------------
   etcd:
     # Milvus 3.x 官方只验证到 etcd 3.5.x，不要跟到 3.6/3.7
     image: quay.io/coreos/etcd:v3.5.25
-    profiles: ["storage"]
+    profiles: ["vector"]
     container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-etcd
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
@@ -152,8 +177,8 @@ services:
 
   # 首次启动时修正数据目录权限（Milvus 容器内以非 root 运行）
   milvus-volume-init:
-    image: milvusdb/milvus:v3.0.6
-    profiles: ["storage"]
+    image: milvusdb/milvus:${MILVUS_VERSION:-v3.0.6}
+    profiles: ["vector"]
     user: "0:0"
     network_mode: none
     read_only: true
@@ -175,8 +200,8 @@ services:
       - ./data/milvus:/var/lib/milvus
 
   milvus:
-    image: milvusdb/milvus:v3.0.6
-    profiles: ["storage"]
+    image: milvusdb/milvus:${MILVUS_VERSION:-v3.0.6}
+    profiles: ["vector"]
     container_name: ${COMPOSE_PROJECT_NAME:-codebiu-deps}-milvus
     command: ["milvus", "run", "standalone"]
     security_opt:
@@ -185,12 +210,15 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       # 对象存储复用 RustFS（与线上 47 主机一致的写法）
       MINIO_ADDRESS: ${MILVUS_S3_ENDPOINT:-rustfs:9000}
-      MINIO_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
-      MINIO_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      # Milvus 2.4+ 使用 ACCESS_KEY_ID/SECRET_ACCESS_KEY; 旧名保留兼容
+      MINIO_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY:-minioadmin}
+      MINIO_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${RUSTFS_SECRET_KEY:-minioadmin}
       MINIO_REGION: ${MILVUS_S3_REGION:-us-east-1}
       MINIO_USE_SSL: "${MILVUS_S3_SSL:-false}"
-      # Milvus 3.x 内置 WAL
-      MQ_TYPE: woodpecker
+      # Milvus 3.x 内置 WAL; 2.6 及以下请设 MILVUS_MQ_TYPE=rocksmq
+      MQ_TYPE: ${MILVUS_MQ_TYPE:-woodpecker}
       # 限制 Go 堆上限, 小内存机器上防止 Milvus 无节制增长
       GOMEMLIMIT: ${MILVUS_GOMEMLIMIT:-256MiB}
     volumes:
@@ -208,7 +236,5 @@ services:
       milvus-volume-init:
         condition: service_completed_successfully
       etcd:
-        condition: service_started
-      rustfs:
         condition: service_started
     restart: unless-stopped

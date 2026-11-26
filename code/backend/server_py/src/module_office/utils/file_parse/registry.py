@@ -17,6 +17,7 @@ from module_office.do.parse import ParseAttempt, ParseContext, ParsePlan
 from module_office.utils.file_parse.base import BaseParser
 from module_office.utils.file_parse.mineru import MinerUParser
 from module_office.utils.file_parse.office import OfficeParser
+from module_office.utils.file_parse.oxide import OxideParser
 from module_office.utils.file_parse.paddleocr import PaddleOCRParser
 from module_office.utils.file_parse.text import TextParser
 
@@ -71,7 +72,7 @@ class EngineRegistry:
 
     def get(self, name: str) -> EngineDescriptor | None:
         """按名称获取引擎描述(兼容 paddle/office 旧称)"""
-        alias = {"paddle": "paddleocr", "office": "office-local"}
+        alias = {"paddle": "paddleocr", "office": "office-local", "oxide": "oxide-local"}
         return self._engines.get(alias.get(name, name))
 
     def names(self) -> list[str]:
@@ -231,6 +232,21 @@ engine_registry.register(
         ),
         parser_cls=PaddleOCRParser,
         priority=20,
+    )
+)
+
+# Oxide(Rust): pdf/doc/docx/xls/xlsx/ppt/pptx 全格式本地解析(旧版二进制格式
+# 是 MinerU/office-local 的盲区), MinerU 不可用时优先于在线 OCR 降级
+engine_registry.register(
+    EngineDescriptor(
+        name="oxide-local",
+        label="本地 Oxide 解析(pdf_oxide+office_oxide)",
+        suffixes=frozenset(
+            {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
+        ),
+        capabilities=frozenset({EngineCapability.TEXT, EngineCapability.TABLE}),
+        parser_cls=OxideParser,
+        priority=15,
     )
 )
 

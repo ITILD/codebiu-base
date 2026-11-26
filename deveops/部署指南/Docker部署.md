@@ -19,9 +19,10 @@ ctl.sh  docker-compose.yml  .env
 
 ```bash
 cd deveops/运维脚本/1-依赖环境
-./ctl.sh up          # 首次自动生成 .env
-./ctl.sh status
-./ctl.sh logs milvus
+./ctl.sh --role server_0 up   # 47：首次自动生成 server_0/.env（PG + Redis）
+./ctl.sh --role server_1 up   # 112：首次自动生成 server_1/.env（Milvus + RustFS）
+./ctl.sh --role server_0 status
+./ctl.sh --role server_1 logs milvus
 ```
 
 数据目录在 `data/`，`./ctl.sh down` 只删容器，不删数据。
@@ -29,16 +30,16 @@ cd deveops/运维脚本/1-依赖环境
 ### 文件服务 HTTPS
 
 ```bash
-# .env
+# server_1/.env
 FILE_DOMAIN=fs.example.com      # 解析到本机；建议用已备案主域名的子域名
 CERT_EMAIL=you@example.com
 NGINX_HTTP_PORT=80
 NGINX_HTTPS_PORT=443
 
-./ctl.sh cert        # certbot standalone 首次签发，随后启动 nginx
+./ctl.sh --role server_1 cert   # certbot standalone 首次签发，随后启动 nginx
 ```
 
-`./ctl.sh cert` 之后，certbot 容器用 webroot 每 12h 检查续期，nginx 每 12h reload 一次自动加载新证书。
+`./ctl.sh --role server_1 cert` 之后，certbot 容器用 webroot 每 12h 检查续期，nginx 每 12h reload 一次自动加载新证书。
 控制台不对公网开放，需要时用 SSH 隧道：`ssh -L 20007:127.0.0.1:20007 user@deps-host`，再访问 `http://127.0.0.1:20007`。
 
 签发后把后端 `file_system.endpoint_url` 改为 `https://fs.example.com`（已初始化过的实例在「系统管理→通用配置」改）。
@@ -60,7 +61,7 @@ cd deveops/运维脚本/2-主服务
 ./update.sh          # 日常改代码（不重建镜像）
 ```
 
-部署目录结构（`$DEPLOY_DIR`，默认 `~/a_apps/codebiu-base/server`）：
+部署目录结构（`$DEPLOY_DIR`，默认 `~/a_apps/server_0/server`，配置见 `server_0/deploy.env`）：
 
 ```
 server/
@@ -75,7 +76,7 @@ server/
 ### 启用 HTTPS
 
 ```bash
-# deploy.env
+# server_0/deploy.env
 ENABLE_HTTPS=1
 DOMAIN=app.example.com
 CERT_EMAIL=you@example.com

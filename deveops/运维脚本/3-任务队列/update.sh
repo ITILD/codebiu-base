@@ -5,8 +5,11 @@
 # ==============================================================================
 source "$(dirname "$0")/../lib.sh"
 KIT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 服务器角色配置：server_1（112 任务队列机）
+ENV_FILE="${DEPLOY_ENV:-$KIT_DIR/server_1/deploy.env}"
+[ -f "$ENV_FILE" ] || die "缺少配置 $ENV_FILE"
 # shellcheck disable=SC1091
-source "$KIT_DIR/deploy.env"
+source "$ENV_FILE"
 
 require_cmd rsync
 [ -d "$DEPLOY_DIR/app" ] || die "部署目录尚未初始化，请先执行 ./build.sh"

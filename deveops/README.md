@@ -4,11 +4,11 @@
 
 | 套件 | 部署到哪 | 内容 |
 | :--- | :--- | :--- |
-| [1-依赖环境](./运维脚本/1-依赖环境/) | 依赖主机 | PostgreSQL + Redis + Milvus + RustFS |
-| [2-主服务](./运维脚本/2-主服务/) | 业务主机 | nginx + 后端 API + 前端静态页 |
-| [3-任务队列](./运维脚本/3-任务队列/) | 任务主机 | Celery worker + beat + 宿主机探针 |
+| [1-依赖环境](./运维脚本/1-依赖环境/) | server_0 / server_1 | `server_0/`：PostgreSQL + Redis；`server_1/`：Milvus + RustFS |
+| [2-主服务](./运维脚本/2-主服务/) | server_0（47） | nginx + 后端 API + 前端静态页 |
+| [3-任务队列](./运维脚本/3-任务队列/) | server_1（112） | Celery worker + beat + 宿主机探针 |
 | [4-客户端](./运维脚本/4-客户端/) | 本地打包机 | Android APK / Linux 桌面端 |
-| [5-服务器管理](./运维脚本/5-服务器管理/) | 本地（不入库） | 各主机域名/IP/SSH/部署目录清单，供 AI IDE 部署 |
+| [5-服务器管理](./运维脚本/5-服务器管理/) | 本地（不入库） | 各主机域名/IP/SSH/部署目录清单 + 一键发布 publish.sh |
 
 ## 最快上手
 
@@ -16,13 +16,14 @@
 
 ```bash
 cd deveops/运维脚本/1-依赖环境
-./ctl.sh up          # 首次自动生成 .env，按需改密码后重新 up
-./ctl.sh status
+./ctl.sh --role server_0 up     # 47：首次自动生成 server_0/.env（PG + Redis）
+./ctl.sh --role server_1 up     # 112：首次自动生成 server_1/.env（Milvus + RustFS）
+./ctl.sh --role server_0 status
 ```
 
-部署到远程主机时，把整个 `1-依赖环境/` 目录拷过去执行同样命令即可。数据在 `data/`，`down` 不会删数据。
+部署到远程主机时，把整个 `1-依赖环境/` 目录拷过去，按本机角色执行 `./ctl.sh --role server_0|server_1 up` 即可。数据在 `data/`，`down` 不会删数据。
 
-文件服务（RustFS）需要 HTTPS 时：在 `.env` 填 `FILE_DOMAIN`（建议用主域名子域名）、`CERT_EMAIL`，执行 `./ctl.sh cert`。之后 `https://FILE_DOMAIN` 即 S3 端点，RustFS 自身端口只监听 `127.0.0.1`；控制台用 SSH 隧道访问。
+文件服务（RustFS）需要 HTTPS 时：在 `server_1/.env` 填 `FILE_DOMAIN`（建议用主域名子域名）、`CERT_EMAIL`，执行 `./ctl.sh --role server_1 cert`。之后 `https://FILE_DOMAIN` 即 S3 端点，RustFS 自身端口只监听 `127.0.0.1`；控制台用 SSH 隧道访问。
 
 ### ② 主服务 + 前端
 
@@ -32,13 +33,13 @@ cd deveops/运维脚本/2-主服务
 ./update.sh          # 以后只改代码：同步 + 重启
 ```
 
-部署目录默认 `~/a_apps/codebiu-base/server`，可在 [deploy.env](./运维脚本/2-主服务/deploy.env) 修改。拷到服务器后同样只需：
+部署目录默认 `~/a_apps/server_0/server`，可在 [server_0/deploy.env](./运维脚本/2-主服务/server_0/deploy.env) 修改。拷到服务器后同样只需：
 
 ```bash
 ./ctl.sh up|status|logs|restart
 ```
 
-**HTTPS（可选，nginx + certbot）**：在 `deploy.env` 设置 `ENABLE_HTTPS=1`、`DOMAIN=app.example.com`、`CERT_EMAIL`，`./build.sh` 生成 [nginx.https.conf](./运维脚本/2-主服务/nginx.https.conf) 后执行 `./ctl.sh cert` 即可签发并启动；之后 certbot 容器自动续期、nginx 自动 reload。手动证书放部署目录 `nginx/certs/{fullchain.pem,privkey.pem}` 同样可用。
+**HTTPS（可选，nginx + certbot）**：在 `server_0/deploy.env` 设置 `ENABLE_HTTPS=1`、`DOMAIN=app.example.com`、`CERT_EMAIL`，`./build.sh` 生成 [nginx.https.conf](./运维脚本/2-主服务/nginx.https.conf) 后执行 `./ctl.sh cert` 即可签发并启动；之后 certbot 容器自动续期、nginx 自动 reload。手动证书放部署目录 `nginx/certs/{fullchain.pem,privkey.pem}` 同样可用。
 
 ### ③ 任务队列
 
@@ -78,7 +79,7 @@ cp servers.example.yaml servers.yaml && chmod 600 servers.yaml
 | 文件 | 作用 |
 | :--- | :--- |
 | `code/backend/server_py/config.dev.yaml` | 应用连哪个库/Redis/Milvus/S3 |
-| 各套件的 `deploy.env` / `.env` | 端口、密码、部署目录、副本数 |
+| 各套件 `server_0|server_1/` 下的 `deploy.env` / `.env` | 端口、密码、部署目录、副本数（按服务器角色已分开） |
 
 ## 单机全量示意（新手最常用）
 

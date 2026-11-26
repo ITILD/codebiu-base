@@ -2,7 +2,7 @@
 # 服务器清单模板
 #   cp servers.example.yaml servers.yaml && chmod 600 servers.yaml
 # servers.yaml 含真实 IP / 账号 / 密钥路径，已加入 .gitignore，不会提交到 Git。
-# 每台机器的 ssh 段与各套件 deploy.env 的部署目录保持一致即可。
+# 每台机器的 ssh 段与各套件 server_0/server_1 下 deploy.env 的部署目录保持一致即可。
 # ==============================================================================
 
 # ---------------- 主服务 + 前端（2-主服务） ----------------
@@ -53,7 +53,7 @@ deps:
     key: keys/deps_server.pem
   deploy:
     dir: /home/hrzn/D/a_apps/codebiu-base/deps
-  services:                        # 宿主端口，需与 1-依赖环境/.env 一致
+  services:                        # 宿主端口，需与 1-依赖环境/server_0|server_1/.env 一致
     postgres: 20001
     redis: 20002
     milvus: 20005
@@ -61,7 +61,7 @@ deps:
     rustfs_console: 20007          # 仅 127.0.0.1（SSH 隧道访问）
     nginx_http: 80                 # 证书签发要求公网可达
     nginx_https: 443
-  credentials:                     # 与 1-依赖环境/.env 保持一致
+  credentials:                     # 与 1-依赖环境/server_0|server_1/.env 保持一致
     postgres_user: postgres
     postgres_password: change-me
     postgres_db: codebiu

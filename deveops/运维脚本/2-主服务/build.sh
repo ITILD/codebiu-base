@@ -9,8 +9,11 @@
 # ==============================================================================
 source "$(dirname "$0")/../lib.sh"
 KIT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 服务器角色配置：server_0（47 主服务机），可用 DEPLOY_ENV 指定其他文件
+ENV_FILE="${DEPLOY_ENV:-$KIT_DIR/server_0/deploy.env}"
+[ -f "$ENV_FILE" ] || die "缺少配置 $ENV_FILE"
 # shellcheck disable=SC1091
-source "$KIT_DIR/deploy.env"
+source "$ENV_FILE"
 
 require_cmd docker
 require_cmd rsync
@@ -43,7 +46,7 @@ NGINX_CONF="$KIT_DIR/nginx.conf"
 sed "s/__SERVER_NAME__/${DOMAIN:-_}/g" "$NGINX_CONF" > "$DEPLOY_DIR/nginx/conf/conf.d/default.conf"
 
 cat > "$DEPLOY_DIR/.env" <<EOF
-# 由 2-主服务/deploy.env 生成；改端口/镜像请改源文件后重新执行 build.sh
+# 由 2-主服务/server_0/deploy.env 生成；改端口/镜像请改源文件后重新执行 build.sh
 COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME
 SERVER_IMAGE=$IMAGE
 NGINX_PORT=$NGINX_PORT
